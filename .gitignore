@@ -37,5 +37,11 @@ backend/=3.0.0
 data/
 backend/data/
 
+# Terraform
+.terraform/
+terraform.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+
 # OS
 .DS_Store

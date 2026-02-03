@@ -2,6 +2,8 @@
 
 The Graphēon backend is a FastAPI app in `backend/`, using async SQLAlchemy with SQLite. Python 3.12 is required.
 
+Cloudflare Pages currently hosts only the frontend. The backend runs as a separate FastAPI service until a Workers + D1 port is completed.
+
 ## Run Locally
 
 Use the Nix dev shell for any Python command.

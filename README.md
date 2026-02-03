@@ -34,6 +34,20 @@ nix develop -c .venv/bin/python -m pytest
 
 See `docs/README.md` for architecture and workflow details.
 
+## Cloudflare Deployment
+
+Graphēon ships a Cloudflare Pages deployment for the frontend, plus Terraform (OpenTofu) config for Pages + DNS.
+
+1. Set GitHub Secrets:
+   - `CLOUDFLARE_API_TOKEN`
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `R2_ACCESS_KEY_ID`
+   - `R2_SECRET_ACCESS_KEY`
+2. Configure `terraform/terraform.tfvars` (based on `terraform/terraform.tfvars.example`).
+3. Push to `master` to trigger `Deploy` workflow.
+
+The backend remains a separate FastAPI service for now; a full Cloudflare-native backend would require porting to Workers + D1.
+
 ## Data Hygiene
 
 - Do not commit `.env` files or scan outputs like `*.xml`.

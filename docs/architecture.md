@@ -2,6 +2,8 @@
 
 Graphēon is a FastAPI backend with a React frontend. It ingests multiple network data formats, normalizes them into a common schema, tags entities, and correlates them into a graph-like model. The repo standardizes on Python 3.12.
 
+Cloudflare Pages hosts the frontend, and OpenTofu provisions Pages + DNS. The backend currently runs as a separate FastAPI service.
+
 ## Components
 
 - Backend: FastAPI API server in `backend/` with SQLAlchemy async models and parser modules.

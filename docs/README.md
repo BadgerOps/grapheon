@@ -8,3 +8,4 @@ This folder documents how Graphēon works end-to-end. The codebase standardizes 
 - `docs/imports.md` - Import pipeline and supported data sources.
 - `docs/tagging-correlation.md` - Tagging rules and correlation behavior.
 - `docs/testing.md` - Test workflow and local checks.
+- `docs/deployment.md` - Cloudflare Pages deployment and OpenTofu setup.

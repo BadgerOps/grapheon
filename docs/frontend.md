@@ -20,6 +20,10 @@ The Vite dev server defaults to `http://localhost:5173` and proxies `/api` to th
 nix develop -c bash -lc "cd frontend && npm run build"
 ```
 
+## Deployment
+
+Cloudflare Pages deployments are driven by the GitHub `Deploy` workflow and the OpenTofu configuration in `terraform/`.
+
 ## App Structure
 
 - `src/api/client.js` contains the API client.

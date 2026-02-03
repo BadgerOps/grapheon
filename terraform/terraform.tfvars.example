@@ -1,0 +1,10 @@
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to version control!
+
+cloudflare_account_id = "your-cloudflare-account-id"
+# cloudflare_api_token = "your-api-token"  # prefer env var TF_VAR_cloudflare_api_token
+
+# Optional overrides
+# zone_name  = "example.com"
+# subdomain  = "grapheon"
+# project_name = "grapheon"

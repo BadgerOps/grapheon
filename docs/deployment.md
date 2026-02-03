@@ -26,8 +26,8 @@ Add the following secrets in the GitHub repo settings:
 
 ## Workflows
 
-- `CI` runs tests, lint, frontend build, and OpenTofu validate/plan on PRs.
-- `Deploy` builds the frontend, applies OpenTofu, and deploys to Cloudflare Pages.
+- `CI` runs tests, lint, and the frontend build.
+- `Deploy` is currently disabled while OpenTofu automation is paused.
 
 ## Backend Note
 

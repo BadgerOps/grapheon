@@ -5,7 +5,6 @@ on:
 
 env:
   NODE_VERSION: "20"
-  OPENTOFU_VERSION: "1.8.0"
 
 concurrency:
   group: deploy-production
@@ -42,48 +41,10 @@ jobs:
           path: frontend/dist/
           retention-days: 1
 
-  tofu-apply:
-    name: OpenTofu Apply
-    runs-on: ubuntu-latest
-    needs: build
-    if: false
-    defaults:
-      run:
-        working-directory: terraform
-    env:
-      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_ENDPOINT_URL_S3: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-    outputs:
-      pages_url: ${{ steps.outputs.outputs.pages_url }}
-      custom_domain: ${{ steps.outputs.outputs.custom_domain }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
-        with:
-          tofu_version: ${{ env.OPENTOFU_VERSION }}
-
-      - name: OpenTofu Init
-        run: tofu init
-
-      - name: OpenTofu Apply
-        run: tofu apply -auto-approve
-
-      - name: Get OpenTofu Outputs
-        id: outputs
-        run: |
-          echo "pages_url=$(tofu output -raw pages_url)" >> $GITHUB_OUTPUT
-          echo "custom_domain=$(tofu output -raw custom_domain_url)" >> $GITHUB_OUTPUT
-
   deploy-pages:
     name: Deploy to Pages
     runs-on: ubuntu-latest
-    needs: [build, tofu-apply]
+    needs: build
     if: false
     steps:
       - name: Checkout
@@ -105,6 +66,3 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "## Deployment Complete! :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Pages URL:** ${{ needs.tofu-apply.outputs.pages_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Custom Domain:** ${{ needs.tofu-apply.outputs.custom_domain }}" >> $GITHUB_STEP_SUMMARY

@@ -10,7 +10,10 @@ This document describes how to automatically update the backend and frontend con
 
 ## Release Trigger (GitHub)
 
-Add a release workflow that builds and pushes images when a release is published. Example tags:
+Use GitHub Releases tagged per component so frontend and backend can ship independently. The release workflow builds and pushes images when a release is published. Tag format:
+
+- `backend-vX.Y.Z`
+- `frontend-vX.Y.Z`
 
 - `ghcr.io/badgerops/grapheon-backend:latest`
 - `ghcr.io/badgerops/grapheon-backend:vX.Y.Z`
@@ -20,8 +23,14 @@ Add a release workflow that builds and pushes images when a release is published
 Release workflow outline:
 
 1. Trigger on `release.published`.
-2. Build backend and frontend images.
+2. Build backend or frontend image (based on tag prefix).
 3. Push both `latest` and version tag to GHCR.
+
+## Container Definitions
+
+- Backend image is built from `backend/Dockerfile`.
+- Frontend image is built from `frontend/Dockerfile` and serves static assets via nginx.
+- The frontend nginx config proxies `/api` to `http://grapheon-backend:8000`.
 
 ## Quadlet Configuration
 

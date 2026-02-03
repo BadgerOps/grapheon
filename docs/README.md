@@ -10,3 +10,4 @@ This folder documents how Graphēon works end-to-end. The codebase standardizes 
 - `docs/testing.md` - Test workflow and local checks.
 - `docs/deployment.md` - Cloudflare Pages deployment and OpenTofu setup.
 - `docs/quadlet-release-updates.md` - NixOS Quadlet + GH release auto-update pipeline.
+- `docs/release-process.md` - Versioning and release workflow for backend/frontend images.

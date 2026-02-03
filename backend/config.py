@@ -1,4 +1,13 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+
+def _load_version() -> str:
+    version_path = Path(__file__).resolve().parent / "VERSION"
+    try:
+        return version_path.read_text().strip()
+    except FileNotFoundError:
+        return "0.1.0"
 
 
 class Settings(BaseSettings):
@@ -15,7 +24,7 @@ class Settings(BaseSettings):
 
     # Application
     APP_NAME: str = "Graphēon"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = _load_version()
     DEBUG: bool = False
 
     class Config:

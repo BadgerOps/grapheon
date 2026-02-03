@@ -8,6 +8,7 @@ import Map from './pages/Map'
 import Search from './pages/Search'
 import Connections from './pages/Connections'
 import Arp from './pages/Arp'
+import Changelog from './pages/Changelog'
 
 // Theme detection and management
 function useTheme() {
@@ -201,6 +202,7 @@ export default function App() {
           <Route path="/arp" element={<Arp />} />
           <Route path="/search" element={<Search />} />
           <Route path="/import" element={<Import />} />
+          <Route path="/changelog" element={<Changelog />} />
         </Routes>
       </main>
 
@@ -212,6 +214,12 @@ export default function App() {
               Graphēon - Built with React, FastAPI & SQLite
             </p>
             <div className="flex items-center gap-4 text-sm text-gray-500">
+              <Link
+                to="/changelog"
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                Changelog
+              </Link>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
                 System Online

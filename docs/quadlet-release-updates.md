@@ -10,7 +10,7 @@ This document describes how to automatically update the backend and frontend con
 
 ## Release Trigger (GitHub)
 
-Use GitHub Releases tagged per component so frontend and backend can ship independently. The release workflow builds and pushes images when a release is published. Tag format:
+Use GitHub Releases tagged per component so frontend and backend can ship independently. The release workflow runs on pushes to `master`, creates tags/releases if they do not exist, and builds/pushes images. Tag format:
 
 - `backend-vX.Y.Z`
 - `frontend-vX.Y.Z`
@@ -22,9 +22,10 @@ Use GitHub Releases tagged per component so frontend and backend can ship indepe
 
 Release workflow outline:
 
-1. Trigger on `release.published`.
-2. Build backend or frontend image (based on tag prefix).
-3. Push both `latest` and version tag to GHCR.
+1. Trigger on `push` to `master`.
+2. Create `backend-vX.Y.Z` and/or `frontend-vX.Y.Z` if they do not exist.
+3. Build backend and/or frontend images.
+4. Push both `latest` and version tag to GHCR.
 
 ## Container Definitions
 

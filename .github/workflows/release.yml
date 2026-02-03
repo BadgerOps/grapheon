@@ -1,11 +1,15 @@
 name: Release Images
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [master]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -14,33 +18,124 @@ env:
   IMAGE_FRONTEND: ghcr.io/badgerops/grapheon-frontend
 
 jobs:
-  backend-image:
-    name: Build & Push Backend
+  prepare:
+    name: Prepare Versions
     runs-on: ubuntu-latest
-    if: startsWith(github.event.release.tag_name, 'backend-v')
+    outputs:
+      backend_version: ${{ steps.versions.outputs.backend_version }}
+      frontend_version: ${{ steps.versions.outputs.frontend_version }}
+      backend_tag_exists: ${{ steps.tags.outputs.backend_tag_exists }}
+      frontend_tag_exists: ${{ steps.tags.outputs.frontend_tag_exists }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read versions
+        id: versions
+        run: |
+          echo "backend_version=$(cat backend/VERSION)" >> $GITHUB_OUTPUT
+          python3 - <<'PY' >> $GITHUB_OUTPUT
+          import json
+          from pathlib import Path
+
+          version = json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))["version"]
+          print(f"frontend_version={version}")
+          PY
+
+      - name: Check tags
+        id: tags
+        run: |
+          backend_tag="backend-v${{ steps.versions.outputs.backend_version }}"
+          frontend_tag="frontend-v${{ steps.versions.outputs.frontend_version }}"
+
+          if git rev-parse "$backend_tag" >/dev/null 2>&1; then
+            echo "backend_tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend_tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+          if git rev-parse "$frontend_tag" >/dev/null 2>&1; then
+            echo "frontend_tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend_tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+  backend:
+    name: Release Backend Image
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.backend_tag_exists == 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Extract version
-        id: version
-        env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
-        run: echo "version=${TAG_NAME#backend-v}" >> $GITHUB_OUTPUT
+      - name: Validate versions
+        run: python scripts/validate_versions.py
 
-      - name: Verify backend version
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.backend_version }}
         run: |
-          file_version=$(cat backend/VERSION)
-          if [ "$file_version" != "${{ steps.version.outputs.version }}" ]; then
-            echo "backend/VERSION ($file_version) does not match tag (${{ steps.version.outputs.version }})"
-            exit 1
-          fi
-          python scripts/validate_versions.py
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          changelog = Path("backend/CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^##\s+{re.escape(version)}\b.*$"
+          match = re.search(pattern, changelog, re.MULTILINE)
+          if not match:
+            raise SystemExit(f"No changelog entry for {version}")
+
+          start = match.end()
+          next_match = re.search(r"^##\s+", changelog[start:], re.MULTILINE)
+          end = start + next_match.start() if next_match else len(changelog)
+          notes = changelog[start:end].strip()
+          if not notes:
+            notes = f"Release backend v{version}"
+
+          Path("backend_release_notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.backend_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "backend-v$VERSION" -m "Backend v$VERSION"
+          git push origin "backend-v$VERSION"
+
+      - name: Create GitHub release
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.prepare.outputs.backend_version }}
+        with:
+          script: |
+            const fs = require('fs');
+            const notes = fs.readFileSync('backend_release_notes.md', 'utf8');
+
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `backend-v${process.env.VERSION}`,
+              name: `backend-v${process.env.VERSION}`,
+              body: notes,
+              draft: false,
+              prerelease: false
+            });
+
+            console.log(`Created release: ${release.data.html_url}`);
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,6 +148,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push backend image
+        env:
+          VERSION: ${{ needs.prepare.outputs.backend_version }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -60,40 +157,82 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_BACKEND }}:latest
-            ${{ env.IMAGE_BACKEND }}:v${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_BACKEND }}:v${{ env.VERSION }}
 
-  frontend-image:
-    name: Build & Push Frontend
+  frontend:
+    name: Release Frontend Image
     runs-on: ubuntu-latest
-    if: startsWith(github.event.release.tag_name, 'frontend-v')
+    needs: prepare
+    if: needs.prepare.outputs.frontend_tag_exists == 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Extract version
-        id: version
-        env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
-        run: echo "version=${TAG_NAME#frontend-v}" >> $GITHUB_OUTPUT
+      - name: Validate versions
+        run: python scripts/validate_versions.py
 
-      - name: Verify frontend version
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.frontend_version }}
         run: |
-          package_version=$(python - <<'PY'
-          import json
+          python - <<'PY'
+          import os
+          import re
           from pathlib import Path
-          print(json.loads(Path('frontend/package.json').read_text())['version'])
+
+          version = os.environ["VERSION"]
+          changelog = Path("frontend/CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^##\s+{re.escape(version)}\b.*$"
+          match = re.search(pattern, changelog, re.MULTILINE)
+          if not match:
+            raise SystemExit(f"No changelog entry for {version}")
+
+          start = match.end()
+          next_match = re.search(r"^##\s+", changelog[start:], re.MULTILINE)
+          end = start + next_match.start() if next_match else len(changelog)
+          notes = changelog[start:end].strip()
+          if not notes:
+            notes = f"Release frontend v{version}"
+
+          Path("frontend_release_notes.md").write_text(notes, encoding="utf-8")
           PY
-          )
-          if [ "$package_version" != "${{ steps.version.outputs.version }}" ]; then
-            echo "frontend/package.json ($package_version) does not match tag (${{ steps.version.outputs.version }})"
-            exit 1
-          fi
-          python scripts/validate_versions.py
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.frontend_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "frontend-v$VERSION" -m "Frontend v$VERSION"
+          git push origin "frontend-v$VERSION"
+
+      - name: Create GitHub release
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.prepare.outputs.frontend_version }}
+        with:
+          script: |
+            const fs = require('fs');
+            const notes = fs.readFileSync('frontend_release_notes.md', 'utf8');
+
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `frontend-v${process.env.VERSION}`,
+              name: `frontend-v${process.env.VERSION}`,
+              body: notes,
+              draft: false,
+              prerelease: false
+            });
+
+            console.log(`Created release: ${release.data.html_url}`);
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -106,6 +245,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push frontend image
+        env:
+          VERSION: ${{ needs.prepare.outputs.frontend_version }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -113,4 +254,4 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_FRONTEND }}:latest
-            ${{ env.IMAGE_FRONTEND }}:v${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_FRONTEND }}:v${{ env.VERSION }}

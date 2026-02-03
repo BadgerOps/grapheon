@@ -50,7 +50,7 @@ The backend remains a separate FastAPI service for now; a full Cloudflare-native
 
 ## Container Releases
 
-Graphēon publishes separate backend and frontend images to GHCR when a GitHub Release is tagged:
+Graphēon publishes separate backend and frontend images to GHCR on pushes to `master` when a new version is detected:
 
 - Backend tags use `backend-vX.Y.Z`
 - Frontend tags use `frontend-vX.Y.Z`

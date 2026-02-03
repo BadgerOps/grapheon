@@ -17,14 +17,15 @@ Grapheon ships the backend and frontend as separate container images, each with 
 2. Ensure the PR passes all CI checks.
 3. Merge the PR to `master`.
 
-## Cut a Release
+## Auto-Release on Merge
 
-Create a GitHub Release with one of the following tags:
+On every push to `master`, the `Release Images` workflow:
 
-- `backend-vX.Y.Z`
-- `frontend-vX.Y.Z`
+- Reads `backend/VERSION` and `frontend/package.json`.
+- Checks whether `backend-vX.Y.Z` or `frontend-vX.Y.Z` tags already exist.
+- Creates tags/releases and pushes images only for components without tags.
 
-The `Release Images` workflow builds and pushes:
+The workflow builds and pushes:
 
 - `ghcr.io/badgerops/grapheon-backend:latest`
 - `ghcr.io/badgerops/grapheon-backend:vX.Y.Z`

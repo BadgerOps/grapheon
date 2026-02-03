@@ -16,8 +16,8 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  build:
-    name: Build & Validate
+  backend:
+    name: Backend Tests & Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,6 +42,13 @@ jobs:
 
       - name: Backend lint
         run: ruff check backend
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -90,7 +97,7 @@ jobs:
   tofu-plan:
     name: OpenTofu Plan
     runs-on: ubuntu-latest
-    needs: [build, tofu-validate]
+    needs: [backend, frontend, tofu-validate]
     if: github.event_name == 'pull_request'
     defaults:
       run:

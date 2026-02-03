@@ -1,0 +1,41 @@
+# Secrets
+*.env
+.env
+backend/.env
+
+# Planning
+.planning/
+
+# Python
+.venv/
+venv/
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Data & binary artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.pcap
+*.pcapng
+*.cap
+*.bin
+*.log
+*.tmp
+*.xml
+nmap.xml
+top1000_services.xml
+backend/=3.0.0
+data/
+backend/data/
+
+# OS
+.DS_Store

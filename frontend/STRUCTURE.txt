@@ -1,0 +1,122 @@
+Graphēon - Frontend
+===================================
+
+Directory Structure:
+/sessions/sharp-modest-goodall/mnt/smiths-network-walker/network-aggregator/frontend/
+
+├── Configuration Files (5)
+│   ├── package.json              - NPM dependencies and scripts
+│   ├── vite.config.js            - Vite build tool configuration
+│   ├── tailwind.config.js        - Tailwind CSS configuration
+│   ├── postcss.config.js         - PostCSS configuration
+│   └── .gitignore                - Git ignore patterns
+│
+├── HTML Entry Point (1)
+│   └── index.html                - Root HTML file
+│
+├── Documentation (3)
+│   ├── README.md                 - Complete documentation
+│   ├── QUICKSTART.md             - Quick start guide
+│   └── PROJECT_SUMMARY.md        - Project overview
+│
+└── src/ (React Application)
+    ├── React Entry Point (2)
+    │   ├── main.jsx              - React DOM render entry
+    │   └── App.jsx               - Main app component with routing
+    │
+    ├── Styling (1)
+    │   └── index.css             - Tailwind imports
+    │
+    ├── api/ (1)
+    │   └── client.js             - Fetch wrapper for API calls
+    │
+    ├── components/ (3)
+    │   ├── HostTable.jsx         - Host list table component
+    │   ├── ImportForm.jsx        - Paste data import form
+    │   └── FileUpload.jsx        - File upload component
+    │
+    └── pages/ (3)
+        ├── Dashboard.jsx         - Dashboard page (/)
+        ├── Hosts.jsx             - Hosts list page (/hosts)
+        └── Import.jsx            - Import page (/import)
+
+Total Files: 19
+Total Size: ~60 KB (source code only)
+
+
+FILE DESCRIPTIONS
+=================
+
+Configuration & Build:
+- package.json: Defines 10 dependencies (React, React Router, Tailwind, Vite, etc.)
+- vite.config.js: Enables React JSX + proxies /api to localhost:8000
+- tailwind.config.js: Configures content paths for Tailwind
+- postcss.config.js: Enables Tailwind and Autoprefixer
+- .gitignore: Excludes node_modules, dist, .env, etc.
+
+HTML & Entry Points:
+- index.html: Root HTML with <div id="root"></div>
+- src/main.jsx: Mounts React app with BrowserRouter
+- src/App.jsx: Main app, navigation bar, route definitions
+
+Styling:
+- src/index.css: @tailwind directives and base reset
+
+API:
+- src/api/client.js: 8 exported async functions for backend communication
+
+Components (Reusable UI):
+- HostTable.jsx: Table with delete, click to navigate
+- ImportForm.jsx: Form for pasting raw data
+- FileUpload.jsx: File picker with form
+
+Pages (Route Components):
+- Dashboard.jsx: Stats cards and recent imports
+- Hosts.jsx: Host list with deletion
+- Import.jsx: Tabbed interface (paste/file)
+
+Documentation:
+- README.md: Full project documentation
+- QUICKSTART.md: Getting started guide
+- PROJECT_SUMMARY.md: Complete file overview
+- STRUCTURE.txt: This file
+
+
+QUICK REFERENCE
+===============
+
+Start Development:
+  cd frontend
+  npm install
+  npm run dev
+  → Visit http://localhost:5173
+
+Build for Production:
+  npm run build
+  → Creates dist/ folder
+
+Preview Production Build:
+  npm run preview
+
+Routes:
+  / → Dashboard (stats, recent imports)
+  /hosts → Hosts (table with delete)
+  /import → Import (paste data or upload)
+
+API Endpoints Used:
+  GET /api/hosts
+  GET /api/hosts/:id
+  POST /api/hosts
+  PUT /api/hosts/:id
+  DELETE /api/hosts/:id
+  GET /api/imports
+  POST /api/imports/raw
+  POST /api/imports/file
+
+Technologies:
+  React 18.2.0
+  React Router 6.20.0
+  Vite 5.0.0
+  Tailwind CSS 3.3.0
+  PostCSS 8.4.31
+  Autoprefixer 10.4.16

@@ -17,6 +17,15 @@ nix develop -c bash -lc "cd backend && uvicorn main:app --reload"
 - Settings live in `backend/config.py` using Pydantic settings.
 - `.env` is supported for local overrides. Do not commit `.env` files.
 - Default database URL is `sqlite:///./data/network.db`.
+- Backend version is sourced from `backend/VERSION`.
+
+## Container
+
+`backend/Dockerfile` packages the FastAPI app for GHCR. The container exposes port 8000 and expects a writable `/app/data` for the SQLite database.
+
+## Changelog
+
+- Release notes live in `backend/CHANGELOG.md`.
 
 ## API Surface
 

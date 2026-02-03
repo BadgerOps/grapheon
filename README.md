@@ -48,6 +48,20 @@ Graphēon ships a Cloudflare Pages deployment for the frontend, plus Terraform (
 
 The backend remains a separate FastAPI service for now; a full Cloudflare-native backend would require porting to Workers + D1.
 
+## Container Releases
+
+Graphēon publishes separate backend and frontend images to GHCR when a GitHub Release is tagged:
+
+- Backend tags use `backend-vX.Y.Z`
+- Frontend tags use `frontend-vX.Y.Z`
+
+The release workflow builds:
+
+- `ghcr.io/badgerops/grapheon-backend:latest` and `:vX.Y.Z`
+- `ghcr.io/badgerops/grapheon-frontend:latest` and `:vX.Y.Z`
+
+See `docs/release-process.md` and `docs/quadlet-release-updates.md` for the full workflow.
+
 ## Data Hygiene
 
 - Do not commit `.env` files or scan outputs like `*.xml`.

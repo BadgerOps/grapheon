@@ -24,6 +24,14 @@ nix develop -c bash -lc "cd frontend && npm run build"
 
 Cloudflare Pages deployments are driven by the GitHub `Deploy` workflow and the OpenTofu configuration in `terraform/`.
 
+For container deployments, the `frontend/Dockerfile` builds the SPA and serves it via nginx. The nginx config proxies `/api` to `http://grapheon-backend:8000` so the static frontend can keep using same-origin `/api` calls.
+
+## Changelog
+
+- Version is sourced from `frontend/package.json`.
+- Release notes live in `frontend/CHANGELOG.md`.
+- The SPA exposes `/changelog` to render the frontend release notes in-app.
+
 ## App Structure
 
 - `src/api/client.js` contains the API client.

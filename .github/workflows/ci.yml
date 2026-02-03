@@ -16,6 +16,21 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  version-check:
+    name: Version + Changelog Sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate versions
+        run: python scripts/validate_versions.py
+
   backend:
     name: Backend Tests & Lint
     runs-on: ubuntu-latest

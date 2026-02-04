@@ -1,17 +1,26 @@
 """
 Database maintenance API endpoints.
 
-Provides data aging, cleanup, and database statistics.
+Provides data aging, cleanup, database statistics, vendor lookup, and backup/restore.
 """
 
 import logging
-from fastapi import APIRouter, Depends, Query
+import os
+import shutil
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from config import settings
 from database import get_db
 from models import Host, Port, Connection, ARPEntry, RawImport, Conflict
 from services.data_aging import run_cleanup, get_data_age_stats, CleanupPolicy
+from services.mac_vendor import lookup_mac_vendor, get_vendor_lookup
+
+DATABASE_URL = settings.DATABASE_URL
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -179,3 +188,248 @@ async def database_health(db: AsyncSession = Depends(get_db)):
             "database": "error",
             "error": str(e),
         }
+
+
+@router.post("/vendor-lookup")
+async def update_vendor_info(
+    overwrite: bool = Query(False, description="Overwrite existing vendor info"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update vendor information for all hosts with MAC addresses.
+
+    Uses the built-in OUI database to lookup vendors.
+    """
+    logger.info(f"Running vendor lookup (overwrite={overwrite})")
+
+    # Get hosts with MAC addresses
+    if overwrite:
+        query = select(Host).where(Host.mac_address.isnot(None))
+    else:
+        query = select(Host).where(
+            Host.mac_address.isnot(None),
+            Host.vendor.is_(None)
+        )
+
+    result = await db.execute(query)
+    hosts = result.scalars().all()
+
+    updated = 0
+    not_found = 0
+
+    for host in hosts:
+        vendor = lookup_mac_vendor(host.mac_address)
+        if vendor:
+            host.vendor = vendor
+            updated += 1
+        else:
+            not_found += 1
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "hosts_checked": len(hosts),
+        "vendors_updated": updated,
+        "vendors_not_found": not_found,
+    }
+
+
+@router.get("/vendor-lookup/{mac}")
+async def lookup_single_vendor(mac: str):
+    """
+    Lookup vendor for a single MAC address.
+    """
+    vendor_lookup = get_vendor_lookup()
+    normalized = vendor_lookup.normalize_mac(mac)
+
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid MAC address format")
+
+    vendor = vendor_lookup.lookup(mac)
+
+    return {
+        "mac_address": normalized,
+        "oui": vendor_lookup.get_oui(mac),
+        "vendor": vendor,
+    }
+
+
+@router.post("/backup")
+async def create_backup(db: AsyncSession = Depends(get_db)):
+    """
+    Create a backup of the database.
+
+    Returns a downloadable backup file.
+    """
+    logger.info("Creating database backup")
+
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+
+    # Create backup directory
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Generate backup filename
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"network_backup_{timestamp}.db"
+    backup_path = os.path.join(backup_dir, backup_filename)
+
+    # Copy database file
+    try:
+        shutil.copy2(db_path, backup_path)
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+    # Get backup file size
+    backup_size = os.path.getsize(backup_path)
+
+    return {
+        "success": True,
+        "backup_file": backup_filename,
+        "backup_path": backup_path,
+        "size_bytes": backup_size,
+        "timestamp": timestamp,
+    }
+
+
+@router.get("/backup/download/{filename}")
+async def download_backup(filename: str):
+    """
+    Download a backup file.
+    """
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    backup_path = os.path.join(backup_dir, filename)
+
+    # Security: prevent path traversal
+    if not os.path.abspath(backup_path).startswith(os.path.abspath(backup_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+
+    return FileResponse(
+        path=backup_path,
+        filename=filename,
+        media_type="application/octet-stream",
+    )
+
+
+@router.get("/backup/list")
+async def list_backups():
+    """
+    List available backup files.
+    """
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+
+    if not os.path.exists(backup_dir):
+        return {"backups": [], "count": 0}
+
+    backups = []
+    for f in os.listdir(backup_dir):
+        if f.endswith(".db"):
+            fpath = os.path.join(backup_dir, f)
+            backups.append({
+                "filename": f,
+                "size_bytes": os.path.getsize(fpath),
+                "created_at": datetime.fromtimestamp(os.path.getctime(fpath)).isoformat(),
+            })
+
+    # Sort by creation time, newest first
+    backups.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return {"backups": backups, "count": len(backups)}
+
+
+@router.post("/restore/{filename}")
+async def restore_backup(filename: str):
+    """
+    Restore database from a backup file.
+
+    WARNING: This will replace the current database!
+    """
+    logger.warning(f"Restoring database from backup: {filename}")
+
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    backup_path = os.path.join(backup_dir, filename)
+
+    # Security: prevent path traversal
+    if not os.path.abspath(backup_path).startswith(os.path.abspath(backup_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+
+    # Create a backup of current database before restore
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    pre_restore_backup = os.path.join(backup_dir, f"pre_restore_{timestamp}.db")
+
+    try:
+        # Backup current database
+        if os.path.exists(db_path):
+            shutil.copy2(db_path, pre_restore_backup)
+
+        # Restore from backup
+        shutil.copy2(backup_path, db_path)
+
+    except Exception as e:
+        logger.error(f"Restore failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+    return {
+        "success": True,
+        "restored_from": filename,
+        "pre_restore_backup": f"pre_restore_{timestamp}.db",
+        "message": "Database restored. You may need to restart the application.",
+    }
+
+
+@router.delete("/backup/{filename}")
+async def delete_backup(filename: str):
+    """
+    Delete a backup file.
+    """
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    backup_path = os.path.join(backup_dir, filename)
+
+    # Security: prevent path traversal
+    if not os.path.abspath(backup_path).startswith(os.path.abspath(backup_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+
+    try:
+        os.remove(backup_path)
+    except Exception as e:
+        logger.error(f"Delete backup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
+    return {"success": True, "deleted": filename}

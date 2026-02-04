@@ -324,3 +324,7 @@ export async function importBulk(files, sourceType, sourceHost) {
 export async function healthCheck() {
   return apiCall('GET', '/health')
 }
+
+export async function getBackendInfo() {
+  return apiCall('GET', '/info')
+}

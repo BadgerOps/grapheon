@@ -10,7 +10,8 @@ import Connections from './pages/Connections'
 import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
 import Config from './pages/Config'
-import { version } from '../package.json'
+import { version as frontendVersion } from '../package.json'
+import * as api from './api/client'
 
 // Theme detection and management with localStorage persistence
 function useTheme() {
@@ -73,6 +74,13 @@ function NavLink({ to, children, icon }) {
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
+  const [backendVersion, setBackendVersion] = useState('...')
+
+  useEffect(() => {
+    api.getBackendInfo()
+      .then(info => setBackendVersion(info.version))
+      .catch(() => setBackendVersion('?'))
+  }, [])
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
@@ -243,9 +251,14 @@ export default function App() {
             <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
               <Link
                 to="/changelog"
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                v{version}
+                <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs">
+                  UI v{frontendVersion}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-xs">
+                  API v{backendVersion}
+                </span>
               </Link>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>

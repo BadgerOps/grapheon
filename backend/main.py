@@ -118,6 +118,25 @@ async def health_check():
     }
 
 
+@app.get("/api/info", tags=["info"])
+async def get_app_info():
+    """Get application version and changelog."""
+    from pathlib import Path
+
+    # Read changelog
+    changelog_path = Path(__file__).parent / "CHANGELOG.md"
+    try:
+        changelog = changelog_path.read_text()
+    except FileNotFoundError:
+        changelog = "Changelog not available."
+
+    return {
+        "name": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "changelog": changelog,
+    }
+
+
 @app.get("/api", tags=["root"])
 async def api_root():
     """API root endpoint."""

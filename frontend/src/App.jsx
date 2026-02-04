@@ -9,6 +9,7 @@ import Search from './pages/Search'
 import Connections from './pages/Connections'
 import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
+import { version } from '../package.json'
 
 // Theme detection and management with localStorage persistence
 function useTheme() {
@@ -230,7 +231,7 @@ export default function App() {
                 to="/changelog"
                 className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                Changelog
+                v{version}
               </Link>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>

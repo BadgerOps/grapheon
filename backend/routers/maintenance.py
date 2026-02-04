@@ -5,23 +5,22 @@ Provides data aging, cleanup, database statistics, vendor lookup, and backup/res
 """
 
 import logging
-import json
 import os
 import shutil
 from datetime import datetime
-from typing import Optional
-from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
+
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from database import get_db
 from config import settings
-
-DATABASE_URL = settings.DATABASE_URL
+from database import get_db
 from models import Host, Port, Connection, ARPEntry, RawImport, Conflict
 from services.data_aging import run_cleanup, get_data_age_stats, CleanupPolicy
 from services.mac_vendor import lookup_mac_vendor, get_vendor_lookup
+
+DATABASE_URL = settings.DATABASE_URL
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

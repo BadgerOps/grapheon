@@ -4,11 +4,9 @@ MAC Vendor lookup service.
 Uses the IEEE OUI database to lookup vendor information from MAC addresses.
 """
 
-import os
 import re
 import logging
 from typing import Optional, Dict
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +288,6 @@ MAC_VENDOR_DB: Dict[str, str] = {
     "00:1C:14": "VMware",
 
     # Virtual / Hypervisor
-    "00:15:5D": "Hyper-V",
     "00:16:3E": "Xen",
     "08:00:27": "VirtualBox",
     "0A:00:27": "VirtualBox",

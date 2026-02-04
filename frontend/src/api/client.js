@@ -258,6 +258,40 @@ export async function runCleanup(daysOld = 90) {
   return apiCall('POST', '/maintenance/cleanup', null, { days_old: daysOld })
 }
 
+// Vendor lookup
+export async function updateVendorInfo() {
+  return apiCall('POST', '/maintenance/vendor-lookup')
+}
+
+export async function lookupMacVendor(mac) {
+  return apiCall('GET', `/maintenance/vendor-lookup/${encodeURIComponent(mac)}`)
+}
+
+// Database backup/restore
+export async function createBackup() {
+  return apiCall('POST', '/maintenance/backup')
+}
+
+export async function listBackups() {
+  return apiCall('GET', '/maintenance/backup/list')
+}
+
+export async function downloadBackup(filename) {
+  const response = await fetch(`${API_BASE}/maintenance/backup/download/${encodeURIComponent(filename)}`)
+  if (!response.ok) {
+    throw new Error(`Download error: ${response.status}`)
+  }
+  return response
+}
+
+export async function restoreBackup(filename) {
+  return apiCall('POST', `/maintenance/restore/${encodeURIComponent(filename)}`)
+}
+
+export async function deleteBackup(filename) {
+  return apiCall('DELETE', `/maintenance/backup/${encodeURIComponent(filename)}`)
+}
+
 // ============================================
 // Bulk import
 // ============================================

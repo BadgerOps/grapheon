@@ -133,6 +133,7 @@ class NmapParser(BaseParser):
         os_name = None
         os_family = None
         os_confidence = None
+        device_type = None
 
         os_elem = host_elem.find(".//osmatch")
         if os_elem is not None:
@@ -140,6 +141,12 @@ class NmapParser(BaseParser):
             os_confidence = int(os_elem.get("accuracy", 0))
             if os_name:
                 os_family = self._infer_os_family(os_name)
+
+            # Extract device type from osclass element
+            osclass_elem = os_elem.find(".//osclass")
+            if osclass_elem is not None:
+                raw_type = osclass_elem.get("type", "")
+                device_type = self._normalize_device_type(raw_type)
 
         # Parse ports
         ports = []
@@ -162,6 +169,7 @@ class NmapParser(BaseParser):
             os_name=os_name,
             os_family=os_family,
             os_confidence=os_confidence,
+            device_type=device_type,
             ports=ports,
         )
 
@@ -343,3 +351,61 @@ class NmapParser(BaseParser):
                 continue
 
         return ports
+
+    def _normalize_device_type(self, raw_type: str) -> str:
+        """
+        Normalize nmap device type to standard categories.
+
+        Nmap osclass types include: 'general purpose', 'router', 'switch',
+        'firewall', 'printer', 'WAP', 'storage-misc', 'media device',
+        'webcam', 'phone', 'game console', 'PDA', 'terminal', etc.
+        """
+        if not raw_type:
+            return "unknown"
+
+        raw_lower = raw_type.lower()
+
+        # Map nmap types to standard device types
+        type_mapping = {
+            "general purpose": "workstation",
+            "router": "router",
+            "switch": "switch",
+            "firewall": "firewall",
+            "printer": "printer",
+            "print server": "printer",
+            "wap": "wireless_ap",
+            "wireless": "wireless_ap",
+            "access point": "wireless_ap",
+            "storage-misc": "storage",
+            "storage": "storage",
+            "nas": "storage",
+            "media device": "media",
+            "webcam": "iot",
+            "camera": "iot",
+            "phone": "phone",
+            "voip": "phone",
+            "game console": "iot",
+            "pda": "mobile",
+            "terminal": "terminal",
+            "terminal server": "server",
+            "remote management": "server",
+            "specialized": "appliance",
+            "load balancer": "load_balancer",
+            "proxy server": "server",
+            "broadband router": "router",
+            "hub": "hub",
+            "bridge": "bridge",
+            "power-device": "iot",
+            "vpn": "vpn",
+        }
+
+        # Check for exact match first
+        for key, value in type_mapping.items():
+            if key in raw_lower:
+                return value
+
+        # If contains "server", classify as server
+        if "server" in raw_lower:
+            return "server"
+
+        return "unknown"

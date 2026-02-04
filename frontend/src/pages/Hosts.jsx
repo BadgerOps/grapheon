@@ -41,7 +41,7 @@ export default function Hosts() {
   return (
     <div className="p-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Hosts</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Hosts</h1>
         <Link
           to="/"
           className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
@@ -51,23 +51,23 @@ export default function Hosts() {
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+        <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-400 dark:border-red-800 text-red-700 dark:text-red-400 rounded">
           {error}
         </div>
       )}
 
       {successMessage && (
-        <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+        <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-400 dark:border-green-800 text-green-700 dark:text-green-400 rounded">
           {successMessage}
         </div>
       )}
 
       {loading ? (
         <div className="text-center py-8">
-          <p className="text-gray-600">Loading hosts...</p>
+          <p className="text-gray-600 dark:text-gray-400">Loading hosts...</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
           <HostTable hosts={hosts} onDelete={handleDelete} />
         </div>
       )}

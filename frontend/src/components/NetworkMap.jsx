@@ -38,24 +38,22 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     return () => observer.disconnect()
   }, [])
 
-  // Initialize vis-network
-  useEffect(() => {
-    if (!containerRef.current || loading) return
-    initNetwork()
-
-    return () => {
-      if (networkRef.current) {
-        networkRef.current.destroy()
-        networkRef.current = null
+  const buildGroupConfig = (groups, isDark) => {
+    const config = {}
+    Object.entries(groups).forEach(([subnet, data]) => {
+      config[subnet] = {
+        color: {
+          background: data.color || '#6b7280',
+          border: isDark ? '#374151' : '#d1d5db',
+          highlight: {
+            background: data.color || '#6b7280',
+            border: '#3b82f6',
+          },
+        },
       }
-    }
-  }, [loading, isDarkMode, initNetwork])
-
-  // Update network when data changes
-  useEffect(() => {
-    if (!networkRef.current || loading) return
-    updateNetworkData()
-  }, [nodes, edges])
+    })
+    return config
+  }
 
   const initNetwork = useCallback(() => {
     if (!containerRef.current) return
@@ -177,22 +175,24 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     setStats({ nodes: nodes.length, edges: edges.length })
   }, [nodes, edges])
 
-  const buildGroupConfig = (groups, isDark) => {
-    const config = {}
-    Object.entries(groups).forEach(([subnet, data]) => {
-      config[subnet] = {
-        color: {
-          background: data.color || '#6b7280',
-          border: isDark ? '#374151' : '#d1d5db',
-          highlight: {
-            background: data.color || '#6b7280',
-            border: '#3b82f6',
-          },
-        },
+  // Initialize vis-network
+  useEffect(() => {
+    if (!containerRef.current || loading) return
+    initNetwork()
+
+    return () => {
+      if (networkRef.current) {
+        networkRef.current.destroy()
+        networkRef.current = null
       }
-    })
-    return config
-  }
+    }
+  }, [loading, isDarkMode, initNetwork])
+
+  // Update network when data changes
+  useEffect(() => {
+    if (!networkRef.current || loading) return
+    updateNetworkData()
+  }, [nodes, edges, loading, updateNetworkData])
 
   // Control functions
   const handleZoomIn = () => {

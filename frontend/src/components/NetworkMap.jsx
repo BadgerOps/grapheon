@@ -19,6 +19,24 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
   const navigate = useNavigate()
   const [selectedNode, setSelectedNode] = useState(null)
   const [stats, setStats] = useState({ nodes: 0, edges: 0 })
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    document.documentElement.classList.contains('dark')
+  )
+
+  // Watch for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          const isDark = document.documentElement.classList.contains('dark')
+          setIsDarkMode(isDark)
+        }
+      })
+    })
+
+    observer.observe(document.documentElement, { attributes: true })
+    return () => observer.disconnect()
+  }, [])
 
   // Initialize vis-network
   useEffect(() => {
@@ -31,7 +49,7 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
         networkRef.current = null
       }
     }
-  }, [loading])
+  }, [loading, isDarkMode, initNetwork])
 
   // Update network when data changes
   useEffect(() => {
@@ -42,9 +60,8 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
   const initNetwork = useCallback(() => {
     if (!containerRef.current) return
 
-    // Detect dark mode
-    const isDark = document.documentElement.classList.contains('dark') ||
-      window.matchMedia('(prefers-color-scheme: dark)').matches
+    // Use the isDarkMode state for consistent theming
+    const isDark = isDarkMode
 
     // Configure physics and layout options
     const options = {
@@ -148,7 +165,7 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     })
 
     setStats({ nodes: nodes.length, edges: edges.length })
-  }, [nodes, edges, groups, navigate, onNodeClick])
+  }, [nodes, edges, groups, navigate, onNodeClick, isDarkMode])
 
   const updateNetworkData = useCallback(() => {
     if (!networkRef.current) return

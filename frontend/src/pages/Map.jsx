@@ -69,7 +69,8 @@ export default function Map() {
   }
 
   const handleNodeClick = (node) => {
-    console.log('Node clicked:', node)
+    // Node selection is handled by NetworkMap component
+    // This callback can be used for additional actions if needed
   }
 
   const handleRefresh = () => {

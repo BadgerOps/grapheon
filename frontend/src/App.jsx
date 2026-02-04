@@ -9,40 +9,48 @@ import Search from './pages/Search'
 import Connections from './pages/Connections'
 import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
+import { version } from '../package.json'
 
-// Theme detection and management
+// Theme detection and management with localStorage persistence
 function useTheme() {
-  const [theme, setTheme] = useState(() => {
-    // Check system preference
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark'
+  const [themePreference, setThemePreference] = useState(() => {
+    const stored = window.localStorage.getItem('theme')
+    if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      return stored
     }
-    return 'light'
+    return 'system'
   })
+  const [systemTheme, setSystemTheme] = useState(() =>
+    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  )
 
   useEffect(() => {
-    // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = (e) => {
-      setTheme(e.matches ? 'dark' : 'light')
+    const handleChange = (event) => {
+      setSystemTheme(event.matches ? 'dark' : 'light')
     }
     mediaQuery.addEventListener('change', handleChange)
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
+  const theme = themePreference === 'system' ? systemTheme : themePreference
+
   useEffect(() => {
-    // Apply theme to document
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
+    document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
-  return theme
+  useEffect(() => {
+    window.localStorage.setItem('theme', themePreference)
+  }, [themePreference])
+
+  const toggleTheme = () => {
+    setThemePreference(theme === 'dark' ? 'light' : 'dark')
+  }
+
+  return { theme, toggleTheme }
 }
 
-// Navigation link component
+// Navigation link component with light/dark mode support
 function NavLink({ to, children, icon }) {
   const location = useLocation()
   const isActive = location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
@@ -53,7 +61,7 @@ function NavLink({ to, children, icon }) {
       className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
         isActive
           ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
-          : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
       }`}
     >
       {icon}
@@ -63,18 +71,18 @@ function NavLink({ to, children, icon }) {
 }
 
 export default function App() {
-  const theme = useTheme()
+  const { theme, toggleTheme } = useTheme()
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
       {/* Navigation */}
-      <nav className="bg-gray-900 dark:bg-gray-950 border-b border-gray-800 sticky top-0 z-50">
+      <nav className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50">
         <div className="max-w-full mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link
               to="/"
-              className="flex items-center gap-3 text-white hover:opacity-90 transition-opacity"
+              className="flex items-center gap-3 text-gray-900 dark:text-white hover:opacity-90 transition-opacity"
             >
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -83,7 +91,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold tracking-tight">Network Aggregator</h1>
-                <p className="text-xs text-gray-400 -mt-0.5">Data Analysis Platform</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 -mt-0.5">Data Analysis Platform</p>
               </div>
             </Link>
 
@@ -167,25 +175,30 @@ export default function App() {
               </NavLink>
             </div>
 
-            {/* Theme indicator */}
+            {/* Theme toggle */}
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full text-sm">
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/80 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                aria-pressed={theme === 'dark'}
+              >
                 {theme === 'dark' ? (
                   <>
                     <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
                       <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
                     </svg>
-                    <span className="text-gray-300">Dark</span>
+                    <span>Light mode</span>
                   </>
                 ) : (
                   <>
                     <svg className="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
                     </svg>
-                    <span className="text-gray-300">Light</span>
+                    <span>Dark mode</span>
                   </>
                 )}
-              </div>
+              </button>
             </div>
           </div>
         </div>
@@ -207,18 +220,18 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-gray-900 dark:bg-gray-950 border-t border-gray-800 py-6">
+      <footer className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-6">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Graphēon - Built with React, FastAPI & SQLite
             </p>
-            <div className="flex items-center gap-4 text-sm text-gray-500">
+            <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
               <Link
                 to="/changelog"
-                className="text-gray-400 hover:text-white transition-colors"
+                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                Changelog
+                v{version}
               </Link>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>

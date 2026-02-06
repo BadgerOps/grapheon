@@ -25,13 +25,12 @@ Requirements:
 
 import argparse
 import json
-import os
 import sys
 import uuid
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from random import choice, randint, uniform, sample
+from random import choice, randint, sample
 
 # ── Ensure we can import project modules ────────────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -419,11 +418,9 @@ def seed_database(db_path, append=False):
     # ── 5. Connections (netstat-style) ───────────────────────────
     print("   Creating connections...")
     conn_count = 0
-    all_ips = list(host_id_map.keys())
 
     # 5a. Internal same-subnet connections (within each VLAN)
     for vlan_id, host_list in HOSTS.items():
-        ips_in_vlan = [h[0] for h in host_list]
         for i, (src_ip, *_) in enumerate(host_list):
             # Each host connects to 1-3 other hosts in same VLAN
             targets = [h[0] for j, h in enumerate(host_list) if j != i]
@@ -645,7 +642,7 @@ def seed_database(db_path, append=False):
     conn.close()
 
     print()
-    print(f"✅ Demo data seeded successfully!")
+    print("✅ Demo data seeded successfully!")
     print(f"   Database: {db_path}")
     print(f"   VLANs: {len(VLAN_CONFIGS)}")
     print(f"   Hosts: {host_count}")
@@ -725,7 +722,7 @@ def restore_backup(db_path, input_file):
 
     conn.commit()
     conn.close()
-    print(f"\n✅ Restored successfully!")
+    print("\n✅ Restored successfully!")
 
 
 # ══════════════════════════════════════════════════════════════════════

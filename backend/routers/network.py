@@ -613,7 +613,7 @@ async def get_network_map(
                         "source": str(gw_id),
                         "target": internet_node_id,
                         "connection_type": "internet",
-                        "tooltip": f"Gateway → Internet",
+                        "tooltip": "Gateway → Internet",
                     }
                 })
 

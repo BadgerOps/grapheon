@@ -15,12 +15,12 @@ import re
 import sys
 from pathlib import Path
 from collections import defaultdict
-from typing import Optional, Dict, Set, Tuple
+from typing import Optional, Dict, Set
 
 # Import the MAC vendor lookup service directly
 services_path = Path(__file__).parent.parent / "services"
 sys.path.insert(0, str(services_path))
-from mac_vendor import MacVendorLookup
+from mac_vendor import MacVendorLookup  # noqa: E402
 
 
 class MACAddressCleaningMigration:

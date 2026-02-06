@@ -4,6 +4,23 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.4.0 - 2026-02-06
+### Added
+- **Import Backup** button in Settings > Database Backup & Restore section
+  - Opens a native file picker filtered to `.db` files
+  - Uploads the selected backup to the server via multipart POST
+  - Uploaded backups immediately appear in the backup list and can be restored, downloaded, or deleted
+  - Client-side file extension validation before upload
+  - Loading spinner and success/error feedback with auto-dismiss
+  - File input automatically resets after upload so the same file can be re-selected
+- **Test Data Generation** section in Settings page (between Backup and Cleanup)
+  - "Generate Fresh Data" button: clears all existing data and seeds a full demo network (6 VLANs, ~48 hosts, ports, connections, ARP entries, traceroute hops)
+  - "Append to Existing" button: adds demo data alongside current records without clearing
+  - Both actions show a confirmation dialog explaining the destructive/additive behavior
+  - Script output displayed inline in a scrollable panel after generation completes
+  - Database statistics automatically refresh after seeding
+- New API client functions: `uploadBackup(file)` and `seedDemoData(append)`
+
 ## 0.3.0 - 2026-02-05
 ### Added
 - In-app update notification banner: polls backend for available updates every 60 minutes

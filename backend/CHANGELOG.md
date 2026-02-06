@@ -4,6 +4,20 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.4.0 - 2026-02-06
+### Added
+- Backup upload endpoint (`POST /api/maintenance/backup/upload`): accepts `.db` file uploads from the browser, saves to the server's backup directory, and makes them available for restore
+  - File extension validation (`.db` only) with clear error messaging
+  - Path traversal protection via `os.path.basename()` sanitization
+  - Automatic timestamp-suffixed renaming when a file with the same name already exists
+- Demo data seed endpoint (`POST /api/maintenance/seed-demo`): triggers the built-in `seed_demo_data.py` script from the API without requiring CLI access
+  - `append` query parameter: when `true`, adds demo data alongside existing records; when `false` (default), clears all data first
+  - Runs as a subprocess with 60-second timeout and full stdout/stderr capture
+  - Returns script output to the frontend for inline display
+
+### Changed
+- Added `UploadFile` and `File` imports from FastAPI for multipart file handling in the maintenance router
+
 ## 0.3.0 - 2026-02-05
 ### Added
 - In-app update check: new `/api/updates` endpoint queries GitHub Releases API for latest versions (1-hour cached)

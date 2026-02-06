@@ -9,7 +9,7 @@ import os
 import shutil
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -438,3 +438,120 @@ async def delete_backup(filename: str):
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
     return {"success": True, "deleted": filename}
+
+
+@router.post("/backup/upload")
+async def upload_backup(file: UploadFile = File(...)):
+    """
+    Upload a backup file (.db) from the client to the server's backup directory.
+
+    The uploaded file will appear in the backup list and can then be restored.
+    """
+    logger.info(f"Uploading backup file: {file.filename}")
+
+    # Validate file extension
+    if not file.filename or not file.filename.endswith(".db"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Only .db (SQLite database) files are accepted.",
+        )
+
+    # Validate filename (prevent path traversal)
+    safe_filename = os.path.basename(file.filename)
+    if not safe_filename or safe_filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Extract database path from URL
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    dest_path = os.path.join(backup_dir, safe_filename)
+
+    # If a file with the same name exists, add a timestamp suffix
+    if os.path.exists(dest_path):
+        name, ext = os.path.splitext(safe_filename)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"{name}_{timestamp}{ext}"
+        dest_path = os.path.join(backup_dir, safe_filename)
+
+    try:
+        contents = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        logger.error(f"Failed to save uploaded backup: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    finally:
+        await file.close()
+
+    file_size = os.path.getsize(dest_path)
+
+    return {
+        "success": True,
+        "filename": safe_filename,
+        "size_bytes": file_size,
+        "message": f"Backup '{safe_filename}' uploaded successfully. You can now restore from it.",
+    }
+
+
+@router.post("/seed-demo")
+async def seed_demo_data(
+    append: bool = Query(False, description="Append to existing data instead of clearing"),
+):
+    """
+    Generate demo/test data by running the built-in seed script.
+
+    WARNING: Without --append this will clear all existing data!
+    """
+    import subprocess
+
+    logger.info(f"Seeding demo data (append={append})")
+
+    # Locate the seed script
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(backend_dir, "scripts", "seed_demo_data.py")
+
+    if not os.path.exists(script_path):
+        raise HTTPException(status_code=404, detail="Seed script not found")
+
+    # Determine database path
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    # Build command
+    cmd = ["python3", script_path, "--db", db_path]
+    if append:
+        cmd.append("--append")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=backend_dir,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Seed script failed: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Seed script failed: {result.stderr.strip() or result.stdout.strip()}",
+            )
+
+        return {
+            "success": True,
+            "append": append,
+            "output": result.stdout.strip(),
+            "message": "Demo data generated successfully. Refresh the page to see the new data.",
+        }
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Seed script timed out after 60 seconds")
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Python3 not found on the server")

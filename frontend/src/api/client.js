@@ -320,6 +320,27 @@ export async function deleteBackup(filename) {
   return apiCall('DELETE', `/maintenance/backup/${encodeURIComponent(filename)}`)
 }
 
+export async function uploadBackup(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(`${API_BASE}/maintenance/backup/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || `Upload error: ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export async function seedDemoData(append = false) {
+  return apiCall('POST', '/maintenance/seed-demo', null, { append })
+}
+
 // ============================================
 // Bulk import
 // ============================================

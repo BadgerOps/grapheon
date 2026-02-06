@@ -22,6 +22,7 @@ from services import (
     resolve_conflict,
     get_host_unified_view,
 )
+from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ async def run_correlation(
     try:
         logger.info("Received correlation request")
         result = await correlate_hosts(db)
+
+        audit.log_correlation(status="success", hosts_merged=result.hosts_merged, conflicts_detected=result.conflicts_detected, device_identities_created=result.device_identities_created)
 
         return {
             "success": True,

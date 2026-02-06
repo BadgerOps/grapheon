@@ -34,7 +34,7 @@ from network.edges import build_all_edges
 from network.legacy_format import build_legacy_response
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -63,35 +63,35 @@ async def get_network_map(
     ``format=legacy``.
     """
     start_time = time.perf_counter()
-    logger.info("=" * 60)
-    logger.info("NETWORK MAP GENERATION STARTED")
-    logger.info(f"Parameters: group_by={group_by}, layout_mode={layout_mode}, format={format}")
+    logger.debug("=" * 60)
+    logger.debug("NETWORK MAP GENERATION STARTED")
+    logger.debug(f"Parameters: group_by={group_by}, layout_mode={layout_mode}, format={format}")
 
     # ── Step 1: Fetch hosts ──────────────────────────────────────
     step_start = time.perf_counter()
     hosts = await fetch_hosts(db, vlan_filter, include_inactive)
-    logger.info(f"[1/7] Fetched {len(hosts)} hosts in {_ms(step_start)}")
+    logger.debug(f"[1/7] Fetched {len(hosts)} hosts in {_ms(step_start)}")
 
     # ── Step 2: Fetch VLAN configs + subnet→VLAN lookup ──────────
     step_start = time.perf_counter()
     vlan_configs = await fetch_vlan_configs(db)
     subnet_to_vlan = _build_subnet_to_vlan(vlan_configs)
-    logger.info(f"[2/7] Loaded {len(vlan_configs)} VLAN configs in {_ms(step_start)}")
+    logger.debug(f"[2/7] Loaded {len(vlan_configs)} VLAN configs in {_ms(step_start)}")
 
     # ── Step 3: Fetch ARP entries for segment info ───────────────
     step_start = time.perf_counter()
     ip_to_segment = await fetch_arp_segments(db) if group_by == "segment" else {}
-    logger.info(f"[3/7] ARP segment mapping: {len(ip_to_segment)} entries in {_ms(step_start)}")
+    logger.debug(f"[3/7] ARP segment mapping: {len(ip_to_segment)} entries in {_ms(step_start)}")
 
     # ── Step 4: Fetch connections ────────────────────────────────
     step_start = time.perf_counter()
     connections = await fetch_connections(db)
-    logger.info(f"[4/7] Fetched {len(connections)} connections in {_ms(step_start)}")
+    logger.debug(f"[4/7] Fetched {len(connections)} connections in {_ms(step_start)}")
 
     # ── Step 5: Batch port counts (single GROUP BY query) ────────
     step_start = time.perf_counter()
     port_counts = await fetch_port_counts(db, [h.id for h in hosts])
-    logger.info(f"[5/7] Batch port counts for {len(hosts)} hosts in {_ms(step_start)}")
+    logger.debug(f"[5/7] Batch port counts for {len(hosts)} hosts in {_ms(step_start)}")
 
     # ── Step 5.5: Fetch DeviceIdentity data for gateway combining ─
     step_start = time.perf_counter()
@@ -99,7 +99,7 @@ async def get_network_map(
     device_identities = (
         await fetch_device_identities(db) if device_id_to_hosts else {}
     )
-    logger.info(f"[5.5/7] Loaded {len(device_identities)} device identities in {_ms(step_start)}")
+    logger.debug(f"[5.5/7] Loaded {len(device_identities)} device identities in {_ms(step_start)}")
 
     # ── Step 6: Build Cytoscape nodes ────────────────────────────
     step_start = time.perf_counter()
@@ -142,7 +142,7 @@ async def get_network_map(
     # Prepend gateway-to-subnet edges (created during node building)
     edges = gateway_subnet_edges + edges
 
-    logger.info(
+    logger.debug(
         f"[6-7/7] Built {len(nodes)} nodes, {len(edges)} edges "
         f"({edge_stats['internet_conn_count']} internet-routed) in {_ms(step_start)}"
     )
@@ -171,13 +171,13 @@ async def get_network_map(
         "generation_time_ms": round(total_duration, 1),
     }
 
-    logger.info("=" * 60)
+    logger.debug("=" * 60)
     logger.info(
         f"NETWORK MAP COMPLETE: {host_count} hosts, {len(seen_vlans)} VLANs, "
         f"{len(seen_subnets)} subnets, {len(edges)} edges, "
         f"{edge_stats['internet_conn_count']} internet-routed in {total_duration:.1f}ms"
     )
-    logger.info("=" * 60)
+    logger.debug("=" * 60)
 
     if format == "legacy":
         return build_legacy_response(nodes, edges, seen_subnets, stats, subnet_prefix)

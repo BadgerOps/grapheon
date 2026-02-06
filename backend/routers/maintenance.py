@@ -19,6 +19,7 @@ from database import get_db
 from models import Host, Port, Connection, ARPEntry, RawImport, Conflict
 from services.data_aging import run_cleanup, get_data_age_stats, CleanupPolicy
 from services.mac_vendor import lookup_mac_vendor, get_vendor_lookup
+from utils.audit import audit
 
 DATABASE_URL = settings.DATABASE_URL
 
@@ -296,6 +297,8 @@ async def create_backup(db: AsyncSession = Depends(get_db)):
     # Get backup file size
     backup_size = os.path.getsize(backup_path)
 
+    audit.log_backup_restore(operation="backup", filename=backup_filename)
+
     return {
         "success": True,
         "backup_file": backup_filename,
@@ -403,6 +406,8 @@ async def restore_backup(filename: str):
         logger.error(f"Restore failed: {e}")
         raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
 
+    audit.log_backup_restore(operation="restore", filename=filename)
+
     return {
         "success": True,
         "restored_from": filename,
@@ -490,6 +495,8 @@ async def upload_backup(file: UploadFile = File(...)):
 
     file_size = os.path.getsize(dest_path)
 
+    audit.log_backup_restore(operation="upload", filename=safe_filename)
+
     return {
         "success": True,
         "filename": safe_filename,
@@ -543,6 +550,8 @@ async def seed_demo_data(
                 status_code=500,
                 detail=f"Seed script failed: {result.stderr.strip() or result.stdout.strip()}",
             )
+
+        audit.log_seed_data(status="success", append_mode=append)
 
         return {
             "success": True,

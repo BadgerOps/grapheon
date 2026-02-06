@@ -14,10 +14,13 @@
     "cytoscape-fcose": "^2.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.20.0",
+    "remark-gfm": "^4.0.1",
     "vis-network": "^9.1.6"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@vitejs/plugin-react": "^5.1.3",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.31",

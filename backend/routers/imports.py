@@ -18,14 +18,11 @@ from utils.tagging import (
     build_arp_tags,
     merge_tags,
 )
+from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
-
-# Enable debug logging for this module
-logging.basicConfig(level=logging.DEBUG)
-logger.setLevel(logging.DEBUG)
 
 
 def _generate_guid() -> str:
@@ -135,10 +132,10 @@ async def _process_import(
         return
 
     try:
-        logger.info(f"Getting parser for source_type={source_type}")
+        logger.debug(f"Getting parser for source_type={source_type}")
         parser = get_parser(source_type)
         result = parser.parse(raw_data)
-        logger.info(f"Parse result: success={result.success}, hosts={len(result.hosts)}, errors={result.errors}")
+        logger.debug(f"Parse result: success={result.success}, hosts={len(result.hosts)}, errors={result.errors}")
 
         if not result.success:
             import_record.parse_status = "failed"
@@ -414,7 +411,7 @@ async def import_raw_data(
     - tags: Optional comma-separated tags
     - notes: Optional notes about the import
     """
-    logger.info(f"POST /raw - source_type={source_type}, data_length={len(raw_data)}")
+    logger.debug(f"POST /raw - source_type={source_type}, data_length={len(raw_data)}")
     logger.debug(f"Raw data preview: {raw_data[:200]}...")
 
     # Parse tags
@@ -437,18 +434,19 @@ async def import_raw_data(
 
     db.add(import_record)
     await db.flush()
-    logger.info(f"Created import record id={import_record.id}")
+    logger.debug(f"Created import record id={import_record.id}")
 
     # Parse the data and create records
     if source_host:
         await _upsert_host_from_value(db, source_host, "import_source")
     await _process_import(db, import_record, source_type, raw_data)
-    logger.info(f"Parse complete: status={import_record.parse_status}, count={import_record.parsed_count}")
+    logger.debug(f"Parse complete: status={import_record.parse_status}, count={import_record.parsed_count}")
 
     await db.commit()
     await db.refresh(import_record)
 
-    logger.info(f"Import committed successfully: id={import_record.id}")
+    logger.debug(f"Import committed successfully: id={import_record.id}")
+    audit.log_import(source_type=source_type, filename=filename, status=import_record.parse_status, record_count=import_record.parsed_count or 0, error_message=import_record.error_message)
     return RawImportResponse.model_validate(import_record)
 
 
@@ -508,6 +506,7 @@ async def import_file(
     await db.commit()
     await db.refresh(import_record)
 
+    audit.log_import(source_type=source_type, filename=file.filename, status=import_record.parse_status, record_count=import_record.parsed_count or 0, error_message=import_record.error_message)
     return RawImportResponse.model_validate(import_record)
 
 
@@ -718,4 +717,5 @@ async def bulk_import_files(
         f"duration={total_duration:.1f}ms"
     )
 
+    audit.log_import(source_type=source_type, filename=f"bulk:{len(files)} files", status="success" if results["failed"] == 0 else "partial", record_count=results["successful"])
     return results

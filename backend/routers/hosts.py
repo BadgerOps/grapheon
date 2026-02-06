@@ -12,6 +12,7 @@ from schemas import (
     PortResponse,
     PaginatedResponse,
 )
+from utils.audit import audit
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
@@ -141,6 +142,7 @@ async def create_host(
     await db.commit()
     await db.refresh(db_host)
 
+    audit.log_host_crud(operation="create", host_id=db_host.id, ip_address=db_host.ip_address, hostname=db_host.hostname)
     return HostResponse.model_validate(db_host)
 
 
@@ -170,6 +172,7 @@ async def update_host(
     await db.commit()
     await db.refresh(db_host)
 
+    audit.log_host_crud(operation="update", host_id=host_id, ip_address=db_host.ip_address, hostname=db_host.hostname)
     return HostResponse.model_validate(db_host)
 
 
@@ -188,3 +191,4 @@ async def delete_host(host_id: int, db: AsyncSession = Depends(get_db)):
     db_host.last_seen = datetime.utcnow()
 
     await db.commit()
+    audit.log_host_crud(operation="delete", host_id=host_id, ip_address=db_host.ip_address, hostname=db_host.hostname)

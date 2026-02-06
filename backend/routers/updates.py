@@ -16,6 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
+from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -325,6 +326,7 @@ async def trigger_upgrade():
         with open(request_file, "w") as f:
             json.dump(upgrade_request, f, indent=2)
         logger.info(f"Upgrade request written to {request_file}")
+        audit.log_upgrade_trigger(version=target_version)
     except Exception as e:
         logger.error(f"Failed to write upgrade request: {e}")
         raise HTTPException(

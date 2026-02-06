@@ -1,7 +1,10 @@
 import time
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import settings
 from database import init_db, close_db
@@ -20,9 +23,10 @@ from routers import (
     device_identities_router,
 )
 from utils.logging_utils import setup_logging, get_logger
+from utils.audit import audit
 
-# Configure enhanced logging
-setup_logging(level="DEBUG")
+# Configure logging — INFO by default, DEBUG via env or flag
+setup_logging(level="INFO")
 logger = get_logger(__name__)
 
 
@@ -32,28 +36,22 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("=" * 60)
     logger.info("NETWORK AGGREGATOR STARTING UP")
-    logger.info("=" * 60)
     logger.info(f"App: {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Debug mode: {settings.DEBUG}")
 
-    logger.info("Initializing database...")
     start = time.perf_counter()
     await init_db()
-    logger.info(f"Database initialized successfully in {(time.perf_counter() - start)*1000:.1f}ms")
+    logger.info(
+        f"Database initialized in {(time.perf_counter() - start) * 1000:.1f}ms"
+    )
 
-    logger.info("=" * 60)
     logger.info("STARTUP COMPLETE - Ready to accept requests")
     logger.info("=" * 60)
 
     yield
 
     # Shutdown
-    logger.info("=" * 60)
     logger.info("NETWORK AGGREGATOR SHUTTING DOWN")
-    logger.info("=" * 60)
-    logger.info("Closing database connection...")
     await close_db()
-    logger.info("Database connection closed")
     logger.info("Shutdown complete")
 
 
@@ -65,28 +63,68 @@ app = FastAPI(
 )
 
 
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests with timing."""
-    start_time = time.perf_counter()
+# ── Custom validation error handler ───────────────────────────────────
 
-    # Log request
-    logger.debug(f"→ {request.method} {request.url.path}")
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    """
+    Return user-friendly error messages when request validation fails.
 
-    # Process request
-    response = await call_next(request)
+    Instead of Pydantic's raw error output, this returns a structured
+    response with per-field error messages and fix guidance.
+    """
+    errors = []
+    for error in exc.errors():
+        # Build a dotted field path (skip the top-level "body"/"query" prefix)
+        loc_parts = [str(x) for x in error.get("loc", [])]
+        if loc_parts and loc_parts[0] in ("body", "query", "path"):
+            loc_parts = loc_parts[1:]
+        field = ".".join(loc_parts) if loc_parts else "unknown"
 
-    # Calculate duration
-    duration_ms = (time.perf_counter() - start_time) * 1000
+        # Extract the human-readable message
+        msg = error.get("msg", "Validation error")
+        # Pydantic wraps custom ValueError messages in "Value error, ..."
+        if msg.startswith("Value error, "):
+            msg = msg[len("Value error, "):]
 
-    # Log response with timing
-    status_indicator = "✓" if response.status_code < 400 else "✗"
-    logger.info(
-        f"← {status_indicator} {request.method} {request.url.path} "
-        f"[{response.status_code}] {duration_ms:.1f}ms"
+        errors.append({
+            "field": field,
+            "message": msg,
+            "type": error.get("type", "unknown"),
+        })
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": "Validation failed",
+            "errors": errors,
+        },
     )
 
+
+# ── Request ID + request logging middleware ───────────────────────────
+
+@app.middleware("http")
+async def request_lifecycle(request: Request, call_next):
+    """Assign a request ID, log timing, and add the ID to response headers."""
+    request_id = str(uuid.uuid4())
+    audit.set_request_id(request_id)
+
+    start_time = time.perf_counter()
+    logger.debug(f"→ {request.method} {request.url.path}")
+
+    response = await call_next(request)
+
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    status_indicator = "+" if response.status_code < 400 else "!"
+    logger.info(
+        f"{status_indicator} {request.method} {request.url.path} "
+        f"[{response.status_code}] {duration_ms:.1f}ms rid={request_id[:8]}"
+    )
+
+    response.headers["X-Request-ID"] = request_id
     return response
 
 

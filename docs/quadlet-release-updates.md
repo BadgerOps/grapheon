@@ -114,6 +114,73 @@ If a release is bad, point Quadlet units at a previous tag (e.g., `:v0.1.2`) and
 systemctl restart grapheon-backend grapheon-frontend
 ```
 
+## In-App Upgrade via Marker File
+
+Graphēon includes an in-app upgrade flow triggered from the Settings page. The backend writes a JSON marker file, and a systemd path unit on the host picks it up to perform the actual container update.
+
+### How It Works
+
+1. User clicks "Upgrade" in the frontend Settings page.
+2. Backend `POST /api/updates/upgrade` writes `/data/upgrade-requested` with the target version.
+3. The `grapheon-upgrade.path` systemd path unit detects the file.
+4. It triggers `grapheon-upgrade.service`, which runs `scripts/grapheon-upgrade.sh`.
+5. The script pulls new images, restarts services, runs a health check, and writes status to `/data/upgrade-status.json`.
+6. The frontend polls `GET /api/updates/status` and shows progress/completion.
+
+### Installation
+
+Copy the systemd units from `deploy/` and the upgrade script:
+
+```bash
+# Copy upgrade script
+sudo mkdir -p /opt/grapheon/scripts
+sudo cp scripts/grapheon-upgrade.sh /opt/grapheon/scripts/
+sudo chmod +x /opt/grapheon/scripts/grapheon-upgrade.sh
+
+# Copy systemd units
+sudo cp deploy/grapheon-upgrade.path /etc/systemd/system/
+sudo cp deploy/grapheon-upgrade.service /etc/systemd/system/
+
+# Enable and start the path watcher
+sudo systemctl daemon-reload
+sudo systemctl enable --now grapheon-upgrade.path
+```
+
+### Verifying
+
+Check that the path unit is active:
+
+```bash
+systemctl status grapheon-upgrade.path
+```
+
+Test manually by creating a marker file:
+
+```bash
+echo '{"target_version": "0.6.0", "current_version": "0.5.0"}' > /data/upgrade-requested
+```
+
+Watch the upgrade log:
+
+```bash
+journalctl -u grapheon-upgrade.service -f
+```
+
+### Rollback After In-App Upgrade
+
+If the upgrade fails or produces issues:
+
+```bash
+# Point Quadlet units at a previous tag
+# Edit /etc/containers/systemd/grapheon-backend.container
+# Change Image= to the previous version tag, then:
+systemctl daemon-reload
+systemctl restart grapheon-backend grapheon-frontend
+
+# Clean up any stale status
+rm -f /data/upgrade-status.json /data/upgrade-requested
+```
+
 ## Notes
 
 - Make sure GHCR images are public or the server is logged in with `podman login ghcr.io`.

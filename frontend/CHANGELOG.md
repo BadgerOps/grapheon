@@ -4,6 +4,24 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.6.0 - 2026-02-06
+### Fixed
+- Legend shape mismatches: Switch now shows vee (was triangle), Server shows round-rectangle (was square), Printer shows rectangle (was square) to match actual Cytoscape node shapes
+- Edge legend colors now update when switching between light and dark mode (`getEdgeLegend(isDark)` replaces static color values)
+- Dark mode default node color changed from #6b7280 to #9ca3af for better visibility against dark backgrounds
+- Dark mode default node border color changed from #9ca3af to #d1d5db for improved contrast
+- `selectedNode` state now clears automatically when map elements change, preventing stale node info panel
+- Added null checks for `containerRef.current` in zoom handlers before accessing `clientWidth`/`clientHeight`
+- Added try/catch around `cytoscape()` constructor in `initCytoscape()` to prevent full page crash on initialization errors
+- Added try/catch around fullscreen resize callback
+- Added null check and warning log in `runLayout()` for invalid layout mode names
+
+### Added
+- `MapErrorBoundary` component: catches Cytoscape rendering errors and shows a fallback UI with retry button instead of crashing the page
+- Inline warning banners in Map page when VLAN, subnet, or route data fails to load (previously only logged to console)
+- Map page no longer renders CytoscapeNetworkMap below a primary error message
+- Shared gateway and gateway border indicators in device legend
+
 ## 0.5.0 - 2026-02-06
 ### Added
 - Map fullscreen toggle using browser Fullscreen API

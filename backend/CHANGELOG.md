@@ -4,6 +4,19 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.6.0 - 2026-02-06
+### Changed
+- Refactored `routers/network.py` (1060+ lines) into `backend/network/` package with 7 extracted modules: constants, validators, styles, queries, nodes, edges, legacy_format
+- Network router is now a slim orchestrator (~325 lines) that delegates to the extracted modules
+- Fixed N+1 port count query: replaced per-host `SELECT COUNT(*)` loop with a single `GROUP BY` batch query in both `/api/network/map` and `/api/network/subnets` endpoints
+- Fixed shared gateway edge bug: gateway-to-subnet edges are now properly separated from node data during node building
+
+### Added
+- Upgrade watcher script (`scripts/grapheon-upgrade.sh`): reads `/data/upgrade-requested`, pulls container images, restarts systemd services, runs health check, writes status to `/data/upgrade-status.json`
+- Systemd path unit (`deploy/grapheon-upgrade.path`): watches for upgrade marker file
+- Systemd service unit (`deploy/grapheon-upgrade.service`): executes upgrade script
+- Updated deployment docs with in-app upgrade installation and rollback instructions
+
 ## 0.5.0 - 2026-02-06
 ### Added
 - `DeviceIdentity` model for non-destructive linking of multi-homed network devices (routers/switches with interfaces on multiple VLANs/subnets)

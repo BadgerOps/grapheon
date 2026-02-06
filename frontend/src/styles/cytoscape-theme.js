@@ -381,8 +381,8 @@ export function getDarkStyles() {
       selector: 'node',
       style: {
         ...baseNodeStyles,
-        'background-color': '#6b7280',
-        'border-color': '#9ca3af',
+        'background-color': '#9ca3af',
+        'border-color': '#d1d5db',
         'border-width': 2,
         'font-size': 11,
         'color': '#e5e7eb',
@@ -719,21 +719,26 @@ export const layoutPresets = {
 
 export const deviceLegend = [
   { type: 'router',      label: 'Router',      color: '#f97316', shape: 'diamond' },
-  { type: 'switch',      label: 'Switch',      color: '#8b5cf6', shape: 'triangle' },
+  { type: 'switch',      label: 'Switch',      color: '#8b5cf6', shape: 'vee' },
   { type: 'firewall',    label: 'Firewall',    color: '#ef4444', shape: 'star' },
-  { type: 'server',      label: 'Server',      color: '#3b82f6', shape: 'square' },
+  { type: 'server',      label: 'Server',      color: '#3b82f6', shape: 'round-rectangle' },
   { type: 'workstation', label: 'Workstation', color: '#22c55e', shape: 'circle' },
-  { type: 'printer',     label: 'Printer',     color: '#ec4899', shape: 'square' },
+  { type: 'printer',     label: 'Printer',     color: '#ec4899', shape: 'rectangle' },
   { type: 'iot',         label: 'IoT',         color: '#06b6d4', shape: 'hexagon' },
   { type: 'unknown',     label: 'Unknown',     color: '#6b7280', shape: 'circle' },
   { type: 'internet',    label: 'Internet',    color: '#0ea5e9', shape: 'circle' },
 ]
 
-export const edgeLegend = [
-  { type: 'same_subnet',  label: 'Same Subnet',  color: '#9ca3af', style: 'solid' },
-  { type: 'cross_subnet', label: 'Cross-Subnet',  color: '#f59e0b', style: 'dashed' },
-  { type: 'cross_vlan',   label: 'Cross-VLAN',    color: '#f97316', style: 'dashed' },
-  { type: 'internet',     label: 'Internet',       color: '#0ea5e9', style: 'solid' },
-  { type: 'route',        label: 'Route Path',    color: '#22c55e', style: 'dotted' },
-  { type: 'to_gateway',   label: 'To Gateway',    color: '#64748b', style: 'solid' },
-]
+export function getEdgeLegend(isDark = false) {
+  return [
+    { type: 'same_subnet',  label: 'Same Subnet',  color: isDark ? '#4b5563' : '#9ca3af', style: 'solid' },
+    { type: 'cross_subnet', label: 'Cross-Subnet',  color: '#f59e0b', style: 'dashed' },
+    { type: 'cross_vlan',   label: 'Cross-VLAN',    color: isDark ? '#fb923c' : '#f97316', style: 'dashed' },
+    { type: 'internet',     label: 'Internet',       color: isDark ? '#38bdf8' : '#0ea5e9', style: 'solid' },
+    { type: 'route',        label: 'Route Path',    color: isDark ? '#4ade80' : '#22c55e', style: 'dotted' },
+    { type: 'to_gateway',   label: 'To Gateway',    color: isDark ? '#64748b' : '#94a3b8', style: 'solid' },
+  ]
+}
+
+// Backward-compatible static export (light mode defaults)
+export const edgeLegend = getEdgeLegend(false)

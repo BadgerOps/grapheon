@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for Grapheon upgrade requests
+Documentation=https://github.com/BadgerOps/grapheon
+
+[Path]
+PathExists=/data/upgrade-requested
+MakeDirectory=yes
+
+[Install]
+WantedBy=multi-user.target

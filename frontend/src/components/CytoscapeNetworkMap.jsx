@@ -4,7 +4,7 @@ import cytoscape from 'cytoscape'
 import dagre from 'cytoscape-dagre'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
-import { getLightStyles, getDarkStyles, layoutPresets, deviceLegend, edgeLegend } from '../styles/cytoscape-theme'
+import { getLightStyles, getDarkStyles, layoutPresets, deviceLegend, getEdgeLegend } from '../styles/cytoscape-theme'
 import { exportMapAsPNG, exportMapAsSVG, toggleFullscreen } from '../services/mapExport'
 
 // Register layout extensions
@@ -63,8 +63,12 @@ export default function CytoscapeNetworkMap({
       // Re-fit the graph when fullscreen changes
       if (cyRef.current) {
         setTimeout(() => {
-          cyRef.current.resize()
-          cyRef.current.fit(40)
+          try {
+            cyRef.current.resize()
+            cyRef.current.fit(40)
+          } catch (err) {
+            console.error('Fullscreen resize failed:', err)
+          }
         }, 100)
       }
     }
@@ -76,6 +80,11 @@ export default function CytoscapeNetworkMap({
   const currentStyle = useMemo(() => {
     return isDarkMode ? getDarkStyles() : getLightStyles()
   }, [isDarkMode])
+
+  // Clear selectedNode when elements change
+  useEffect(() => {
+    setSelectedNode(null)
+  }, [elements])
 
   // ── Initialize Cytoscape ──────────────────────────────────────
   const initCytoscape = useCallback(() => {
@@ -92,17 +101,23 @@ export default function CytoscapeNetworkMap({
 
     if (allNodes.length === 0) return
 
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [...allNodes, ...allEdges],
-      style: currentStyle,
-      layout: { name: 'preset' }, // We'll run layout separately
-      minZoom: 0.1,
-      maxZoom: 5,
-      wheelSensitivity: 0.3,
-      boxSelectionEnabled: true,
-      selectionType: 'single',
-    })
+    let cy
+    try {
+      cy = cytoscape({
+        container: containerRef.current,
+        elements: [...allNodes, ...allEdges],
+        style: currentStyle,
+        layout: { name: 'preset' }, // We'll run layout separately
+        minZoom: 0.1,
+        maxZoom: 5,
+        wheelSensitivity: 0.3,
+        boxSelectionEnabled: true,
+        selectionType: 'single',
+      })
+    } catch (err) {
+      console.error('Failed to initialize Cytoscape:', err)
+      return
+    }
 
     cyRef.current = cy
 
@@ -188,26 +203,39 @@ export default function CytoscapeNetworkMap({
   // ── Re-run layout when mode changes ──────────────────────────
   const runLayout = useCallback((mode) => {
     if (!cyRef.current) return
-    const config = layoutPresets[mode] || layoutPresets.grouped
-    const layout = cyRef.current.layout(config)
-    layout.run()
+    const config = layoutPresets[mode]
+    if (!config) {
+      console.warn(`Unknown layout mode: "${mode}", falling back to grouped`)
+    }
+    try {
+      const layout = cyRef.current.layout(config || layoutPresets.grouped)
+      layout.run()
+    } catch (err) {
+      console.error('Layout failed:', err)
+    }
   }, [])
 
   // ── Control functions ─────────────────────────────────────────
   const handleZoomIn = () => {
-    if (cyRef.current) {
+    if (!cyRef.current || !containerRef.current) return
+    const w = containerRef.current.clientWidth
+    const h = containerRef.current.clientHeight
+    if (w > 0 && h > 0) {
       cyRef.current.zoom({
         level: cyRef.current.zoom() * 1.3,
-        renderedPosition: { x: containerRef.current.clientWidth / 2, y: containerRef.current.clientHeight / 2 }
+        renderedPosition: { x: w / 2, y: h / 2 }
       })
     }
   }
 
   const handleZoomOut = () => {
-    if (cyRef.current) {
+    if (!cyRef.current || !containerRef.current) return
+    const w = containerRef.current.clientWidth
+    const h = containerRef.current.clientHeight
+    if (w > 0 && h > 0) {
       cyRef.current.zoom({
         level: cyRef.current.zoom() / 1.3,
-        renderedPosition: { x: containerRef.current.clientWidth / 2, y: containerRef.current.clientHeight / 2 }
+        renderedPosition: { x: w / 2, y: h / 2 }
       })
     }
   }
@@ -424,29 +452,43 @@ export default function CytoscapeNetworkMap({
           {/* Device types */}
           <h6 className="text-gray-500 dark:text-gray-400 mt-1 mb-1 uppercase tracking-wider" style={{ fontSize: '10px' }}>Devices</h6>
           <div className="space-y-1 mb-3">
-            {deviceLegend.map(({ type, label, color, shape }) => (
-              <div key={type} className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 flex-shrink-0"
-                  style={{
-                    backgroundColor: color,
-                    borderRadius: shape === 'circle' ? '50%' : shape === 'diamond' ? '2px' : '1px',
-                    transform: shape === 'diamond' ? 'rotate(45deg) scale(0.7)' : 'none',
-                    clipPath: shape === 'triangle' ? 'polygon(50% 0%, 0% 100%, 100% 100%)' :
-                              shape === 'star' ? 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' :
-                              shape === 'hexagon' ? 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' :
-                              'none',
-                  }}
-                ></span>
-                <span className="text-gray-600 dark:text-gray-400">{label}</span>
-              </div>
-            ))}
+            {deviceLegend.map(({ type, label, color, shape }) => {
+              const shapeStyle = (() => {
+                switch (shape) {
+                  case 'circle':
+                    return { borderRadius: '50%' }
+                  case 'diamond':
+                    return { borderRadius: '2px', transform: 'rotate(45deg) scale(0.7)' }
+                  case 'vee':
+                    return { clipPath: 'polygon(0% 0%, 50% 100%, 100% 0%, 75% 0%, 50% 60%, 25% 0%)' }
+                  case 'star':
+                    return { clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }
+                  case 'hexagon':
+                    return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' }
+                  case 'round-rectangle':
+                    return { borderRadius: '3px' }
+                  case 'rectangle':
+                    return { borderRadius: '1px' }
+                  default:
+                    return { borderRadius: '1px' }
+                }
+              })()
+              return (
+                <div key={type} className="flex items-center gap-2">
+                  <span
+                    className="w-3 h-3 flex-shrink-0"
+                    style={{ backgroundColor: color, ...shapeStyle }}
+                  ></span>
+                  <span className="text-gray-600 dark:text-gray-400">{label}</span>
+                </div>
+              )
+            })}
           </div>
 
           {/* Edge types */}
           <h6 className="text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wider" style={{ fontSize: '10px' }}>Connections</h6>
           <div className="space-y-1 mb-3">
-            {edgeLegend.map(({ type, label, color, style }) => (
+            {getEdgeLegend(isDarkMode).map(({ type, label, color, style }) => (
               <div key={type} className="flex items-center gap-2">
                 <span
                   className="h-0.5 w-4 flex-shrink-0"

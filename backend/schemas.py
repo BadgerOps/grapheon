@@ -1,9 +1,17 @@
 """
-Pydantic v2 schemas with strict field validation.
+Pydantic v2 schemas with strict input validation and lenient output serialization.
 
-Every network-relevant field (IP, MAC, port, protocol, device_type, etc.)
-is validated at the schema boundary so bad data is rejected early with
-clear, actionable error messages.
+Architecture:
+  - *Fields classes: pure field definitions, no validators.  Shared by both
+    input (Create/Update) and output (Response) schemas.
+  - *Create / *Update classes: inherit from *Fields and ADD strict validators
+    so bad data is rejected early with clear, actionable error messages.
+  - *Response classes: inherit from *Fields directly (no validators) so any
+    data already in the database serializes without crashing.
+
+This separation is critical because parsers write directly to DB models and
+may produce values that were never validated through the API schemas (e.g.
+nmap returns device_type="wireless_ap", netstat returns state="LISTEN").
 """
 
 from datetime import datetime
@@ -11,26 +19,46 @@ from typing import Optional, List
 from ipaddress import ip_address as parse_ip
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# ── Allowed value sets ────────────────────────────────────────────────
+# ── Allowed value sets (for input validation) ────────────────────────
+#
+# These cover every value a user should be able to submit via the API.
+# They also include values the parsers can produce, so that data round-
+# trips cleanly when a user re-submits parser-originated data.
 
 VALID_DEVICE_TYPES = frozenset({
     "router", "switch", "firewall", "server", "workstation",
     "printer", "iot", "phone", "storage", "virtual", "unknown",
+    # Additional types produced by nmap _normalize_device_type()
+    "wireless_ap", "media", "mobile", "terminal",
+    "appliance", "load_balancer", "hub", "bridge", "vpn",
 })
 
 VALID_OS_FAMILIES = frozenset({
     "linux", "windows", "macos", "ios", "android",
     "unix", "bsd", "vmware", "unknown",
+    # Produced by nmap _infer_os_family() for Cisco/Juniper/etc.
+    "network",
 })
 
 VALID_CRITICALITIES = frozenset({"critical", "high", "medium", "low"})
 
-VALID_PROTOCOLS = frozenset({"tcp", "udp", "sctp", "ip"})
+VALID_PROTOCOLS = frozenset({"tcp", "udp", "sctp", "ip", "icmp"})
 
-VALID_PORT_STATES = frozenset({"open", "closed", "filtered", "unfiltered"})
+VALID_PORT_STATES = frozenset({
+    # Nmap scan states
+    "open", "closed", "filtered", "unfiltered",
+    "open|filtered", "closed|filtered",
+})
+
+VALID_CONNECTION_STATES = frozenset({
+    # TCP connection states (netstat / pcap)
+    "listen", "established", "time_wait", "close_wait",
+    "fin_wait1", "fin_wait2", "syn_recv", "syn_sent",
+    "closing", "last_ack", "closed", "unknown",
+})
 
 VALID_SOURCE_TYPES = frozenset({
     "nmap", "arp", "netstat", "ping", "traceroute", "pcap", "manual",
@@ -38,6 +66,7 @@ VALID_SOURCE_TYPES = frozenset({
 
 VALID_IMPORT_TYPES = frozenset({
     "xml", "grep", "json", "text", "csv", "pcap", "raw",
+    "file", "paste",  # set by the import endpoints themselves
 })
 
 # ── Reusable validators ──────────────────────────────────────────────
@@ -93,10 +122,12 @@ def _validate_hostname(value: str) -> str:
     return value
 
 
-# ── Host schemas ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# HOST SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
 
-class HostBase(BaseModel):
-    """Base schema for host creation/update."""
+class HostFields(BaseModel):
+    """Pure field definitions for hosts.  No validators."""
 
     ip_address: str
     ip_v6_address: Optional[str] = None
@@ -119,9 +150,15 @@ class HostBase(BaseModel):
     is_active: bool = True
     source_types: Optional[List[str]] = None
 
+
+class _HostValidators:
+    """Mixin-style validators reused by HostCreate and HostUpdate."""
+
     @field_validator("ip_address")
     @classmethod
-    def validate_ip_address(cls, v: str) -> str:
+    def validate_ip_address(cls, v):
+        if v is None:
+            return v
         return _validate_ip(v, "IP address")
 
     @field_validator("ip_v6_address")
@@ -212,14 +249,13 @@ class HostBase(BaseModel):
         return lower
 
 
-class HostCreate(HostBase):
-    """Schema for creating a host."""
-
+class HostCreate(HostFields, _HostValidators):
+    """Schema for creating a host — fields + strict validation."""
     pass
 
 
-class HostUpdate(BaseModel):
-    """Schema for updating a host (all fields optional)."""
+class HostUpdate(BaseModel, _HostValidators):
+    """Schema for updating a host (all fields optional, with validation)."""
 
     ip_address: Optional[str] = None
     ip_v6_address: Optional[str] = None
@@ -242,101 +278,9 @@ class HostUpdate(BaseModel):
     is_active: Optional[bool] = None
     source_types: Optional[List[str]] = None
 
-    @field_validator("ip_address")
-    @classmethod
-    def validate_ip_address(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        return _validate_ip(v, "IP address")
 
-    @field_validator("ip_v6_address")
-    @classmethod
-    def validate_ipv6(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        try:
-            addr = parse_ip(v)
-        except ValueError:
-            raise ValueError(
-                f"Invalid IPv6 address '{v}'. "
-                "Expected format like 2001:db8::1"
-            )
-        if addr.version != 6:
-            raise ValueError(f"Expected IPv6 address, got IPv4 '{v}'")
-        if addr.is_unspecified:
-            raise ValueError("Unspecified IPv6 address (::) is not allowed")
-        return v
-
-    @field_validator("mac_address")
-    @classmethod
-    def validate_mac(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        return _validate_mac(v)
-
-    @field_validator("hostname")
-    @classmethod
-    def validate_hostname(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        return _validate_hostname(v)
-
-    @field_validator("fqdn")
-    @classmethod
-    def validate_fqdn(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        if len(v) > 255:
-            raise ValueError("FQDN too long. Maximum 255 characters allowed")
-        if not HOSTNAME_RE.match(v):
-            raise ValueError(
-                f"Invalid FQDN '{v}'. "
-                "Use only alphanumeric characters, hyphens, dots, and underscores"
-            )
-        return v
-
-    @field_validator("os_family")
-    @classmethod
-    def validate_os_family(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_OS_FAMILIES:
-            raise ValueError(
-                f"Invalid OS family '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_OS_FAMILIES))}"
-            )
-        return lower
-
-    @field_validator("device_type")
-    @classmethod
-    def validate_device_type(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_DEVICE_TYPES:
-            raise ValueError(
-                f"Invalid device type '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_DEVICE_TYPES))}"
-            )
-        return lower
-
-    @field_validator("criticality")
-    @classmethod
-    def validate_criticality(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_CRITICALITIES:
-            raise ValueError(
-                f"Invalid criticality '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_CRITICALITIES))}"
-            )
-        return lower
-
-
-class HostResponse(HostBase):
-    """Schema for host response."""
+class HostResponse(HostFields):
+    """Schema for host responses — no validators, just serialization."""
 
     id: int
     guid: Optional[str] = None
@@ -345,14 +289,19 @@ class HostResponse(HostBase):
     first_seen: datetime
     last_seen: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── Port schemas ──────────────────────────────────────────────────────
+# ── Backwards compatibility alias ────────────────────────────────────
+HostBase = HostFields
 
-class PortBase(BaseModel):
-    """Base schema for port creation/update."""
+
+# ═══════════════════════════════════════════════════════════════════════
+# PORT SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+class PortFields(BaseModel):
+    """Pure field definitions for ports.  No validators."""
 
     port_number: int = Field(..., ge=0, le=65535)
     protocol: str
@@ -368,9 +317,15 @@ class PortBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     source_types: Optional[List[str]] = None
 
+
+class _PortValidators:
+    """Mixin-style validators reused by PortCreate and PortUpdate."""
+
     @field_validator("protocol")
     @classmethod
-    def validate_protocol(cls, v: str) -> str:
+    def validate_protocol(cls, v):
+        if v is None:
+            return v
         lower = v.lower()
         if lower not in VALID_PROTOCOLS:
             raise ValueError(
@@ -381,7 +336,9 @@ class PortBase(BaseModel):
 
     @field_validator("state")
     @classmethod
-    def validate_state(cls, v: str) -> str:
+    def validate_state(cls, v):
+        if v is None:
+            return v
         lower = v.lower()
         if lower not in VALID_PORT_STATES:
             raise ValueError(
@@ -391,14 +348,13 @@ class PortBase(BaseModel):
         return lower
 
 
-class PortCreate(PortBase):
-    """Schema for creating a port."""
-
+class PortCreate(PortFields, _PortValidators):
+    """Schema for creating a port — fields + strict validation."""
     pass
 
 
-class PortUpdate(BaseModel):
-    """Schema for updating a port."""
+class PortUpdate(BaseModel, _PortValidators):
+    """Schema for updating a port (all fields optional, with validation)."""
 
     port_number: Optional[int] = Field(None, ge=0, le=65535)
     protocol: Optional[str] = None
@@ -414,49 +370,28 @@ class PortUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     source_types: Optional[List[str]] = None
 
-    @field_validator("protocol")
-    @classmethod
-    def validate_protocol(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_PROTOCOLS:
-            raise ValueError(
-                f"Invalid protocol '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_PROTOCOLS))}"
-            )
-        return lower
 
-    @field_validator("state")
-    @classmethod
-    def validate_state(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_PORT_STATES:
-            raise ValueError(
-                f"Invalid port state '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_PORT_STATES))}"
-            )
-        return lower
-
-
-class PortResponse(PortBase):
-    """Schema for port response."""
+class PortResponse(PortFields):
+    """Schema for port responses — no validators, just serialization."""
 
     id: int
     host_id: int
     first_seen: datetime
     last_seen: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── Connection schemas ────────────────────────────────────────────────
+# ── Backwards compatibility alias ────────────────────────────────────
+PortBase = PortFields
 
-class ConnectionBase(BaseModel):
-    """Base schema for connection."""
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONNECTION SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+class ConnectionFields(BaseModel):
+    """Pure field definitions for connections.  No validators."""
 
     local_ip: str
     local_port: int = Field(..., ge=0, le=65535)
@@ -470,21 +405,31 @@ class ConnectionBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     source_type: Optional[str] = None
 
+
+class _ConnectionValidators:
+    """Mixin-style validators for ConnectionCreate."""
+
     @field_validator("local_ip")
     @classmethod
-    def validate_local_ip(cls, v: str) -> str:
+    def validate_local_ip(cls, v):
+        if v is None:
+            return v
         # Connections allow 0.0.0.0 (LISTEN state binds to all interfaces)
         return _validate_ip(v, "local IP address", allow_unspecified=True)
 
     @field_validator("remote_ip")
     @classmethod
-    def validate_remote_ip(cls, v: str) -> str:
+    def validate_remote_ip(cls, v):
+        if v is None:
+            return v
         # Connections allow 0.0.0.0 (LISTEN state has no remote peer)
         return _validate_ip(v, "remote IP address", allow_unspecified=True)
 
     @field_validator("protocol")
     @classmethod
-    def validate_protocol(cls, v: str) -> str:
+    def validate_protocol(cls, v):
+        if v is None:
+            return v
         lower = v.lower()
         if lower not in VALID_PROTOCOLS:
             raise ValueError(
@@ -493,28 +438,45 @@ class ConnectionBase(BaseModel):
             )
         return lower
 
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v):
+        if v is None:
+            return v
+        lower = v.lower()
+        if lower not in VALID_CONNECTION_STATES:
+            raise ValueError(
+                f"Invalid connection state '{v}'. "
+                f"Allowed values: {', '.join(sorted(VALID_CONNECTION_STATES))}"
+            )
+        return lower
 
-class ConnectionCreate(ConnectionBase):
-    """Schema for creating a connection."""
 
+class ConnectionCreate(ConnectionFields, _ConnectionValidators):
+    """Schema for creating a connection — fields + strict validation."""
     pass
 
 
-class ConnectionResponse(ConnectionBase):
-    """Schema for connection response."""
+class ConnectionResponse(ConnectionFields):
+    """Schema for connection responses — no validators, just serialization."""
 
     id: int
     first_seen: datetime
     last_seen: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── ARP Entry schemas ─────────────────────────────────────────────────
+# ── Backwards compatibility alias ────────────────────────────────────
+ConnectionBase = ConnectionFields
 
-class ARPEntryBase(BaseModel):
-    """Base schema for ARP entry."""
+
+# ═══════════════════════════════════════════════════════════════════════
+# ARP ENTRY SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+class ARPEntryFields(BaseModel):
+    """Pure field definitions for ARP entries.  No validators."""
 
     ip_address: str
     mac_address: str
@@ -526,38 +488,50 @@ class ARPEntryBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     source_type: Optional[str] = None
 
+
+class _ARPValidators:
+    """Mixin-style validators for ARPEntryCreate."""
+
     @field_validator("ip_address")
     @classmethod
-    def validate_ip(cls, v: str) -> str:
+    def validate_ip(cls, v):
+        if v is None:
+            return v
         return _validate_ip(v, "IP address")
 
     @field_validator("mac_address")
     @classmethod
-    def validate_mac(cls, v: str) -> str:
+    def validate_mac(cls, v):
+        if v is None:
+            return v
         return _validate_mac(v)
 
 
-class ARPEntryCreate(ARPEntryBase):
-    """Schema for creating an ARP entry."""
-
+class ARPEntryCreate(ARPEntryFields, _ARPValidators):
+    """Schema for creating an ARP entry — fields + strict validation."""
     pass
 
 
-class ARPEntryResponse(ARPEntryBase):
-    """Schema for ARP entry response."""
+class ARPEntryResponse(ARPEntryFields):
+    """Schema for ARP entry responses — no validators, just serialization."""
 
     id: int
     first_seen: datetime
     last_seen: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── Raw import schemas ────────────────────────────────────────────────
+# ── Backwards compatibility alias ────────────────────────────────────
+ARPEntryBase = ARPEntryFields
 
-class RawImportBase(BaseModel):
-    """Base schema for raw import."""
+
+# ═══════════════════════════════════════════════════════════════════════
+# RAW IMPORT SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+class RawImportFields(BaseModel):
+    """Pure field definitions for raw imports.  No validators."""
 
     source_type: str
     import_type: str
@@ -567,9 +541,15 @@ class RawImportBase(BaseModel):
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
 
+
+class _RawImportValidators:
+    """Mixin-style validators for RawImportCreate."""
+
     @field_validator("source_type")
     @classmethod
-    def validate_source_type(cls, v: str) -> str:
+    def validate_source_type(cls, v):
+        if v is None:
+            return v
         lower = v.lower()
         if lower not in VALID_SOURCE_TYPES:
             raise ValueError(
@@ -580,7 +560,9 @@ class RawImportBase(BaseModel):
 
     @field_validator("import_type")
     @classmethod
-    def validate_import_type(cls, v: str) -> str:
+    def validate_import_type(cls, v):
+        if v is None:
+            return v
         lower = v.lower()
         if lower not in VALID_IMPORT_TYPES:
             raise ValueError(
@@ -591,7 +573,9 @@ class RawImportBase(BaseModel):
 
     @field_validator("raw_data")
     @classmethod
-    def validate_raw_data(cls, v: str) -> str:
+    def validate_raw_data(cls, v):
+        if v is None:
+            return v
         if not v or not v.strip():
             raise ValueError("Raw data cannot be empty")
         if len(v.encode("utf-8", errors="replace")) > RAW_DATA_MAX_BYTES:
@@ -621,14 +605,13 @@ class RawImportBase(BaseModel):
         return v
 
 
-class RawImportCreate(RawImportBase):
-    """Schema for creating a raw import."""
-
+class RawImportCreate(RawImportFields, _RawImportValidators):
+    """Schema for creating a raw import — fields + strict validation."""
     pass
 
 
-class RawImportResponse(RawImportBase):
-    """Schema for raw import response."""
+class RawImportResponse(RawImportFields):
+    """Schema for raw import responses — no validators, just serialization."""
 
     id: int
     parse_status: str
@@ -637,14 +620,19 @@ class RawImportResponse(RawImportBase):
     created_at: datetime
     processed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── Device Identity schemas ───────────────────────────────────────────
+# ── Backwards compatibility alias ────────────────────────────────────
+RawImportBase = RawImportFields
 
-class DeviceIdentityBase(BaseModel):
-    """Base schema for device identity."""
+
+# ═══════════════════════════════════════════════════════════════════════
+# DEVICE IDENTITY SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+class DeviceIdentityFields(BaseModel):
+    """Pure field definitions for device identities.  No validators."""
 
     name: Optional[str] = Field(None, max_length=255)
     device_type: Optional[str] = None
@@ -653,6 +641,10 @@ class DeviceIdentityBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     source: Optional[str] = None
     is_active: bool = True
+
+
+class _DeviceIdentityValidators:
+    """Mixin-style validators for DeviceIdentityCreate/Update."""
 
     @field_validator("device_type")
     @classmethod
@@ -696,13 +688,12 @@ class DeviceIdentityBase(BaseModel):
         return v
 
 
-class DeviceIdentityCreate(DeviceIdentityBase):
-    """Schema for creating a device identity."""
-
+class DeviceIdentityCreate(DeviceIdentityFields, _DeviceIdentityValidators):
+    """Schema for creating a device identity — fields + strict validation."""
     pass
 
 
-class DeviceIdentityUpdate(BaseModel):
+class DeviceIdentityUpdate(BaseModel, _DeviceIdentityValidators):
     """Schema for updating a device identity (all fields optional)."""
 
     name: Optional[str] = Field(None, max_length=255)
@@ -713,50 +704,9 @@ class DeviceIdentityUpdate(BaseModel):
     source: Optional[str] = None
     is_active: Optional[bool] = None
 
-    @field_validator("device_type")
-    @classmethod
-    def validate_device_type(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        lower = v.lower()
-        if lower not in VALID_DEVICE_TYPES:
-            raise ValueError(
-                f"Invalid device type '{v}'. "
-                f"Allowed values: {', '.join(sorted(VALID_DEVICE_TYPES))}"
-            )
-        return lower
 
-    @field_validator("mac_addresses")
-    @classmethod
-    def validate_mac_list(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        if v is None:
-            return v
-        for i, mac in enumerate(v):
-            if not MAC_RE.match(mac):
-                raise ValueError(
-                    f"Invalid MAC address at index {i}: '{mac}'. "
-                    "Expected format XX:XX:XX:XX:XX:XX"
-                )
-        return v
-
-    @field_validator("ip_addresses")
-    @classmethod
-    def validate_ip_list(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        if v is None:
-            return v
-        for i, ip in enumerate(v):
-            try:
-                parse_ip(ip)
-            except ValueError:
-                raise ValueError(
-                    f"Invalid IP address at index {i}: '{ip}'. "
-                    "Expected valid IPv4 or IPv6 address"
-                )
-        return v
-
-
-class DeviceIdentityResponse(DeviceIdentityBase):
-    """Schema for device identity response."""
+class DeviceIdentityResponse(DeviceIdentityFields):
+    """Schema for device identity responses — no validators."""
 
     id: int
     guid: Optional[str] = None
@@ -764,8 +714,11 @@ class DeviceIdentityResponse(DeviceIdentityBase):
     last_seen: datetime
     host_count: Optional[int] = None  # Number of linked hosts
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ── Backwards compatibility alias ────────────────────────────────────
+DeviceIdentityBase = DeviceIdentityFields
 
 
 class LinkHostsRequest(BaseModel):
@@ -774,7 +727,9 @@ class LinkHostsRequest(BaseModel):
     host_ids: List[int]
 
 
-# ── Pagination schemas ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# PAGINATION SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
 
 class PaginationParams(BaseModel):
     """Query parameters for pagination."""

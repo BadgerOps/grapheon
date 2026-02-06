@@ -393,3 +393,35 @@ export async function triggerUpgrade() {
 export async function getUpgradeStatus() {
   return apiCall('GET', '/updates/status')
 }
+
+// ============================================
+// Device Identities endpoints
+// ============================================
+
+export async function getDeviceIdentities(params = {}) {
+  return apiCall('GET', '/device-identities', null, params)
+}
+
+export async function getDeviceIdentity(id) {
+  return apiCall('GET', `/device-identities/${id}`)
+}
+
+export async function createDeviceIdentity(data) {
+  return apiCall('POST', '/device-identities', data)
+}
+
+export async function updateDeviceIdentity(id, data) {
+  return apiCall('PUT', `/device-identities/${id}`, data)
+}
+
+export async function deleteDeviceIdentity(id) {
+  return apiCall('DELETE', `/device-identities/${id}`)
+}
+
+export async function linkHostsToDevice(deviceId, hostIds) {
+  return apiCall('POST', `/device-identities/${deviceId}/link-hosts`, { host_ids: hostIds })
+}
+
+export async function unlinkHostFromDevice(deviceId, hostId) {
+  return apiCall('POST', `/device-identities/${deviceId}/unlink-host/${hostId}`)
+}

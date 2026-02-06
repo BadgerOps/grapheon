@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
-from models import Host, Port, Connection, ARPEntry, Conflict
+from models import Host, Port, Connection, ARPEntry, Conflict, DeviceIdentity
 from utils.tagging import merge_tags
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,71 @@ class CorrelationResult:
     conflicts_detected: int
     conflicts_resolved: int
     hosts_updated: int
+    device_identities_created: int
     timestamp: datetime
+
+
+async def create_device_identity_from_mac(
+    db: AsyncSession,
+    mac_address: str,
+    hosts: List[Host],
+) -> DeviceIdentity:
+    """
+    Create a DeviceIdentity for hosts sharing the same MAC (multi-homed device).
+
+    Instead of merging these hosts (which would lose per-subnet identity),
+    we link them via device_id to indicate they're the same physical box.
+    """
+    # Check if a DeviceIdentity already exists for this MAC
+    result = await db.execute(
+        select(DeviceIdentity).where(
+            DeviceIdentity.is_active.is_(True)
+        )
+    )
+    existing_devices = result.scalars().all()
+    for dev in existing_devices:
+        if dev.mac_addresses and mac_address in dev.mac_addresses:
+            # Already exists — update IP list and link new hosts
+            existing_ips = set(dev.ip_addresses or [])
+            for host in hosts:
+                existing_ips.add(host.ip_address)
+                host.device_id = dev.id
+            dev.ip_addresses = sorted(existing_ips)
+            dev.last_seen = datetime.utcnow()
+            return dev
+
+    # Infer device type from hosts
+    device_types = set(h.device_type for h in hosts if h.device_type)
+    inferred_type = device_types.pop() if len(device_types) == 1 else "router"
+
+    # Collect all IPs
+    ips = sorted(set(h.ip_address for h in hosts))
+
+    # Build a useful name from hostname or IPs
+    hostnames = [h.hostname for h in hosts if h.hostname]
+    name = hostnames[0] if hostnames else f"Device ({mac_address})"
+
+    device = DeviceIdentity(
+        name=name,
+        device_type=inferred_type,
+        mac_addresses=[mac_address],
+        ip_addresses=ips,
+        source="mac_correlation",
+        is_active=True,
+    )
+    db.add(device)
+    await db.flush()  # Get the ID assigned
+
+    # Link all hosts to this device identity
+    for host in hosts:
+        host.device_id = device.id
+
+    logger.info(
+        f"Created DeviceIdentity {device.id} for MAC {mac_address}: "
+        f"{len(hosts)} hosts ({', '.join(ips)})"
+    )
+
+    return device
 
 
 async def correlate_hosts(db: AsyncSession) -> CorrelationResult:
@@ -99,6 +163,7 @@ async def correlate_hosts(db: AsyncSession) -> CorrelationResult:
     conflicts_detected = 0
     conflicts_resolved = 0
     hosts_updated = 0
+    device_identities_created = 0
     start_time = datetime.utcnow()
 
     # Get all active hosts
@@ -122,22 +187,37 @@ async def correlate_hosts(db: AsyncSession) -> CorrelationResult:
                 await merge_hosts(db, primary_host.id, secondary_host.id)
                 hosts_merged += 1
 
-    # Phase 2: Merge hosts with same MAC but different IP
+    # Phase 2: Device Identity Detection + duplicate MAC merge
+    # When same MAC appears on multiple hosts with DIFFERENT IPs,
+    # create a DeviceIdentity to link them (non-destructive).
+    # When same MAC has multiple hosts with SAME IP, merge (true duplicates).
     mac_groups = {}
     for host in hosts:
         if host.mac_address and host.is_active:
-            if host.mac_address not in mac_groups:
-                mac_groups[host.mac_address] = []
-            mac_groups[host.mac_address].append(host)
+            mac_key = host.mac_address.lower()
+            if mac_key not in mac_groups:
+                mac_groups[mac_key] = []
+            mac_groups[mac_key].append(host)
 
     for mac, host_list in mac_groups.items():
         if len(host_list) > 1:
-            logger.info(f"Found {len(host_list)} hosts with same MAC {mac}")
-            primary_host = host_list[0]
-            for secondary_host in host_list[1:]:
-                if secondary_host.is_active and secondary_host.ip_address != primary_host.ip_address:
-                    await merge_hosts(db, primary_host.id, secondary_host.id)
-                    hosts_merged += 1
+            unique_ips = set(h.ip_address for h in host_list)
+            if len(unique_ips) > 1:
+                # Different IPs, same MAC = multi-homed device
+                # Don't merge — create/update DeviceIdentity
+                logger.info(
+                    f"Multi-homed device detected: MAC {mac} has {len(unique_ips)} IPs: "
+                    f"{', '.join(sorted(unique_ips))}"
+                )
+                await create_device_identity_from_mac(db, mac, host_list)
+                device_identities_created += 1
+            else:
+                # Same IP and MAC = true duplicate host records — merge them
+                primary_host = host_list[0]
+                for secondary_host in host_list[1:]:
+                    if secondary_host.is_active:
+                        await merge_hosts(db, primary_host.id, secondary_host.id)
+                        hosts_merged += 1
 
     # Phase 3: Merge hosts by high-confidence tags
     result = await db.execute(select(Host).where(Host.is_active.is_(True)))
@@ -270,11 +350,13 @@ async def correlate_hosts(db: AsyncSession) -> CorrelationResult:
         conflicts_detected=conflicts_detected,
         conflicts_resolved=conflicts_resolved,
         hosts_updated=hosts_updated,
+        device_identities_created=device_identities_created,
         timestamp=end_time,
     )
 
     logger.info(
         f"Correlation completed: {hosts_merged} merged, "
+        f"{device_identities_created} device identities created, "
         f"{conflicts_detected} conflicts detected, "
         f"duration: {(end_time - start_time).total_seconds()}s"
     )

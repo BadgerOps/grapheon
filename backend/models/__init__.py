@@ -6,5 +6,16 @@ from .raw_import import RawImport
 from .conflict import Conflict
 from .route_hop import RouteHop
 from .vlan_config import VLANConfig
+from .device_identity import DeviceIdentity
 
-__all__ = ["Host", "Port", "Connection", "ARPEntry", "RawImport", "Conflict", "RouteHop", "VLANConfig"]
+__all__ = [
+    "Host",
+    "Port",
+    "Connection",
+    "ARPEntry",
+    "RawImport",
+    "Conflict",
+    "RouteHop",
+    "VLANConfig",
+    "DeviceIdentity",
+]

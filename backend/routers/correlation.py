@@ -53,10 +53,12 @@ async def run_correlation(
                 "conflicts_detected": result.conflicts_detected,
                 "conflicts_resolved": result.conflicts_resolved,
                 "hosts_updated": result.hosts_updated,
+                "device_identities_created": result.device_identities_created,
                 "timestamp": result.timestamp.isoformat(),
             },
             "message": (
                 f"Correlation completed: {result.hosts_merged} hosts merged, "
+                f"{result.device_identities_created} device identities created, "
                 f"{result.conflicts_detected} conflicts detected"
             ),
         }

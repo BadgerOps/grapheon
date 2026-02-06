@@ -238,6 +238,48 @@ export function getLightStyles() {
       }
     },
 
+    // Public IPs compound node
+    {
+      selector: 'node[type="public_ips"]',
+      style: {
+        'background-color': '#0ea5e9',
+        'background-opacity': 0.08,
+        'border-color': '#0284c7',
+        'border-width': 3,
+        'border-style': 'dashed',
+        'label': 'data(label)',
+        'font-size': 14,
+        'font-weight': 'bold',
+        'text-halign': 'center',
+        'text-valign': 'top',
+        'color': '#0c4a6e',
+        'padding': '20px',
+      }
+    },
+    // Shared gateway node (multi-homed router)
+    {
+      selector: 'node[?is_shared_gateway]',
+      style: {
+        'background-color': '#f97316',
+        'border-color': '#c2410c',
+        'border-width': 4,
+        'shape': 'diamond',
+        'width': 55,
+        'height': 55,
+        'font-weight': 'bold',
+        'font-size': 11,
+      }
+    },
+    // Public IP host nodes
+    {
+      selector: 'node[?is_public]',
+      style: {
+        'background-color': '#0ea5e9',
+        'border-color': '#0284c7',
+        'border-width': 2,
+      }
+    },
+
     // ── Synthetic gateway node ──────────────────────────────
     {
       selector: 'node[?is_synthetic]',
@@ -493,6 +535,48 @@ export function getDarkStyles() {
       }
     },
 
+    // Public IPs compound node (dark)
+    {
+      selector: 'node[type="public_ips"]',
+      style: {
+        'background-color': '#0ea5e9',
+        'background-opacity': 0.15,
+        'border-color': '#38bdf8',
+        'border-width': 3,
+        'border-style': 'dashed',
+        'label': 'data(label)',
+        'font-size': 14,
+        'font-weight': 'bold',
+        'text-halign': 'center',
+        'text-valign': 'top',
+        'color': '#7dd3fc',
+        'padding': '20px',
+      }
+    },
+    // Shared gateway node (dark)
+    {
+      selector: 'node[?is_shared_gateway]',
+      style: {
+        'background-color': '#f97316',
+        'border-color': '#fb923c',
+        'border-width': 4,
+        'shape': 'diamond',
+        'width': 55,
+        'height': 55,
+        'font-weight': 'bold',
+        'font-size': 11,
+      }
+    },
+    // Public IP host nodes (dark)
+    {
+      selector: 'node[?is_public]',
+      style: {
+        'background-color': '#0ea5e9',
+        'border-color': '#38bdf8',
+        'border-width': 2,
+      }
+    },
+
     // ── Synthetic gateway node ──────────────────────────────
     {
       selector: 'node[?is_synthetic]',
@@ -642,6 +726,7 @@ export const deviceLegend = [
   { type: 'printer',     label: 'Printer',     color: '#ec4899', shape: 'square' },
   { type: 'iot',         label: 'IoT',         color: '#06b6d4', shape: 'hexagon' },
   { type: 'unknown',     label: 'Unknown',     color: '#6b7280', shape: 'circle' },
+  { type: 'internet',    label: 'Internet',    color: '#0ea5e9', shape: 'circle' },
 ]
 
 export const edgeLegend = [
@@ -650,4 +735,5 @@ export const edgeLegend = [
   { type: 'cross_vlan',   label: 'Cross-VLAN',    color: '#f97316', style: 'dashed' },
   { type: 'internet',     label: 'Internet',       color: '#0ea5e9', style: 'solid' },
   { type: 'route',        label: 'Route Path',    color: '#22c55e', style: 'dotted' },
+  { type: 'to_gateway',   label: 'To Gateway',    color: '#64748b', style: 'solid' },
 ]

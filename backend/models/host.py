@@ -38,6 +38,9 @@ class Host(Base):
     # VLAN assignment
     vlan_id = Column(Integer, nullable=True, index=True)  # 802.1Q VLAN ID (0-4094)
     vlan_name = Column(String(32), nullable=True)  # e.g., "DMZ", "Internal", "Guest"
+
+    # Device identity — links multi-homed hosts to the same physical device
+    device_id = Column(Integer, nullable=True, index=True)  # FK to device_identities.id
     criticality = Column(String(20), nullable=True)  # low/medium/high/critical
     owner = Column(String(255), nullable=True)
     location = Column(String(255), nullable=True)

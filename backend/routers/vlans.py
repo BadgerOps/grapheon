@@ -14,6 +14,7 @@ from sqlalchemy import select, func
 
 from database import get_db
 from models import VLANConfig, Host
+from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ async def create_vlan(
     await db.refresh(vlan)
 
     logger.info(f"Created VLAN {vlan_id} ({vlan_name}) with subnets: {cidrs}")
+    audit.log_vlan_change(operation="create", vlan_id=vlan.vlan_id, vlan_name=vlan.vlan_name)
 
     return {
         "status": "created",
@@ -188,6 +190,7 @@ async def update_vlan(
     await db.commit()
 
     logger.info(f"Updated VLAN {vlan_id}")
+    audit.log_vlan_change(operation="update", vlan_id=vlan_id, vlan_name=vlan.vlan_name)
 
     return {
         "status": "updated",
@@ -225,6 +228,7 @@ async def delete_vlan(
     await db.commit()
 
     logger.info(f"Deleted VLAN {vlan_id}, cleared {len(hosts)} host assignments")
+    audit.log_vlan_change(operation="delete", vlan_id=vlan.vlan_id, vlan_name=vlan.vlan_name)
 
     return {
         "status": "deleted",

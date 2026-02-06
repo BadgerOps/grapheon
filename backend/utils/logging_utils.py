@@ -60,9 +60,13 @@ class ColoredFormatter(logging.Formatter):
         return f"{timestamp} | {level_str} | {location:30} | {message}{extra_str}"
 
 
-def setup_logging(level: str = "DEBUG") -> None:
+def setup_logging(level: str = "INFO") -> None:
     """
     Set up enhanced logging configuration.
+
+    The 'audit' logger gets its own plain-JSON handler so structured
+    audit events are easy to grep/parse.  It does **not** propagate
+    to the root logger to avoid duplication.
 
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -80,6 +84,15 @@ def setup_logging(level: str = "DEBUG") -> None:
     # Configure root logger
     root.setLevel(getattr(logging, level.upper()))
     root.addHandler(handler)
+
+    # ── Audit logger: plain JSON to stdout, no duplication ────────
+    audit_logger = logging.getLogger("audit")
+    audit_logger.handlers.clear()
+    audit_handler = logging.StreamHandler(sys.stdout)
+    audit_handler.setFormatter(logging.Formatter("%(message)s"))
+    audit_handler.setLevel(logging.INFO)
+    audit_logger.addHandler(audit_handler)
+    audit_logger.propagate = False
 
     # Set specific loggers
     logging.getLogger('uvicorn').setLevel(logging.INFO)

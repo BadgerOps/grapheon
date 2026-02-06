@@ -21,6 +21,7 @@ from schemas import (
     DeviceIdentityUpdate,
     LinkHostsRequest,
 )
+from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ async def create_device_identity(
         await db.refresh(device)
 
         logger.info(f"Created device identity {device.id}: {device.name}")
+        audit.log_device_identity_change(operation="create", device_id=device.id, device_name=device.name)
 
         return {
             "success": True,
@@ -305,6 +307,7 @@ async def link_hosts_to_device(
         await db.commit()
 
         logger.info(f"Linked {linked} hosts to device identity {device_id}")
+        audit.log_device_identity_change(operation="link_hosts", device_id=device_id, host_ids=data.host_ids)
 
         return {
             "success": True,
@@ -345,6 +348,7 @@ async def unlink_host_from_device(
         await db.commit()
 
         logger.info(f"Unlinked host {host_id} from device identity {device_id}")
+        audit.log_device_identity_change(operation="unlink_host", device_id=device_id)
 
         return {
             "success": True,

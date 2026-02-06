@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import frontendChangelog from '../../CHANGELOG.md?raw'
 import { version as frontendVersion } from '../../package.json'
 import * as api from '../api/client'
@@ -95,9 +97,11 @@ export default function Changelog() {
                 <p className="text-sm text-gray-500 dark:text-gray-400">React + Vite + Tailwind CSS</p>
               </div>
             </div>
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200 font-mono leading-relaxed">
-              {frontendChangelog}
-            </pre>
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {frontendChangelog}
+              </ReactMarkdown>
+            </div>
           </div>
         ) : (
           <div>
@@ -117,9 +121,11 @@ export default function Changelog() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
               </div>
             ) : (
-              <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200 font-mono leading-relaxed">
-                {backendInfo.changelog}
-              </pre>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {backendInfo.changelog}
+                </ReactMarkdown>
+              </div>
             )}
           </div>
         )}

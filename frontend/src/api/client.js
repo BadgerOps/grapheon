@@ -382,8 +382,8 @@ export async function getBackendInfo() {
 // Update check endpoints
 // ============================================
 
-export async function checkForUpdates() {
-  return apiCall('GET', '/updates')
+export async function checkForUpdates(force = false) {
+  return apiCall('GET', '/updates', null, force ? { force: true } : null)
 }
 
 export async function triggerUpgrade() {

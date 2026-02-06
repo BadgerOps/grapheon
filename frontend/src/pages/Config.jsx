@@ -59,7 +59,7 @@ export default function Config() {
     try {
       setLoading(prev => ({ ...prev, updateCheck: true }))
       setError('')
-      const data = await api.checkForUpdates()
+      const data = await api.checkForUpdates(true)
       setUpdateInfo(data)
       setShowUpdateModal(true)
       setUpgradeStep(null)

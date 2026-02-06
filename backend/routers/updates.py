@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
 
@@ -153,19 +153,21 @@ def _get_release_info(releases: list[dict], tag_name: str) -> Optional[dict]:
 
 
 @router.get("")
-async def check_updates():
+async def check_updates(
+    force: bool = Query(False, description="Bypass the cache and fetch fresh data from GitHub"),
+):
     """
     Check for available updates.
 
     Queries GitHub releases API to find the latest backend and frontend versions.
-    Caches results for 1 hour.
+    Caches results for 1 hour unless force=true.
 
     Returns update availability status with version info and release notes.
     """
-    logger.info("Checking for available updates")
+    logger.info(f"Checking for available updates (force={force})")
 
-    # Try to use cached data first
-    cached = _get_cached_releases()
+    # Try to use cached data first (skip if force refresh)
+    cached = None if force else _get_cached_releases()
 
     if cached is not None:
         releases = cached

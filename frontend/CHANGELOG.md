@@ -4,6 +4,11 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.4.1 - 2026-02-06
+### Fixed
+- "Check for Updates" button in Settings now bypasses the server-side release cache, so manual checks always query GitHub for the latest version instead of returning stale cached results
+- `checkForUpdates()` API client now accepts an optional `force` parameter; the Settings button passes `force=true` while the auto-poll UpdateBanner continues using the cached path to avoid GitHub rate-limiting
+
 ## 0.4.0 - 2026-02-06
 ### Added
 - **Import Backup** button in Settings > Database Backup & Restore section

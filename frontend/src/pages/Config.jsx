@@ -24,11 +24,15 @@ export default function Config() {
     restore: false,
     cleanup: false,
     updateCheck: false,
+    upload: false,
+    seed: false,
   })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [cleanupDays, setCleanupDays] = useState(90)
   const [cleanupPreview, setCleanupPreview] = useState(null)
+  const uploadInputRef = useRef(null)
+  const [seedOutput, setSeedOutput] = useState(null)
 
   // Update check state
   const [updateInfo, setUpdateInfo] = useState(null)
@@ -214,6 +218,54 @@ export default function Config() {
       fetchBackups()
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  const handleUploadBackup = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.db')) {
+      setError('Invalid file type. Only .db (SQLite database) files are accepted.')
+      return
+    }
+
+    try {
+      setLoading(prev => ({ ...prev, upload: true }))
+      setError('')
+      const result = await api.uploadBackup(file)
+      setSuccess(`Backup uploaded: ${result.filename} (${formatBytes(result.size_bytes)})`)
+      setTimeout(() => setSuccess(''), 5000)
+      fetchBackups()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(prev => ({ ...prev, upload: false }))
+      // Reset file input so the same file can be re-selected
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+    }
+  }
+
+  const handleSeedDemoData = async (append = false) => {
+    const action = append
+      ? 'add demo data to your existing data'
+      : 'replace ALL existing data with demo data'
+    if (!window.confirm(`This will ${action}. Continue?`)) {
+      return
+    }
+    try {
+      setLoading(prev => ({ ...prev, seed: true }))
+      setError('')
+      setSeedOutput(null)
+      const result = await api.seedDemoData(append)
+      setSeedOutput(result.output)
+      setSuccess(result.message)
+      setTimeout(() => setSuccess(''), 8000)
+      fetchStats()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(prev => ({ ...prev, seed: false }))
     }
   }
 
@@ -582,7 +634,7 @@ export default function Config() {
             Database Backup & Restore
           </h2>
           <div className="space-y-4">
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               <button
                 onClick={handleCreateBackup}
                 disabled={loading.backup}
@@ -602,6 +654,36 @@ export default function Config() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
                     Create Backup
+                  </>
+                )}
+              </button>
+
+              <input
+                type="file"
+                ref={uploadInputRef}
+                accept=".db"
+                onChange={handleUploadBackup}
+                className="hidden"
+              />
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={loading.upload}
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 text-white rounded-md transition-colors flex items-center gap-2"
+              >
+                {loading.upload ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Import Backup
                   </>
                 )}
               </button>
@@ -665,6 +747,77 @@ export default function Config() {
               )}
             </div>
           </div>
+        </section>
+
+        {/* Demo Data Generation */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+            </svg>
+            Test Data Generation
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Generate a realistic demo network with 6 VLANs, ~48 hosts, ports, connections, ARP entries, and traceroute data for testing and demonstration purposes.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => handleSeedDemoData(false)}
+              disabled={loading.seed}
+              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 dark:disabled:bg-purple-800 text-white rounded-md transition-colors flex items-center gap-2"
+            >
+              {loading.seed ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                  </svg>
+                  Generate Fresh Data
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => handleSeedDemoData(true)}
+              disabled={loading.seed}
+              className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 dark:disabled:bg-indigo-800 text-white rounded-md transition-colors flex items-center gap-2"
+            >
+              {loading.seed ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                  Append to Existing
+                </>
+              )}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
+            <strong>Generate Fresh</strong> clears all data first. <strong>Append</strong> adds demo data alongside your existing records.
+          </p>
+
+          {seedOutput && (
+            <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg">
+              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2 text-sm">Script Output</h4>
+              <pre className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
+                {seedOutput}
+              </pre>
+            </div>
+          )}
         </section>
 
         {/* Data Cleanup */}

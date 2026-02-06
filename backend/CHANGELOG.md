@@ -4,6 +4,11 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.4.1 - 2026-02-06
+### Fixed
+- "Check for Updates" button now bypasses the 1-hour server-side release cache so manual checks always fetch fresh data from GitHub instead of returning stale cached results
+- Added `force` query parameter to `GET /api/updates` endpoint; when `true`, skips the in-memory release cache and queries the GitHub Releases API directly
+
 ## 0.4.0 - 2026-02-06
 ### Added
 - Backup upload endpoint (`POST /api/maintenance/backup/upload`): accepts `.db` file uploads from the browser, saves to the server's backup directory, and makes them available for restore

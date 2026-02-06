@@ -10,6 +10,7 @@ import Connections from './pages/Connections'
 import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
 import Config from './pages/Config'
+import UpdateBanner from './components/UpdateBanner'
 import { version as frontendVersion } from '../package.json'
 import * as api from './api/client'
 
@@ -224,6 +225,9 @@ export default function App() {
           </div>
         </div>
       </nav>
+
+      {/* Update notification banner */}
+      <UpdateBanner />
 
       {/* Main Content */}
       <main className="flex-1">

@@ -67,14 +67,15 @@ class ArpParser(BaseParser):
             if re.match(r"\s*Internet Address\s+Physical Address\s+Type", line):
                 return "windows"
 
-            # macOS format: "? (192.168.1.1) at 0:11:22:33:44:55 on en0 ifscope"
-            # Must check before Linux because Linux pattern also matches ?
+            # Both Linux and macOS can start with "?" for unresolved hostnames.
+            # Disambiguate using type markers: Linux uses [ether], macOS uses [ethernet] or ifscope.
             if re.match(r"\?\s+\([\d.]+\)\s+at\s+", line):
-                return "macos"
-
-            # Alternative check: presence of "ifscope" and "ethernet" keywords suggests macOS
-            if "ifscope" in line and "[ethernet]" in line:
-                return "macos"
+                if "[ether]" in line and "ifscope" not in line:
+                    return "linux"
+                if "ifscope" in line or "[ethernet]" in line:
+                    return "macos"
+                # Default to linux for ? lines without clear macOS markers
+                return "linux"
 
             # Linux arp -a format: "router (192.168.1.1) at 00:11:22:33:44:55"
             # Note: Character class excludes ? to avoid matching macOS
@@ -316,6 +317,9 @@ class ArpParser(BaseParser):
 
         # Remove any whitespace
         mac = mac.strip()
+
+        # Strip trailing type markers like [ether], [ethernet]
+        mac = re.sub(r'\s*\[.*\]', '', mac)
 
         # Replace dashes with colons
         mac = mac.replace("-", ":")

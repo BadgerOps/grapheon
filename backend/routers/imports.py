@@ -148,224 +148,239 @@ async def _process_import(
 
         records_created = 0
 
-        # Process hosts and their ports
-        for parsed_host in result.hosts:
-            logger.debug(f"Processing host: {parsed_host.ip_address} with {len(parsed_host.ports)} ports")
-            # Check if host already exists by IP
-            existing = await db.execute(
-                select(Host).where(Host.ip_address == parsed_host.ip_address)
-            )
-            host = existing.scalar_one_or_none()
-
-            if host:
-                if not host.guid:
-                    host.guid = _generate_guid()
-                # Update existing host with new data
-                if parsed_host.mac_address and not host.mac_address:
-                    host.mac_address = parsed_host.mac_address
-                if parsed_host.hostname and not host.hostname:
-                    host.hostname = parsed_host.hostname
-                if parsed_host.vendor and not host.vendor:
-                    host.vendor = parsed_host.vendor
-                if parsed_host.os_name and not host.os_name:
-                    host.os_name = parsed_host.os_name
-                if parsed_host.os_family and not host.os_family:
-                    host.os_family = parsed_host.os_family
-                if parsed_host.os_confidence and (not host.os_confidence or parsed_host.os_confidence > host.os_confidence):
-                    host.os_confidence = parsed_host.os_confidence
-                    host.os_name = parsed_host.os_name
-                if parsed_host.device_type and not host.device_type:
-                    host.device_type = parsed_host.device_type
-
-                # Update source_types
-                current_sources = host.source_types or []
-                if source_type not in current_sources:
-                    host.source_types = current_sources + [source_type]
-
-                host.last_seen = datetime.utcnow()
-                host.tags = merge_tags(
-                    host.tags,
-                    build_host_tags(
-                        ip_address=host.ip_address,
-                        mac_address=host.mac_address,
-                        hostname=host.hostname,
-                        fqdn=host.fqdn,
-                        vendor=host.vendor,
-                        os_family=host.os_family,
-                        os_name=host.os_name,
-                    ),
-                )
-            else:
-                # Create new host
-                host = Host(
-                    ip_address=parsed_host.ip_address,
-                    mac_address=parsed_host.mac_address,
-                    hostname=parsed_host.hostname,
-                    fqdn=parsed_host.fqdn,
-                    vendor=parsed_host.vendor,
-                    os_name=parsed_host.os_name,
-                    os_version=parsed_host.os_version,
-                    os_family=parsed_host.os_family,
-                    os_confidence=parsed_host.os_confidence,
-                    device_type=parsed_host.device_type,
-                    source_types=[source_type],
-                    guid=_generate_guid(),
-                    first_seen=datetime.utcnow(),
-                    last_seen=datetime.utcnow(),
-                )
-                host.tags = build_host_tags(
-                    ip_address=host.ip_address,
-                    mac_address=host.mac_address,
-                    hostname=host.hostname,
-                    fqdn=host.fqdn,
-                    vendor=host.vendor,
-                    os_family=host.os_family,
-                    os_name=host.os_name,
-                )
-                db.add(host)
-                records_created += 1
-
-            await db.flush()  # Get host.id for port foreign key
-            logger.debug(f"Host flushed with id={host.id}, processing {len(parsed_host.ports)} ports")
-
-            # Process ports for this host
-            for parsed_port in parsed_host.ports:
-                logger.debug(f"Processing port {parsed_port.port_number}/{parsed_port.protocol}")
-                # Check if port already exists
-                existing_port = await db.execute(
-                    select(Port).where(
-                        Port.host_id == host.id,
-                        Port.port_number == parsed_port.port_number,
-                        Port.protocol == parsed_port.protocol,
+        # Use a savepoint so DB errors (IntegrityError, etc.) only roll back
+        # the parsed records, not the import_record itself.
+        try:
+            async with db.begin_nested():
+                # Process hosts and their ports
+                for parsed_host in result.hosts:
+                    logger.debug(f"Processing host: {parsed_host.ip_address} with {len(parsed_host.ports)} ports")
+                    # Check if host already exists by IP
+                    existing = await db.execute(
+                        select(Host).where(Host.ip_address == parsed_host.ip_address)
                     )
-                )
-                port = existing_port.scalar_one_or_none()
+                    host = existing.scalar_one_or_none()
 
-                if port:
-                    # Update existing port
-                    port.state = parsed_port.state
-                    if parsed_port.service_name:
-                        port.service_name = parsed_port.service_name
-                    if parsed_port.service_version:
-                        port.service_version = parsed_port.service_version
-                    if parsed_port.service_product:
-                        port.product = parsed_port.service_product
-                    port.last_seen = datetime.utcnow()
-                    port.tags = merge_tags(
-                        port.tags,
-                        build_port_tags(
-                            port_number=port.port_number,
-                            protocol=port.protocol,
-                            state=port.state,
-                            service_name=port.service_name,
-                            service_product=port.product,
-                            service_version=port.service_version,
-                        ),
+                    if host:
+                        if not host.guid:
+                            host.guid = _generate_guid()
+                        # Update existing host with new data
+                        if parsed_host.mac_address and not host.mac_address:
+                            host.mac_address = parsed_host.mac_address
+                        if parsed_host.hostname and not host.hostname:
+                            host.hostname = parsed_host.hostname
+                        if parsed_host.vendor and not host.vendor:
+                            host.vendor = parsed_host.vendor
+                        if parsed_host.os_name and not host.os_name:
+                            host.os_name = parsed_host.os_name
+                        if parsed_host.os_family and not host.os_family:
+                            host.os_family = parsed_host.os_family
+                        if parsed_host.os_confidence and (not host.os_confidence or parsed_host.os_confidence > host.os_confidence):
+                            host.os_confidence = parsed_host.os_confidence
+                            host.os_name = parsed_host.os_name
+                        if parsed_host.device_type and not host.device_type:
+                            host.device_type = parsed_host.device_type
+
+                        # Update source_types
+                        current_sources = host.source_types or []
+                        if source_type not in current_sources:
+                            host.source_types = current_sources + [source_type]
+
+                        host.last_seen = datetime.utcnow()
+                        host.tags = merge_tags(
+                            host.tags,
+                            build_host_tags(
+                                ip_address=host.ip_address,
+                                mac_address=host.mac_address,
+                                hostname=host.hostname,
+                                fqdn=host.fqdn,
+                                vendor=host.vendor,
+                                os_family=host.os_family,
+                                os_name=host.os_name,
+                            ),
+                        )
+                    else:
+                        # Create new host
+                        host = Host(
+                            ip_address=parsed_host.ip_address,
+                            mac_address=parsed_host.mac_address,
+                            hostname=parsed_host.hostname,
+                            fqdn=parsed_host.fqdn,
+                            vendor=parsed_host.vendor,
+                            os_name=parsed_host.os_name,
+                            os_version=parsed_host.os_version,
+                            os_family=parsed_host.os_family,
+                            os_confidence=parsed_host.os_confidence,
+                            device_type=parsed_host.device_type,
+                            source_types=[source_type],
+                            guid=_generate_guid(),
+                            first_seen=datetime.utcnow(),
+                            last_seen=datetime.utcnow(),
+                        )
+                        host.tags = build_host_tags(
+                            ip_address=host.ip_address,
+                            mac_address=host.mac_address,
+                            hostname=host.hostname,
+                            fqdn=host.fqdn,
+                            vendor=host.vendor,
+                            os_family=host.os_family,
+                            os_name=host.os_name,
+                        )
+                        db.add(host)
+                        records_created += 1
+
+                    await db.flush()  # Get host.id for port foreign key
+                    logger.debug(f"Host flushed with id={host.id}, processing {len(parsed_host.ports)} ports")
+
+                    # Process ports for this host
+                    for parsed_port in parsed_host.ports:
+                        logger.debug(f"Processing port {parsed_port.port_number}/{parsed_port.protocol}")
+                        # Check if port already exists
+                        existing_port = await db.execute(
+                            select(Port).where(
+                                Port.host_id == host.id,
+                                Port.port_number == parsed_port.port_number,
+                                Port.protocol == parsed_port.protocol,
+                            )
+                        )
+                        port = existing_port.scalar_one_or_none()
+
+                        if port:
+                            # Update existing port
+                            port.state = parsed_port.state
+                            if parsed_port.service_name:
+                                port.service_name = parsed_port.service_name
+                            if parsed_port.service_version:
+                                port.service_version = parsed_port.service_version
+                            if parsed_port.service_product:
+                                port.product = parsed_port.service_product
+                            port.last_seen = datetime.utcnow()
+                            port.tags = merge_tags(
+                                port.tags,
+                                build_port_tags(
+                                    port_number=port.port_number,
+                                    protocol=port.protocol,
+                                    state=port.state,
+                                    service_name=port.service_name,
+                                    service_product=port.product,
+                                    service_version=port.service_version,
+                                ),
+                            )
+                        else:
+                            # Create new port
+                            port = Port(
+                                host_id=host.id,
+                                port_number=parsed_port.port_number,
+                                protocol=parsed_port.protocol,
+                                state=parsed_port.state,
+                                service_name=parsed_port.service_name,
+                                service_version=parsed_port.service_version,
+                                product=parsed_port.service_product,
+                                service_extrainfo=parsed_port.service_banner,
+                                confidence=parsed_port.confidence,
+                                source_types=[source_type],
+                                first_seen=datetime.utcnow(),
+                                last_seen=datetime.utcnow(),
+                            )
+                            port.tags = build_port_tags(
+                                port_number=port.port_number,
+                                protocol=port.protocol,
+                                state=port.state,
+                                service_name=port.service_name,
+                                service_product=port.product,
+                                service_version=port.service_version,
+                            )
+                            db.add(port)
+                            records_created += 1
+
+                # Process connections (from netstat)
+                for parsed_conn in result.connections:
+                    await _upsert_host_from_value(
+                        db,
+                        parsed_conn.local_ip,
+                        source_type,
                     )
-                else:
-                    # Create new port
-                    port = Port(
-                        host_id=host.id,
-                        port_number=parsed_port.port_number,
-                        protocol=parsed_port.protocol,
-                        state=parsed_port.state,
-                        service_name=parsed_port.service_name,
-                        service_version=parsed_port.service_version,
-                        product=parsed_port.service_product,
-                        service_extrainfo=parsed_port.service_banner,
-                        confidence=parsed_port.confidence,
-                        source_types=[source_type],
+                    # Skip host upsert for unspecified remote IPs (LISTEN state)
+                    remote_ip = parsed_conn.remote_ip or "0.0.0.0"
+                    if not _is_unspecified_ip(remote_ip):
+                        await _upsert_host_from_value(
+                            db,
+                            remote_ip,
+                            source_type,
+                        )
+                    conn = Connection(
+                        local_ip=parsed_conn.local_ip,
+                        local_port=parsed_conn.local_port or 0,
+                        remote_ip=remote_ip,
+                        remote_port=parsed_conn.remote_port,
+                        protocol=parsed_conn.protocol,
+                        state=parsed_conn.state,
+                        pid=parsed_conn.pid,
+                        process_name=parsed_conn.process_name,
+                        source_type=source_type,
                         first_seen=datetime.utcnow(),
                         last_seen=datetime.utcnow(),
                     )
-                    port.tags = build_port_tags(
-                        port_number=port.port_number,
-                        protocol=port.protocol,
-                        state=port.state,
-                        service_name=port.service_name,
-                        service_product=port.product,
-                        service_version=port.service_version,
+                    conn.tags = build_connection_tags(
+                        local_ip=conn.local_ip,
+                        local_port=conn.local_port,
+                        remote_ip=conn.remote_ip,
+                        remote_port=conn.remote_port,
+                        protocol=conn.protocol,
+                        state=conn.state,
+                        process_name=conn.process_name,
                     )
-                    db.add(port)
+                    db.add(conn)
                     records_created += 1
 
-        # Process connections (from netstat)
-        for parsed_conn in result.connections:
-            await _upsert_host_from_value(
-                db,
-                parsed_conn.local_ip,
-                source_type,
-            )
-            await _upsert_host_from_value(
-                db,
-                parsed_conn.remote_ip,
-                source_type,
-            )
-            conn = Connection(
-                local_ip=parsed_conn.local_ip,
-                local_port=parsed_conn.local_port,
-                remote_ip=parsed_conn.remote_ip,
-                remote_port=parsed_conn.remote_port,
-                protocol=parsed_conn.protocol,
-                state=parsed_conn.state,
-                pid=parsed_conn.pid,
-                process_name=parsed_conn.process_name,
-                source_type=source_type,
-                first_seen=datetime.utcnow(),
-                last_seen=datetime.utcnow(),
-            )
-            conn.tags = build_connection_tags(
-                local_ip=conn.local_ip,
-                local_port=conn.local_port,
-                remote_ip=conn.remote_ip,
-                remote_port=conn.remote_port,
-                protocol=conn.protocol,
-                state=conn.state,
-                process_name=conn.process_name,
-            )
-            db.add(conn)
-            records_created += 1
+                # Process ARP entries
+                for parsed_arp in result.arp_entries:
+                    await _upsert_host_from_value(
+                        db,
+                        parsed_arp.ip_address,
+                        source_type,
+                        mac_address=parsed_arp.mac_address,
+                    )
+                    if not parsed_arp.mac_address:
+                        continue
+                    # Check if entry already exists
+                    existing_arp = await db.execute(
+                        select(ARPEntry).where(
+                            ARPEntry.ip_address == parsed_arp.ip_address,
+                            ARPEntry.mac_address == parsed_arp.mac_address,
+                        )
+                    )
+                    arp = existing_arp.scalar_one_or_none()
 
-        # Process ARP entries
-        for parsed_arp in result.arp_entries:
-            await _upsert_host_from_value(
-                db,
-                parsed_arp.ip_address,
-                source_type,
-                mac_address=parsed_arp.mac_address,
-            )
-            if not parsed_arp.mac_address:
-                continue
-            # Check if entry already exists
-            existing_arp = await db.execute(
-                select(ARPEntry).where(
-                    ARPEntry.ip_address == parsed_arp.ip_address,
-                    ARPEntry.mac_address == parsed_arp.mac_address,
-                )
-            )
-            arp = existing_arp.scalar_one_or_none()
+                    if not arp:
+                        arp = ARPEntry(
+                            ip_address=parsed_arp.ip_address,
+                            mac_address=parsed_arp.mac_address,
+                            interface=parsed_arp.interface,
+                            entry_type=parsed_arp.entry_type,
+                            vendor=parsed_arp.vendor,
+                            source_type=source_type,
+                            first_seen=datetime.utcnow(),
+                        )
+                        arp.tags = build_arp_tags(
+                            ip_address=arp.ip_address,
+                            mac_address=arp.mac_address,
+                            interface=arp.interface,
+                            entry_type=arp.entry_type,
+                            vendor=arp.vendor,
+                        )
+                        db.add(arp)
+                        records_created += 1
 
-            if not arp:
-                arp = ARPEntry(
-                    ip_address=parsed_arp.ip_address,
-                    mac_address=parsed_arp.mac_address,
-                    interface=parsed_arp.interface,
-                    entry_type=parsed_arp.entry_type,
-                    vendor=parsed_arp.vendor,
-                    source_type=source_type,
-                    first_seen=datetime.utcnow(),
-                )
-                arp.tags = build_arp_tags(
-                    ip_address=arp.ip_address,
-                    mac_address=arp.mac_address,
-                    interface=arp.interface,
-                    entry_type=arp.entry_type,
-                    vendor=arp.vendor,
-                )
-                db.add(arp)
-                records_created += 1
+        except Exception as db_err:
+            # Savepoint was rolled back automatically; outer transaction is intact.
+            # The import_record (flushed before _process_import) is still valid.
+            logger.exception(f"Database error while importing {source_type} data")
+            import_record.parse_status = "failed"
+            import_record.error_message = f"Database error: {str(db_err)}"
+            return
 
-        # Update import record
+        # Update import record (savepoint committed successfully)
         import_record.parse_status = "success" if not result.warnings else "partial"
         import_record.parsed_count = records_created
         import_record.processed_at = datetime.utcnow()

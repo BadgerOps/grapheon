@@ -1,6 +1,6 @@
 {
   "name": "network-aggregator-frontend",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,6 +8,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cytoscape": "^3.33.1",
+    "cytoscape-cola": "^2.5.1",
+    "cytoscape-dagre": "^2.5.0",
+    "cytoscape-fcose": "^2.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",

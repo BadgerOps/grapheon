@@ -4,6 +4,25 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.2.0 - 2026-02-05
+### Added
+- Cytoscape.js network visualization replacing vis-network, with compound node hierarchy (VLAN -> Subnet -> Host)
+- Three layout modes: hierarchical (dagre), grouped (fcose), force-directed (cola)
+- CytoscapeNetworkMap component with zoom/pan controls, stats overlay, interactive legend, and selected node info panel
+- Full light/dark mode Cytoscape stylesheets with device-type-specific shapes and colors
+- Client-side graph filtering: filter by VLAN, device type, or subnet without API re-fetches
+- Search-and-focus: find devices by IP or hostname with animated zoom
+- Internet mode selector: collapse public IPs into cloud node, hide, or show raw
+- "Route via GW" toggle: visualize cross-subnet traffic routing through gateway nodes
+- VLAN filter dropdown and device type filter bar with toggle chips
+- VLAN management API client methods (CRUD + auto-assign)
+- Edge legend showing same-subnet, cross-subnet, cross-VLAN, internet, and route path styles
+
+### Changed
+- Map page completely rewritten with new controls toolbar and stats bar
+- Network visualization now uses compound nodes for VLAN/subnet grouping instead of flat force-directed graph
+- Internet node filtering: stays visible when connected gateways pass filters, dims when all connections are filtered
+
 ## 0.1.2 - 2026-02-04
 ### Added
 - New Settings/Config page (`/config`) for system maintenance and configuration

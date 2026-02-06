@@ -7,6 +7,7 @@ from .export import router as export_router
 from .maintenance import router as maintenance_router
 from .connections import router as connections_router
 from .arp_entries import router as arp_router
+from .vlans import router as vlans_router
 
 __all__ = [
     "hosts_router",
@@ -18,4 +19,5 @@ __all__ = [
     "maintenance_router",
     "connections_router",
     "arp_router",
+    "vlans_router",
 ]

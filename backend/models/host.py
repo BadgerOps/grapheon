@@ -34,6 +34,10 @@ class Host(Base):
         String(50), nullable=True
     )  # server/workstation/router/printer/iot/unknown
     vendor = Column(String(255), nullable=True)
+
+    # VLAN assignment
+    vlan_id = Column(Integer, nullable=True, index=True)  # 802.1Q VLAN ID (0-4094)
+    vlan_name = Column(String(32), nullable=True)  # e.g., "DMZ", "Internal", "Guest"
     criticality = Column(String(20), nullable=True)  # low/medium/high/critical
     owner = Column(String(255), nullable=True)
     location = Column(String(255), nullable=True)

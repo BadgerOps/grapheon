@@ -1,10 +1,45 @@
 import { useState } from 'react'
 
+const SOURCE_HINTS = {
+  nmap: {
+    label: 'Nmap',
+    command: 'nmap -O -A -oX scan.xml 10.0.0.0/24',
+    note: 'Upload the XML file generated with -oX. Add -O for OS detection, -A for aggressive mode.',
+    accept: '.xml',
+  },
+  netstat: {
+    label: 'Netstat',
+    command: 'netstat -tulnp > netstat.txt',
+    note: 'Redirect terminal output to a file, then upload it here.',
+    accept: '.txt,.log',
+  },
+  arp: {
+    label: 'ARP',
+    command: 'arp -a > arp.txt',
+    note: 'Redirect terminal output to a file. Also supports: ip neigh > arp.txt',
+    accept: '.txt,.log',
+  },
+  traceroute: {
+    label: 'Traceroute',
+    command: 'traceroute -n 10.0.0.1 > trace.txt',
+    note: 'Redirect terminal output to a file. Use -n to skip DNS lookups.',
+    accept: '.txt,.log',
+  },
+  ping: {
+    label: 'Ping',
+    command: 'ping -c 4 10.0.0.1 > ping.txt',
+    note: 'Redirect terminal output to a file.',
+    accept: '.txt,.log',
+  },
+}
+
 export default function FileUpload({ onSubmit, isLoading }) {
   const [sourceType, setSourceType] = useState('nmap')
   const [sourceHost, setSourceHost] = useState('')
   const [file, setFile] = useState(null)
   const [error, setError] = useState('')
+
+  const hint = SOURCE_HINTS[sourceType] || {}
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files?.[0]
@@ -74,10 +109,19 @@ export default function FileUpload({ onSubmit, isLoading }) {
             type="text"
             value={sourceHost}
             onChange={(e) => setSourceHost(e.target.value)}
-            placeholder="e.g., 192.168.1.1"
+            placeholder="IP of the machine that ran the scan"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+      </div>
+
+      {/* Command hint */}
+      <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Example command</p>
+        <code className="block text-sm font-mono text-blue-700 bg-white px-2 py-1 rounded border border-gray-200 select-all">
+          {hint.command}
+        </code>
+        <p className="text-xs text-gray-500 mt-1.5">{hint.note}</p>
       </div>
 
       <div>
@@ -86,6 +130,7 @@ export default function FileUpload({ onSubmit, isLoading }) {
         </label>
         <input
           type="file"
+          accept={hint.accept || '*'}
           onChange={handleFileChange}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />

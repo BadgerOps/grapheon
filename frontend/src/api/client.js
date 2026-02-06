@@ -151,6 +151,34 @@ export async function getSubnets(params = {}) {
 }
 
 // ============================================
+// VLAN endpoints
+// ============================================
+
+export async function getVlans() {
+  return apiCall('GET', '/vlans')
+}
+
+export async function getVlan(vlanId) {
+  return apiCall('GET', `/vlans/${vlanId}`)
+}
+
+export async function createVlan(params = {}) {
+  return apiCall('POST', '/vlans', null, params)
+}
+
+export async function updateVlan(vlanId, params = {}) {
+  return apiCall('PUT', `/vlans/${vlanId}`, null, params)
+}
+
+export async function deleteVlan(vlanId) {
+  return apiCall('DELETE', `/vlans/${vlanId}`)
+}
+
+export async function autoAssignVlans() {
+  return apiCall('POST', '/vlans/auto-assign')
+}
+
+// ============================================
 // Correlation endpoints
 // ============================================
 

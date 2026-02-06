@@ -19,6 +19,7 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
   const navigate = useNavigate()
   const [selectedNode, setSelectedNode] = useState(null)
   const [stats, setStats] = useState({ nodes: 0, edges: 0 })
+  const [hasRouteEdges, setHasRouteEdges] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains('dark')
   )
@@ -55,22 +56,84 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     return config
   }
 
+  // Enhance nodes with gateway styling
+  const enhanceNodes = useCallback((rawNodes, fontDefaults) => {
+    return rawNodes.map(node => {
+      if (node.is_gateway) {
+        return {
+          ...node,
+          shape: 'diamond',
+          size: 30,
+          color: {
+            background: '#f97316',
+            border: '#ea580c',
+            highlight: { background: '#fb923c', border: '#3b82f6' },
+          },
+          font: { ...fontDefaults, size: 14 },
+          borderWidth: 3,
+        }
+      }
+      return node
+    })
+  }, [])
+
+  // Enhance edges with cross-segment and route styling
+  const enhanceEdges = useCallback((rawEdges) => {
+    return rawEdges.map(edge => {
+      // Handle route edges
+      if (edge.route_edge) {
+        return {
+          ...edge,
+          color: '#22c55e',
+          dashes: [5, 5],
+          arrows: {
+            to: { enabled: true, scaleFactor: 0.5 },
+          },
+          smooth: {
+            type: 'curvedCW',
+          },
+        }
+      }
+
+      // Handle cross-segment edges
+      if (edge.cross_segment) {
+        return {
+          ...edge,
+          color: '#fbbf24',
+          dashes: [8, 4],
+          smooth: {
+            type: 'curvedCCW',
+          },
+        }
+      }
+
+      // Regular edges remain unchanged
+      return edge
+    })
+  }, [])
+
   const initNetwork = useCallback(() => {
     if (!containerRef.current) return
 
-    // Use the isDarkMode state for consistent theming
+    // Destroy previous instance first
+    if (networkRef.current) {
+      networkRef.current.destroy()
+      networkRef.current = null
+    }
+
     const isDark = isDarkMode
 
-    // Configure physics and layout options
+    const fontDefaults = {
+      size: 12,
+      color: isDark ? '#e5e7eb' : '#1f2937',
+      face: 'Inter, system-ui, sans-serif',
+    }
+
     const options = {
       nodes: {
         borderWidth: 2,
         borderWidthSelected: 4,
-        font: {
-          size: 12,
-          color: isDark ? '#e5e7eb' : '#1f2937',
-          face: 'Inter, system-ui, sans-serif',
-        },
+        font: fontDefaults,
         shadow: {
           enabled: true,
           color: 'rgba(0,0,0,0.2)',
@@ -125,18 +188,18 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
       groups: buildGroupConfig(groups, isDark),
     }
 
-    // Create DataSets
-    const nodesDataset = new DataSet(nodes)
-    const edgesDataset = new DataSet(edges)
+    const enhancedNodes = enhanceNodes(nodes, fontDefaults)
+    const enhancedEdges = enhanceEdges(edges)
 
-    // Create network
+    const nodesDataset = new DataSet(enhancedNodes)
+    const edgesDataset = new DataSet(enhancedEdges)
+
     networkRef.current = new Network(
       containerRef.current,
       { nodes: nodesDataset, edges: edgesDataset },
       options
     )
 
-    // Set up event handlers
     networkRef.current.on('click', (params) => {
       if (params.nodes.length > 0) {
         const nodeId = params.nodes[0]
@@ -159,23 +222,19 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     })
 
     networkRef.current.on('stabilizationIterationsDone', () => {
-      networkRef.current.setOptions({ physics: { enabled: false } })
+      if (networkRef.current) {
+        networkRef.current.setOptions({ physics: { enabled: false } })
+      }
     })
 
     setStats({ nodes: nodes.length, edges: edges.length })
-  }, [nodes, edges, groups, navigate, onNodeClick, isDarkMode])
 
-  const updateNetworkData = useCallback(() => {
-    if (!networkRef.current) return
+    // Check if any route edges exist
+    const hasRoutes = edges.some(edge => edge.route_edge)
+    setHasRouteEdges(hasRoutes)
+  }, [nodes, edges, groups, navigate, onNodeClick, isDarkMode, enhanceNodes, enhanceEdges])
 
-    const nodesDataset = new DataSet(nodes)
-    const edgesDataset = new DataSet(edges)
-
-    networkRef.current.setData({ nodes: nodesDataset, edges: edgesDataset })
-    setStats({ nodes: nodes.length, edges: edges.length })
-  }, [nodes, edges])
-
-  // Initialize vis-network
+  // Single effect: rebuild network when data or settings change
   useEffect(() => {
     if (!containerRef.current || loading) return
     initNetwork()
@@ -186,13 +245,7 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
         networkRef.current = null
       }
     }
-  }, [loading, isDarkMode, initNetwork])
-
-  // Update network when data changes
-  useEffect(() => {
-    if (!networkRef.current || loading) return
-    updateNetworkData()
-  }, [nodes, edges, loading, updateNetworkData])
+  }, [loading, initNetwork])
 
   // Control functions
   const handleZoomIn = () => {
@@ -224,39 +277,37 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-900 rounded-lg">
-        <div className="text-center">
-          <div className="spinner mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading network map...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (nodes.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-900 rounded-lg">
-        <div className="text-center">
-          <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-          </svg>
-          <p className="text-gray-600 dark:text-gray-400">No hosts to display</p>
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Import network data to see the topology</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="relative h-full">
-      {/* Network visualization container */}
+      {/* Network visualization container — always mounted to prevent vis-network DOM errors */}
       <div
         ref={containerRef}
         className="network-canvas bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
-        style={{ height: '100%', minHeight: '500px' }}
+        style={{ height: '100%', minHeight: '500px', display: (loading || nodes.length === 0) ? 'none' : 'block' }}
       />
+
+      {/* Loading overlay */}
+      {loading && (
+        <div className="flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700" style={{ height: '100%', minHeight: '500px' }}>
+          <div className="text-center">
+            <div className="spinner mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading network map...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && nodes.length === 0 && (
+        <div className="flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700" style={{ height: '100%', minHeight: '500px' }}>
+          <div className="text-center">
+            <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+            </svg>
+            <p className="text-gray-600 dark:text-gray-400">No hosts to display</p>
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Import network data to see the topology</p>
+          </div>
+        </div>
+      )}
 
       {/* Controls overlay */}
       <div className="absolute top-4 right-4 flex flex-col gap-2">
@@ -328,8 +379,13 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
             <p><span className="text-gray-500">IP:</span> {selectedNode.ip}</p>
             {selectedNode.os && <p><span className="text-gray-500">OS:</span> {selectedNode.os}</p>}
             {selectedNode.device_type && <p><span className="text-gray-500">Type:</span> {selectedNode.device_type}</p>}
+            {selectedNode.is_gateway && <p className="text-orange-500 font-medium">Gateway / Router</p>}
             <p><span className="text-gray-500">Open Ports:</span> {selectedNode.open_ports || 0}</p>
             <p><span className="text-gray-500">Subnet:</span> {selectedNode.subnet}</p>
+            {selectedNode.segment && <p><span className="text-gray-500">Segment:</span> {selectedNode.segment}</p>}
+            {selectedNode.group && selectedNode.group !== selectedNode.subnet && (
+              <p><span className="text-gray-500">Segment:</span> {selectedNode.group}</p>
+            )}
           </div>
           <button
             onClick={() => navigate(`/hosts/${selectedNode.id}`)}
@@ -364,7 +420,30 @@ export default function NetworkMap({ nodes = [], edges = [], groups = {}, onNode
             <span className="w-3 h-3 rounded-full bg-red-500"></span>
             <span className="text-gray-600 dark:text-gray-400">Firewall</span>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rotate-45 bg-orange-500" style={{ clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' }}></span>
+            <span className="text-gray-600 dark:text-gray-400">Gateway</span>
+          </div>
         </div>
+
+        <h5 className="font-semibold text-gray-700 dark:text-gray-300 mb-2 mt-3">Edge Types</h5>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-4 bg-gray-400" style={{ backgroundColor: isDarkMode ? '#4b5563' : '#9ca3af' }}></span>
+            <span className="text-gray-600 dark:text-gray-400">Regular</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-4" style={{ backgroundColor: '#fbbf24', backgroundImage: 'repeating-linear-gradient(90deg, #fbbf24 0px, #fbbf24 8px, transparent 8px, transparent 12px)' }}></span>
+            <span className="text-gray-600 dark:text-gray-400">Cross-segment</span>
+          </div>
+          {hasRouteEdges && (
+            <div className="flex items-center gap-2">
+              <span className="h-0.5 w-4" style={{ backgroundColor: '#22c55e', backgroundImage: 'repeating-linear-gradient(90deg, #22c55e 0px, #22c55e 5px, transparent 5px, transparent 10px)' }}></span>
+              <span className="text-gray-600 dark:text-gray-400">Route path</span>
+            </div>
+          )}
+        </div>
+
         <p className="mt-2 text-gray-500 dark:text-gray-500">Double-click to open details</p>
       </div>
     </div>

@@ -61,7 +61,10 @@ export default function Config() {
       setLoading(prev => ({ ...prev, vendor: true }))
       setError('')
       const result = await api.updateVendorInfo()
-      setSuccess(`Vendor lookup complete: ${result.updated} hosts updated, ${result.not_found} not found`)
+      const parts = [`${result.vendors_updated} resolved`]
+      if (result.vendors_local_admin) parts.push(`${result.vendors_local_admin} locally administered`)
+      if (result.vendors_not_found) parts.push(`${result.vendors_not_found} not found`)
+      setSuccess(`Vendor lookup complete: ${parts.join(', ')}`)
       setTimeout(() => setSuccess(''), 5000)
       fetchStats()
     } catch (err) {

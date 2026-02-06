@@ -135,7 +135,7 @@ class ConnectionBase(BaseModel):
     local_ip: str
     local_port: int
     remote_ip: str
-    remote_port: int
+    remote_port: Optional[int] = None
     protocol: str
     state: Optional[str] = None
     pid: Optional[int] = None

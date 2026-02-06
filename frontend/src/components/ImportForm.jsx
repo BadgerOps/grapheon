@@ -1,10 +1,45 @@
 import { useState } from 'react'
 
+const SOURCE_HINTS = {
+  nmap: {
+    label: 'Nmap',
+    command: 'nmap -O -A -oX scan.xml 10.0.0.0/24',
+    note: 'Use -oX for XML output. Add -O for OS detection, -A for aggressive (services + scripts).',
+    paste: 'Paste the XML output, or use the File tab to upload the .xml file directly.',
+  },
+  netstat: {
+    label: 'Netstat',
+    command: 'netstat -tulnp',
+    note: 'Shows TCP/UDP listeners with PIDs. Use -a for all connections including ESTABLISHED.',
+    paste: 'Paste the full terminal output.',
+  },
+  arp: {
+    label: 'ARP',
+    command: 'arp -a',
+    note: 'Shows MAC-to-IP mappings on local segments. Also supports: ip neigh',
+    paste: 'Paste the full terminal output.',
+  },
+  traceroute: {
+    label: 'Traceroute',
+    command: 'traceroute -n 10.0.0.1',
+    note: 'Use -n to skip DNS lookups for faster results.',
+    paste: 'Paste the full terminal output.',
+  },
+  ping: {
+    label: 'Ping',
+    command: 'ping -c 4 10.0.0.1',
+    note: 'Use -c to set the number of pings.',
+    paste: 'Paste the full terminal output.',
+  },
+}
+
 export default function ImportForm({ onSubmit, isLoading }) {
   const [sourceType, setSourceType] = useState('nmap')
   const [sourceHost, setSourceHost] = useState('')
   const [rawData, setRawData] = useState('')
   const [error, setError] = useState('')
+
+  const hint = SOURCE_HINTS[sourceType] || {}
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -63,10 +98,20 @@ export default function ImportForm({ onSubmit, isLoading }) {
             type="text"
             value={sourceHost}
             onChange={(e) => setSourceHost(e.target.value)}
-            placeholder="e.g., 192.168.1.1"
+            placeholder="IP of the machine that ran the scan"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+      </div>
+
+      {/* Command hint */}
+      <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Example command</p>
+        <code className="block text-sm font-mono text-blue-700 bg-white px-2 py-1 rounded border border-gray-200 select-all">
+          {hint.command}
+        </code>
+        <p className="text-xs text-gray-500 mt-1.5">{hint.note}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{hint.paste}</p>
       </div>
 
       <div>
@@ -76,7 +121,7 @@ export default function ImportForm({ onSubmit, isLoading }) {
         <textarea
           value={rawData}
           onChange={(e) => setRawData(e.target.value)}
-          placeholder="Paste your data here..."
+          placeholder={`Paste ${hint.label || sourceType} output here...`}
           rows={12}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
         />

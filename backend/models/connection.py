@@ -17,7 +17,7 @@ class Connection(Base):
 
     # Destination host
     remote_ip = Column(String(45), nullable=False, index=True)
-    remote_port = Column(Integer, nullable=False)
+    remote_port = Column(Integer, nullable=True)
 
     # Connection info
     protocol = Column(String(10), nullable=False)  # tcp/udp

@@ -215,11 +215,15 @@ async def update_vendor_info(
     hosts = result.scalars().all()
 
     updated = 0
+    local_admin = 0
     not_found = 0
 
     for host in hosts:
         vendor = lookup_mac_vendor(host.mac_address)
-        if vendor:
+        if vendor == "Locally Administered":
+            host.vendor = vendor
+            local_admin += 1
+        elif vendor:
             host.vendor = vendor
             updated += 1
         else:
@@ -231,6 +235,7 @@ async def update_vendor_info(
         "success": True,
         "hosts_checked": len(hosts),
         "vendors_updated": updated,
+        "vendors_local_admin": local_admin,
         "vendors_not_found": not_found,
     }
 

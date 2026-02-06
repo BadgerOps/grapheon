@@ -9,9 +9,8 @@ Handles:
 
 import logging
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -20,7 +19,6 @@ from models import DeviceIdentity, Host
 from schemas import (
     DeviceIdentityCreate,
     DeviceIdentityUpdate,
-    DeviceIdentityResponse,
     LinkHostsRequest,
 )
 

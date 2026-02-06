@@ -4,6 +4,21 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.5.0 - 2026-02-06
+### Added
+- `DeviceIdentity` model for non-destructive linking of multi-homed network devices (routers/switches with interfaces on multiple VLANs/subnets)
+- Full CRUD REST API at `/api/device-identities` with host link/unlink endpoints
+- `device_id` column on hosts table (nullable FK to device_identities) with auto-migration
+- Correlation engine Phase 2 now creates DeviceIdentity records from shared MAC addresses instead of destructively merging multi-homed hosts
+- `create_device_identity_from_mac()` function with device type inference from hostname patterns
+- Network map shared gateway combining: DeviceIdentity-linked gateways render as a single node spanning multiple subnets
+- Network map public IP grouping: `show_internet=show` groups public IPs under a "Public IPs" compound node
+- `is_private_ip()` utility covering RFC1918, loopback, link-local, CGNAT, and IPv6 ULA ranges
+- Seed data updated with shared MAC gateways across VLANs 20/30/40 for multi-homed router demonstration
+
+### Fixed
+- Network map edge integrity: `ip_to_host_id` no longer populated for skipped hosts (public IPs in cloud/hide mode, shared gateway hosts), preventing Cytoscape "nonexistent target" errors
+
 ## 0.4.1 - 2026-02-06
 ### Fixed
 - "Check for Updates" button now bypasses the 1-hour server-side release cache so manual checks always fetch fresh data from GitHub instead of returning stale cached results

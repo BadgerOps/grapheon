@@ -110,7 +110,7 @@ HOSTS = {
         ("10.10.10.21",  "fw-02",         "00:1a:2b:3c:4d:21", "firewall", "Palo Alto PAN-OS", "11.1", "network", "Palo Alto Networks"),
     ],
     20: [  # Servers
-        ("10.20.20.1",   "srv-gw",        "00:50:56:aa:20:01", "router",   "VyOS",         "1.4",   "linux",    "VMware"),
+        ("10.20.20.1",   "core-rtr",      "00:50:56:aa:00:01", "router",   "VyOS",         "1.4",   "linux",    "VMware"),
         ("10.20.20.10",  "web-01",        "00:50:56:aa:20:10", "server",   "Ubuntu",       "22.04", "linux",    "VMware"),
         ("10.20.20.11",  "web-02",        "00:50:56:aa:20:11", "server",   "Ubuntu",       "22.04", "linux",    "VMware"),
         ("10.20.20.12",  "web-03",        "00:50:56:aa:20:12", "server",   "Ubuntu",       "24.04", "linux",    "VMware"),
@@ -124,7 +124,7 @@ HOSTS = {
         ("10.20.20.60",  "backup-01",     "00:50:56:aa:20:60", "server",   "TrueNAS",      "13.0",  "linux",    "iXsystems"),
     ],
     30: [  # Workstations
-        ("10.30.30.1",   "ws-gw",         "00:50:56:bb:30:01", "router",   "VyOS",         "1.4",   "linux",    "VMware"),
+        ("10.30.30.1",   "core-rtr",      "00:50:56:aa:00:01", "router",   "VyOS",         "1.4",   "linux",    "VMware"),
         ("10.30.30.10",  "ws-jsmith",     "a4:83:e7:10:30:10", "workstation", "Windows",   "11",    "windows",  "Dell"),
         ("10.30.30.11",  "ws-jdoe",       "a4:83:e7:10:30:11", "workstation", "Windows",   "11",    "windows",  "Dell"),
         ("10.30.30.12",  "ws-abrown",     "a4:83:e7:10:30:12", "workstation", "Windows",   "11",    "windows",  "Lenovo"),
@@ -136,7 +136,7 @@ HOSTS = {
         ("10.30.30.22",  "ws-dpatel",     "3c:22:fb:10:30:22", "workstation", "macOS",     "15.0",  "macos",    "Apple"),
     ],
     40: [  # IoT / OT
-        ("10.40.40.1",   "iot-gw",        "00:50:56:cc:40:01", "router",   "OpenWrt",      "23.05", "linux",    "TP-Link"),
+        ("10.40.40.1",   "core-rtr",      "00:50:56:aa:00:01", "router",   "OpenWrt",      "23.05", "linux",    "TP-Link"),
         ("10.40.40.10",  "cam-lobby",     "b0:c5:54:40:00:10", "iot",      "Linux",        "4.19",  "linux",    "Hikvision"),
         ("10.40.40.11",  "cam-parking",   "b0:c5:54:40:00:11", "iot",      "Linux",        "4.19",  "linux",    "Hikvision"),
         ("10.40.40.12",  "cam-warehouse", "b0:c5:54:40:00:12", "iot",      "Linux",        "4.19",  "linux",    "Dahua"),
@@ -637,6 +637,42 @@ def seed_database(db_path, append=False):
         ))
 
     print(f"   ✓ {len(imports)} import records")
+
+    # ── 8. DeviceIdentity for shared core router ────────────────────
+    print("   Creating DeviceIdentity for shared core router...")
+    core_router_data = {
+        "name": "Core Router 01",
+        "device_type": "router",
+        "mac_addresses": ["00:50:56:aa:00:01"],
+        "ip_addresses": ["10.20.20.1", "10.30.30.1", "10.40.40.1"],
+        "source": "seed_data",
+        "is_active": True,
+    }
+
+    # Determine column names for device_identities table
+    cursor.execute("""
+        INSERT INTO device_identities (name, device_type, mac_addresses, ip_addresses, source, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        core_router_data["name"],
+        core_router_data["device_type"],
+        '["00:50:56:aa:00:01"]',  # JSON array format
+        '["10.20.20.1", "10.30.30.1", "10.40.40.1"]',  # JSON array format
+        core_router_data["source"],
+        1,  # True
+        now, now,
+    ))
+    device_identity_id = cursor.lastrowid
+
+    # Link the three gateway hosts to this device identity
+    for ip in ["10.20.20.1", "10.30.30.1", "10.40.40.1"]:
+        host_id = host_id_map.get(ip)
+        if host_id:
+            cursor.execute("""
+                UPDATE hosts SET device_id = ? WHERE id = ?
+            """, (device_identity_id, host_id))
+
+    print(f"   ✓ DeviceIdentity created with ID {device_identity_id}, linked to 3 gateway hosts")
 
     conn.commit()
     conn.close()

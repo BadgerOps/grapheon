@@ -65,6 +65,7 @@ class HostResponse(HostBase):
 
     id: int
     guid: Optional[str] = None
+    device_id: Optional[int] = None
     ports_count: Optional[int] = None
     first_seen: datetime
     last_seen: datetime
@@ -225,6 +226,56 @@ class RawImportResponse(RawImportBase):
 
     class Config:
         from_attributes = True
+
+
+# Device Identity schemas
+class DeviceIdentityBase(BaseModel):
+    """Base schema for device identity."""
+
+    name: Optional[str] = None
+    device_type: Optional[str] = None
+    mac_addresses: Optional[List[str]] = None
+    ip_addresses: Optional[List[str]] = None
+    notes: Optional[str] = None
+    source: Optional[str] = None
+    is_active: bool = True
+
+
+class DeviceIdentityCreate(DeviceIdentityBase):
+    """Schema for creating a device identity."""
+
+    pass
+
+
+class DeviceIdentityUpdate(BaseModel):
+    """Schema for updating a device identity (all fields optional)."""
+
+    name: Optional[str] = None
+    device_type: Optional[str] = None
+    mac_addresses: Optional[List[str]] = None
+    ip_addresses: Optional[List[str]] = None
+    notes: Optional[str] = None
+    source: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class DeviceIdentityResponse(DeviceIdentityBase):
+    """Schema for device identity response."""
+
+    id: int
+    guid: Optional[str] = None
+    first_seen: datetime
+    last_seen: datetime
+    host_count: Optional[int] = None  # Number of linked hosts
+
+    class Config:
+        from_attributes = True
+
+
+class LinkHostsRequest(BaseModel):
+    """Schema for linking hosts to a device identity."""
+
+    host_ids: List[int]
 
 
 # Pagination schemas

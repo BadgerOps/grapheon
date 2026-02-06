@@ -85,6 +85,15 @@ def _run_migrations(sync_conn) -> None:
         ],
     )
 
+    # DeviceIdentity: link multi-homed hosts to the same physical device
+    _ensure_columns(
+        sync_conn,
+        "hosts",
+        [
+            ("device_id", "device_id INTEGER"),
+        ],
+    )
+
     # Migrate connections table: make remote_port nullable (for LISTEN state)
     _make_column_nullable(sync_conn, "connections", "remote_port")
 

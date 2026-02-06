@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from database import get_db
-from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig
+from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity
 
 # Set up verbose logging
 logger = logging.getLogger(__name__)
@@ -225,7 +225,24 @@ async def get_network_map(
             )
         )
         port_counts[host.id] = port_result.scalar() or 0
-    logger.info(f"[5/6] Counted ports for {len(hosts)} hosts in {(time.perf_counter() - step_start)*1000:.1f}ms")
+    logger.info(f"[5/7] Counted ports for {len(hosts)} hosts in {(time.perf_counter() - step_start)*1000:.1f}ms")
+
+    # ── Step 5.5: Fetch DeviceIdentity data for gateway combining ─
+    step_start = time.perf_counter()
+    device_id_to_hosts = defaultdict(list)  # device_id → [host, ...]
+    for host in hosts:
+        if host.device_id is not None:
+            device_id_to_hosts[host.device_id].append(host)
+
+    # Fetch DeviceIdentity records for shared gateways
+    device_identities = {}
+    if device_id_to_hosts:
+        di_result = await db.execute(
+            select(DeviceIdentity).where(DeviceIdentity.is_active.is_(True))
+        )
+        for di in di_result.scalars().all():
+            device_identities[di.id] = di
+    logger.info(f"[5.5/7] Loaded {len(device_identities)} device identities in {(time.perf_counter() - step_start)*1000:.1f}ms")
 
     # ── Step 6: Build Cytoscape elements ─────────────────────────
     step_start = time.perf_counter()
@@ -235,6 +252,28 @@ async def get_network_map(
     ip_to_host_id = {}  # For edge building
     seen_vlans = {}     # vlan_id → compound node data
     seen_subnets = {}   # subnet_cidr → compound node data
+
+    # Public IP grouping: track which hosts are public
+    public_ips_node_id = "public_ips"
+    public_ip_node_added = False
+    public_ip_count = 0
+
+    # Track hosts that belong to a shared gateway (device_id based)
+    # These will be replaced by a single shared gateway node later
+    shared_gw_host_ids = set()  # host IDs that are part of a shared gateway
+
+    # Pre-compute: which device_ids have multi-subnet gateways?
+    shared_gateway_devices = {}  # device_id → list of gateway hosts
+    for device_id, di_hosts in device_id_to_hosts.items():
+        gateway_hosts = [
+            h for h in di_hosts
+            if h.device_type and h.device_type.lower() == "router"
+        ]
+        if len(gateway_hosts) > 1:
+            # Multiple router-type hosts share a device_id → shared gateway
+            shared_gateway_devices[device_id] = gateway_hosts
+            for h in gateway_hosts:
+                shared_gw_host_ids.add(h.id)
 
     for host in hosts:
         subnet_cidr = get_subnet(host.ip_address, subnet_prefix)
@@ -246,6 +285,78 @@ async def get_network_map(
         if segment_filter and segment != segment_filter:
             continue
 
+        # ── Handle public IP hosts ────────────────────────────
+        host_is_public = not is_private_ip(host.ip_address)
+
+        if host_is_public and show_internet == "cloud":
+            # In cloud mode, public IP hosts are folded into the Internet node.
+            # Don't create individual nodes — they'll be represented by the
+            # Internet cloud + gateway routing from connections.
+            # NOTE: do NOT add to ip_to_host_id — Case 2 in edge building
+            # handles public IPs by routing through gateway → Internet.
+            continue
+
+        if host_is_public and show_internet == "hide":
+            # Don't add to ip_to_host_id so no edges reference this host.
+            continue
+
+        if host_is_public and show_internet == "show":
+            # Group all public IPs into a "Public IPs" compound node
+            public_ip_count += 1
+            ip_to_host_id[host.ip_address] = host.id
+            if not public_ip_node_added:
+                nodes.append({
+                    "data": {
+                        "id": public_ips_node_id,
+                        "label": "Internet / Public IPs",
+                        "type": "public_ips",
+                        "color": "#0ea5e9",
+                    }
+                })
+                public_ip_node_added = True
+
+            # Create node parented to the public IPs compound
+            style = _get_device_style(host)
+            label_parts = []
+            if host.hostname:
+                label_parts.append(host.hostname)
+            label_parts.append(host.ip_address)
+
+            nodes.append({
+                "data": {
+                    "id": str(host.id),
+                    "parent": public_ips_node_id,
+                    "label": "\n".join(label_parts),
+                    "tooltip": _build_node_tooltip(host, port_counts.get(host.id, 0)),
+                    "ip": host.ip_address,
+                    "hostname": host.hostname,
+                    "mac": host.mac_address,
+                    "os": host.os_name,
+                    "os_family": host.os_family,
+                    "device_type": host.device_type or "unknown",
+                    "vendor": host.vendor,
+                    "open_ports": port_counts.get(host.id, 0),
+                    "subnet": "public",
+                    "segment": None,
+                    "vlan_id": None,
+                    "vlan_name": None,
+                    "is_gateway": False,
+                    "is_public": True,
+                    "color": style["color"],
+                    "node_shape": style["shape"],
+                    "node_size": style["size"] + min(port_counts.get(host.id, 0), 15),
+                }
+            })
+            continue
+
+        # ── Skip hosts that will be represented by a shared gateway node ─
+        if host.id in shared_gw_host_ids:
+            # Don't create an individual node — a shared gateway node
+            # will be created after the loop for this device.
+            # ip_to_host_id will be set to the shared_gw_node_id later.
+            continue
+
+        # Map this host's IP → node ID (only for hosts that have nodes created)
         ip_to_host_id[host.ip_address] = host.id
 
         # ── Resolve VLAN for this host ───────────────────────
@@ -336,6 +447,7 @@ async def get_network_map(
                 "vlan_id": host_vlan_id,
                 "vlan_name": host_vlan_name,
                 "is_gateway": bool(host.device_type and host.device_type.lower() == "router"),
+                "device_id": host.device_id,
                 # Styling hints
                 "color": style["color"],
                 "node_shape": style["shape"],
@@ -343,6 +455,95 @@ async def get_network_map(
             }
         }
         nodes.append(host_node)
+
+    # ── Create shared gateway nodes (multi-homed routers) ───────
+    # For each device_id with multiple gateway hosts, create ONE shared
+    # gateway node that sits outside the subnet compounds, replacing the
+    # individual gateway host nodes that were skipped above.
+    shared_gateway_nodes = {}  # device_id → shared_gw_node_id
+
+    for device_id, gateway_hosts in shared_gateway_devices.items():
+        di = device_identities.get(device_id)
+        gw_ips = sorted(h.ip_address for h in gateway_hosts)
+        gw_subnets = sorted(set(
+            get_subnet(h.ip_address, subnet_prefix) for h in gateway_hosts
+        ))
+
+        # Build label
+        gw_name = di.name if di else gateway_hosts[0].hostname or "Shared Gateway"
+        gw_label = f"{gw_name}\n" + " / ".join(gw_ips)
+
+        # Build tooltip
+        tooltip_lines = [f"<b>{gw_name}</b>", f"Type: Shared Gateway (Device ID: {device_id})"]
+        tooltip_lines.append(f"IPs: {', '.join(gw_ips)}")
+        tooltip_lines.append(f"Subnets: {', '.join(gw_subnets)}")
+        if gateway_hosts[0].mac_address:
+            tooltip_lines.append(f"MAC: {gateway_hosts[0].mac_address}")
+        if gateway_hosts[0].vendor:
+            tooltip_lines.append(f"Vendor: {gateway_hosts[0].vendor}")
+
+        shared_gw_node_id = f"shared_gw_{device_id}"
+
+        # Determine parent: if all gateways share a VLAN, nest under that VLAN
+        # Otherwise, leave at top level (no parent)
+        gw_vlan_ids = set()
+        for h in gateway_hosts:
+            if h.vlan_id is not None:
+                gw_vlan_ids.add(h.vlan_id)
+        parent = None
+        # Don't nest in a single VLAN — shared gateways span VLANs by definition
+
+        shared_gw_data = {
+            "id": shared_gw_node_id,
+            "label": gw_label,
+            "tooltip": "<br>".join(tooltip_lines),
+            "ip": " / ".join(gw_ips),
+            "hostname": gw_name,
+            "mac": gateway_hosts[0].mac_address,
+            "os": gateway_hosts[0].os_name,
+            "os_family": gateway_hosts[0].os_family,
+            "device_type": "router",
+            "vendor": gateway_hosts[0].vendor,
+            "open_ports": sum(port_counts.get(h.id, 0) for h in gateway_hosts),
+            "subnet": ", ".join(gw_subnets),
+            "segment": None,
+            "vlan_id": None,
+            "vlan_name": None,
+            "is_gateway": True,
+            "is_shared_gateway": True,
+            "device_id": device_id,
+            "serves_subnets": gw_subnets,
+            "color": "#f97316",
+            "node_shape": "diamond",
+            "node_size": 55,
+        }
+        if parent:
+            shared_gw_data["parent"] = parent
+        nodes.append({"data": shared_gw_data})
+        shared_gateway_nodes[device_id] = shared_gw_node_id
+
+        # Map each gateway host's IP to this shared node for edge building
+        for h in gateway_hosts:
+            ip_to_host_id[h.ip_address] = shared_gw_node_id
+
+        # Create edges from shared gateway to each subnet it connects
+        for subnet_cidr in gw_subnets:
+            subnet_node_id = f"subnet_{subnet_cidr}"
+            if subnet_node_id in seen_subnets:
+                edges.append({
+                    "data": {
+                        "id": f"{shared_gw_node_id}-{subnet_node_id}",
+                        "source": shared_gw_node_id,
+                        "target": subnet_node_id,
+                        "connection_type": "to_gateway",
+                        "tooltip": f"{gw_name} → {subnet_cidr}",
+                    }
+                })
+
+        logger.info(
+            f"Created shared gateway node '{gw_name}' for device {device_id}: "
+            f"{', '.join(gw_ips)} serving {', '.join(gw_subnets)}"
+        )
 
     # ── Build edges from connections ──────────────────────────
     edge_set = set()
@@ -383,6 +584,14 @@ async def get_network_map(
 
         if source_subnet_id in subnet_gateways:
             return subnet_gateways[source_subnet_id]
+
+        # Strategy 0: check if this subnet is served by a shared gateway
+        for device_id, shared_gw_id in shared_gateway_nodes.items():
+            gw_hosts = shared_gateway_devices.get(device_id, [])
+            gw_subnets = [get_subnet(h.ip_address, subnet_prefix) for h in gw_hosts]
+            if source_subnet_cidr in gw_subnets:
+                subnet_gateways[source_subnet_id] = shared_gw_id
+                return shared_gw_id
 
         # Strategy 1: look for a router node already in this subnet
         for n in nodes:
@@ -631,12 +840,13 @@ async def get_network_map(
             d["tooltip"] = f"Gateway → Internet ({count} ext. IPs)\n{sample_str}"
             d["public_ip_count"] = count
 
-    logger.info(f"[6/6] Built {len(nodes)} elements, {len(edges)} edges ({internet_conn_count} internet-routed) in {(time.perf_counter() - step_start)*1000:.1f}ms")
+    logger.info(f"[6/7] Built {len(nodes)} elements, {len(edges)} edges ({internet_conn_count} internet-routed) in {(time.perf_counter() - step_start)*1000:.1f}ms")
 
     # ── Build response ───────────────────────────────────────────
     total_duration = (time.perf_counter() - start_time) * 1000
 
-    host_count = sum(1 for n in nodes if n["data"].get("type") not in ("vlan", "subnet", "internet"))
+    compound_types = ("vlan", "subnet", "internet", "public_ips")
+    host_count = sum(1 for n in nodes if n["data"].get("type") not in compound_types and not n["data"].get("is_shared_gateway"))
     stats = {
         "total_hosts": host_count,
         "total_edges": len(edges),
@@ -645,6 +855,8 @@ async def get_network_map(
         "cross_vlan_edges": cross_vlan_count,
         "cross_subnet_edges": cross_subnet_count,
         "internet_connections": internet_conn_count,
+        "public_ip_hosts": public_ip_count,
+        "shared_gateways": len(shared_gateway_nodes),
         "show_internet": show_internet,
         "group_mode": group_by,
         "layout_mode": layout_mode,

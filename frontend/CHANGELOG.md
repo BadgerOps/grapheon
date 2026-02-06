@@ -4,6 +4,21 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.5.0 - 2026-02-06
+### Added
+- Map fullscreen toggle using browser Fullscreen API
+- Map pop-out window at `/map/fullscreen` for chromeless visualization
+- PNG and SVG export buttons using Cytoscape built-in `cy.png()` / `cy.svg()`
+- `mapExport.js` service module for export and fullscreen utilities
+- `MapFullscreen.jsx` page component for dedicated full-viewport map view
+- Cytoscape theme selectors for "Public IPs" compound node, shared gateway nodes, and public IP host nodes (light + dark mode)
+- Edge and device legend entries for `to_gateway` and `internet` connection types
+- Device identity API client methods: CRUD, link/unlink hosts to devices
+
+### Changed
+- `App.jsx` conditionally hides nav/footer when on fullscreen map route
+- `CytoscapeNetworkMap.jsx` gains fullscreen state management, three new control buttons, and updated legend
+
 ## 0.4.1 - 2026-02-06
 ### Fixed
 - "Check for Updates" button in Settings now bypasses the server-side release cache, so manual checks always query GitHub for the latest version instead of returning stale cached results

@@ -5,6 +5,7 @@ import Hosts from './pages/Hosts'
 import HostDetail from './pages/HostDetail'
 import Import from './pages/Import'
 import Map from './pages/Map'
+import MapFullscreen from './pages/MapFullscreen'
 import Search from './pages/Search'
 import Connections from './pages/Connections'
 import Arp from './pages/Arp'
@@ -76,6 +77,7 @@ function NavLink({ to, children, icon }) {
 export default function App() {
   const { theme, toggleTheme } = useTheme()
   const [backendVersion, setBackendVersion] = useState('...')
+  const location = useLocation()
 
   useEffect(() => {
     api.getBackendInfo()
@@ -83,10 +85,13 @@ export default function App() {
       .catch(() => setBackendVersion('?'))
   }, [])
 
+  // Hide nav/footer on fullscreen map route
+  const isMapFullscreen = location.pathname.startsWith('/map/fullscreen')
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
       {/* Navigation */}
-      <nav className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50">
+      {!isMapFullscreen && (<nav className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50">
         <div className="max-w-full mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
@@ -225,13 +230,15 @@ export default function App() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Update notification banner */}
-      <UpdateBanner />
+      {!isMapFullscreen && <UpdateBanner />}
 
       {/* Main Content */}
       <main className="flex-1">
         <Routes>
+          <Route path="/map/fullscreen" element={<MapFullscreen />} />
           <Route path="/" element={<Dashboard />} />
           <Route path="/hosts" element={<Hosts />} />
           <Route path="/hosts/:id" element={<HostDetail />} />
@@ -246,7 +253,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-6">
+      {!isMapFullscreen && (<footer className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-6">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -272,6 +279,7 @@ export default function App() {
           </div>
         </div>
       </footer>
+      )}
     </div>
   )
 }

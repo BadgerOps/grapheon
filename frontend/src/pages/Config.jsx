@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import * as api from '../api/client'
+import { version as frontendVersion } from '../../package.json'
 
 /**
  * Config Page - System settings and maintenance
  *
  * Features:
+ * - Software update check
  * - Database statistics
  * - MAC vendor lookup
  * - Database backup/restore
@@ -21,16 +23,93 @@ export default function Config() {
     backup: false,
     restore: false,
     cleanup: false,
+    updateCheck: false,
   })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [cleanupDays, setCleanupDays] = useState(90)
   const [cleanupPreview, setCleanupPreview] = useState(null)
 
+  // Update check state
+  const [updateInfo, setUpdateInfo] = useState(null)
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const [upgradeStep, setUpgradeStep] = useState(null) // null, 'confirm', 'in_progress', 'completed', 'failed'
+  const [upgradeMessage, setUpgradeMessage] = useState('')
+  const statusPollRef = useRef(null)
+  const reloadTimeoutRef = useRef(null)
+  const [backendVersion, setBackendVersion] = useState('...')
+
   useEffect(() => {
     fetchStats()
     fetchBackups()
+    api.getBackendInfo()
+      .then(info => setBackendVersion(info.version))
+      .catch(() => setBackendVersion('?'))
+    return () => {
+      if (statusPollRef.current) clearInterval(statusPollRef.current)
+      if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current)
+    }
   }, [])
+
+  const handleCheckForUpdates = async () => {
+    try {
+      setLoading(prev => ({ ...prev, updateCheck: true }))
+      setError('')
+      const data = await api.checkForUpdates()
+      setUpdateInfo(data)
+      setShowUpdateModal(true)
+      setUpgradeStep(null)
+      setUpgradeMessage('')
+    } catch (err) {
+      setError('Failed to check for updates: ' + err.message)
+    } finally {
+      setLoading(prev => ({ ...prev, updateCheck: false }))
+    }
+  }
+
+  const handleStartUpgrade = async () => {
+    setUpgradeStep('in_progress')
+    setUpgradeMessage('Starting upgrade...')
+    try {
+      await api.triggerUpgrade()
+      let attempt = 0
+      const maxAttempts = 120
+      statusPollRef.current = setInterval(async () => {
+        attempt++
+        try {
+          const status = await api.getUpgradeStatus()
+          if (status.status === 'running') {
+            setUpgradeMessage(status.message || 'Upgrading...')
+          } else if (status.status === 'completed') {
+            clearInterval(statusPollRef.current)
+            setUpgradeStep('completed')
+            setUpgradeMessage('Upgrade complete! Refreshing in 3 seconds...')
+            reloadTimeoutRef.current = setTimeout(() => window.location.reload(), 3000)
+          } else if (status.status === 'failed') {
+            clearInterval(statusPollRef.current)
+            setUpgradeStep('failed')
+            setUpgradeMessage(status.message || 'Upgrade failed.')
+          }
+        } catch {
+          if (attempt >= maxAttempts) {
+            clearInterval(statusPollRef.current)
+            setUpgradeStep('failed')
+            setUpgradeMessage('Status check timed out. The upgrade may still be running.')
+          }
+        }
+      }, 5000)
+    } catch (err) {
+      setUpgradeStep('failed')
+      setUpgradeMessage('Failed to start upgrade: ' + err.message)
+    }
+  }
+
+  const closeUpdateModal = () => {
+    if (statusPollRef.current) clearInterval(statusPollRef.current)
+    setShowUpdateModal(false)
+    setUpgradeStep(null)
+    setUpgradeMessage('')
+  }
 
   const fetchStats = async () => {
     try {
@@ -206,6 +285,225 @@ export default function Config() {
       )}
 
       <div className="grid gap-6">
+        {/* Software Updates */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Software Updates
+          </h2>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="inline-flex items-center gap-1.5">
+                Running:
+                <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-medium">
+                  UI v{frontendVersion}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-xs font-medium">
+                  API v{backendVersion}
+                </span>
+              </span>
+            </div>
+            <button
+              onClick={handleCheckForUpdates}
+              disabled={loading.updateCheck}
+              className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 dark:disabled:bg-indigo-800 text-white rounded-md transition-colors flex items-center gap-2"
+            >
+              {loading.updateCheck ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Checking...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  Check for Updates
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        {/* Update Modal */}
+        {showUpdateModal && updateInfo && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+              {/* Modal header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {upgradeStep === 'in_progress' ? 'Upgrading...' :
+                   upgradeStep === 'completed' ? 'Upgrade Complete' :
+                   upgradeStep === 'failed' ? 'Upgrade Failed' :
+                   updateInfo.update_available ? 'Update Available' : 'Up to Date'}
+                </h3>
+                {upgradeStep !== 'in_progress' && (
+                  <button
+                    onClick={closeUpdateModal}
+                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Modal body */}
+              <div className="px-6 py-4 overflow-y-auto flex-1">
+                {/* Upgrade in progress */}
+                {upgradeStep === 'in_progress' && (
+                  <div className="flex flex-col items-center py-8 gap-4">
+                    <svg className="animate-spin w-10 h-10 text-indigo-500" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="text-gray-700 dark:text-gray-300 text-center">{upgradeMessage}</p>
+                  </div>
+                )}
+
+                {/* Upgrade completed */}
+                {upgradeStep === 'completed' && (
+                  <div className="flex flex-col items-center py-8 gap-4">
+                    <svg className="w-12 h-12 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-gray-700 dark:text-gray-300 text-center">{upgradeMessage}</p>
+                  </div>
+                )}
+
+                {/* Upgrade failed */}
+                {upgradeStep === 'failed' && (
+                  <div className="flex flex-col items-center py-8 gap-4">
+                    <svg className="w-12 h-12 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-red-600 dark:text-red-400 text-center">{upgradeMessage}</p>
+                  </div>
+                )}
+
+                {/* Normal state: show version info + release notes */}
+                {upgradeStep === null && (
+                  <>
+                    {updateInfo.update_available ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
+                            v{updateInfo.latest_version}
+                          </span>
+                          {updateInfo.published_at && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              Released {new Date(updateInfo.published_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                          <p>Current backend: <span className="font-mono">{updateInfo.current_backend_version}</span></p>
+                          <p>Latest backend: <span className="font-mono">{updateInfo.latest_backend_version}</span></p>
+                          {updateInfo.latest_frontend_version && (
+                            <p>Latest frontend: <span className="font-mono">{updateInfo.latest_frontend_version}</span></p>
+                          )}
+                        </div>
+
+                        {updateInfo.release_notes && (
+                          <div className="mt-4">
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Release Notes</h4>
+                            <pre className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap font-sans leading-relaxed">
+                              {updateInfo.release_notes}
+                            </pre>
+                          </div>
+                        )}
+
+                        {updateInfo.release_url && (
+                          <a
+                            href={updateInfo.release_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                          >
+                            View on GitHub
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center py-6 gap-3">
+                        <svg className="w-12 h-12 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <p className="text-gray-700 dark:text-gray-300 font-medium">You're running the latest version.</p>
+                        {updateInfo.error && (
+                          <p className="text-sm text-amber-600 dark:text-amber-400">{updateInfo.error}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Modal footer */}
+              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                {upgradeStep === null && updateInfo.update_available && (
+                  <>
+                    <button
+                      onClick={closeUpdateModal}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                    >
+                      Later
+                    </button>
+                    <button
+                      onClick={handleStartUpgrade}
+                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                    >
+                      Upgrade now
+                    </button>
+                  </>
+                )}
+                {upgradeStep === null && !updateInfo.update_available && (
+                  <button
+                    onClick={closeUpdateModal}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                )}
+                {upgradeStep === 'failed' && (
+                  <>
+                    <button
+                      onClick={closeUpdateModal}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      onClick={handleStartUpgrade}
+                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                    >
+                      Try again
+                    </button>
+                  </>
+                )}
+                {upgradeStep === 'completed' && (
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                  >
+                    Refresh now
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Database Statistics */}
         <section className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">

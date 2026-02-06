@@ -4,6 +4,14 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.3.0 - 2026-02-05
+### Added
+- In-app update check: new `/api/updates` endpoint queries GitHub Releases API for latest versions (1-hour cached)
+- In-app upgrade trigger: `POST /api/updates/upgrade` writes a trigger file for the host-level systemd path unit
+- Upgrade status polling: `GET /api/updates/status` reads progress from the host upgrade handler
+- New `updates` router with full semver comparison for backend and frontend versions
+- Added `httpx` dependency for async HTTP requests to GitHub API
+
 ## 0.2.0 - 2026-02-05
 ### Added
 - VLAN support: new `VLANConfig` model with subnet-to-VLAN CIDR mapping

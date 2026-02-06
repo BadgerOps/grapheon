@@ -4,6 +4,17 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.3.0 - 2026-02-05
+### Added
+- In-app update notification banner: polls backend for available updates every 60 minutes
+- UpdateBanner component with expandable release notes, upgrade confirmation dialog, and progress tracking
+- Dismissible banner with localStorage persistence (reappears for new versions)
+- Upgrade flow: confirm → in-progress (with status polling) → complete (auto-refresh) or error (retry)
+- New API client methods: `checkForUpdates()`, `triggerUpgrade()`, `getUpgradeStatus()`
+- Slide-down animation for banner appearance
+- Manual "Check for Updates" button in Settings page with version info and current version badges
+- Update modal in Settings: shows version comparison, release notes, release date, GitHub link, and upgrade option
+
 ## 0.2.0 - 2026-02-05
 ### Added
 - Cytoscape.js network visualization replacing vis-network, with compound node hierarchy (VLAN -> Subnet -> Host)

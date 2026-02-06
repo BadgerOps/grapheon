@@ -16,6 +16,7 @@ from routers import (
     export_router,
     maintenance_router,
     vlans_router,
+    updates_router,
 )
 from utils.logging_utils import setup_logging, get_logger
 
@@ -108,6 +109,7 @@ app.include_router(search_router)
 app.include_router(export_router)
 app.include_router(maintenance_router)
 app.include_router(vlans_router)
+app.include_router(updates_router)
 
 
 @app.get("/health", tags=["health"])

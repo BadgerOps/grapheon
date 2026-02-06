@@ -356,3 +356,19 @@ export async function healthCheck() {
 export async function getBackendInfo() {
   return apiCall('GET', '/info')
 }
+
+// ============================================
+// Update check endpoints
+// ============================================
+
+export async function checkForUpdates() {
+  return apiCall('GET', '/updates')
+}
+
+export async function triggerUpgrade() {
+  return apiCall('POST', '/updates/upgrade')
+}
+
+export async function getUpgradeStatus() {
+  return apiCall('GET', '/updates/status')
+}

@@ -48,7 +48,11 @@ HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._\-]+$")
 RAW_DATA_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def _validate_ip(value: str, field_name: str = "IP address") -> str:
+def _validate_ip(
+    value: str,
+    field_name: str = "IP address",
+    allow_unspecified: bool = False,
+) -> str:
     """Validate an IPv4 or IPv6 address string."""
     try:
         addr = parse_ip(value)
@@ -57,7 +61,7 @@ def _validate_ip(value: str, field_name: str = "IP address") -> str:
             f"Invalid {field_name} '{value}'. "
             "Expected IPv4 (e.g. 192.168.1.1) or IPv6 (e.g. 2001:db8::1)"
         )
-    if addr.is_unspecified:
+    if addr.is_unspecified and not allow_unspecified:
         raise ValueError(
             f"Unspecified {field_name} ({value}) is not allowed"
         )
@@ -469,12 +473,14 @@ class ConnectionBase(BaseModel):
     @field_validator("local_ip")
     @classmethod
     def validate_local_ip(cls, v: str) -> str:
-        return _validate_ip(v, "local IP address")
+        # Connections allow 0.0.0.0 (LISTEN state binds to all interfaces)
+        return _validate_ip(v, "local IP address", allow_unspecified=True)
 
     @field_validator("remote_ip")
     @classmethod
     def validate_remote_ip(cls, v: str) -> str:
-        return _validate_ip(v, "remote IP address")
+        # Connections allow 0.0.0.0 (LISTEN state has no remote peer)
+        return _validate_ip(v, "remote IP address", allow_unspecified=True)
 
     @field_validator("protocol")
     @classmethod

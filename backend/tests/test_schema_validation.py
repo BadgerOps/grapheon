@@ -628,16 +628,16 @@ class TestConnectionBaseIPAddresses:
         error_str = str(exc_info.value).lower()
         assert "invalid" in error_str and "ip" in error_str
 
-    def test_unspecified_local_ip_rejected(self):
-        """Unspecified local IP (0.0.0.0) should be rejected."""
-        with pytest.raises(ValidationError) as exc_info:
-            ConnectionBase(
-                local_ip="0.0.0.0",
-                local_port=1234,
-                remote_ip="8.8.8.8",
-                protocol="tcp"
-            )
-        assert "Unspecified" in str(exc_info.value)
+    def test_unspecified_local_ip_allowed(self):
+        """Unspecified local IP (0.0.0.0) is valid for connections (LISTEN state)."""
+        conn = ConnectionBase(
+            local_ip="0.0.0.0",
+            local_port=1234,
+            remote_ip="0.0.0.0",
+            protocol="tcp"
+        )
+        assert conn.local_ip == "0.0.0.0"
+        assert conn.remote_ip == "0.0.0.0"
 
 
 class TestConnectionBasePorts:

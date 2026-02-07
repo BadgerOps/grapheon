@@ -17,7 +17,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - IdP-to-app role mapping via `RoleMapping` table with support for dotted claim paths (e.g., `resource_access.app.roles`)
 - Audit logger now tracks authenticated actor via ContextVar (replaces hardcoded "user" strings)
 - 33 new auth tests covering JWT, endpoints, RBAC, role mapping, OIDC service, feature flags, local admin bootstrap, and provider registration
-- Added `authlib`, `passlib[bcrypt]`, `python-jose[cryptography]` to dependencies
+- Added `authlib`, `bcrypt`, `python-jose[cryptography]` to dependencies
 
 ## 0.7.0 - 2026-02-07
 ### Added

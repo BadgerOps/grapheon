@@ -13,7 +13,7 @@ import pytest
 from datetime import timedelta
 from jose import JWTError
 from httpx import AsyncClient
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 
 from auth.jwt_service import create_access_token, verify_access_token
 from auth.oidc_service import resolve_role, _get_nested_claim
@@ -81,8 +81,19 @@ class TestJWTService:
         """Test that a tampered token raises JWTError when verified."""
         token = create_access_token(user_id=999, role="admin")
 
-        # Tamper with the token (change last character)
-        tampered_token = token[:-1] + ("x" if token[-1] != "x" else "y")
+        # Tamper with the payload section (middle segment) to reliably
+        # invalidate the signature.  Swapping two characters in the
+        # base64url-encoded payload virtually guarantees an invalid
+        # HMAC, unlike changing the last byte of the signature which
+        # can (rarely) still decode to a valid token.
+        parts = token.split(".")
+        assert len(parts) == 3, "JWT must have 3 dot-separated parts"
+        payload = list(parts[1])
+        # Swap first two characters of the payload section
+        if len(payload) >= 2:
+            payload[0], payload[1] = payload[1], payload[0]
+        parts[1] = "".join(payload)
+        tampered_token = ".".join(parts)
 
         # Attempting to verify should raise JWTError
         with pytest.raises(JWTError):
@@ -129,9 +140,8 @@ class TestAuthEndpoints:
     async def test_local_login_success(self, async_client: AsyncClient):
         """Test successful local login with valid credentials."""
         # Setup: Create a test user with password hash
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         password = "test_password_123"
-        password_hash = pwd_context.hash(password)
+        password_hash = _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
         # Get database session from the app's override
         db_gen = app.dependency_overrides[get_db]()
@@ -169,8 +179,7 @@ class TestAuthEndpoints:
     async def test_local_login_wrong_password(self, async_client: AsyncClient):
         """Test local login fails with wrong password."""
         # Setup: Create a test user
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        password_hash = pwd_context.hash("correct_password")
+        password_hash = _bcrypt.hashpw("correct_password".encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
         db_gen = app.dependency_overrides[get_db]()
         db = await db_gen.__anext__()
@@ -210,9 +219,8 @@ class TestAuthEndpoints:
     async def test_local_login_disabled_user(self, async_client: AsyncClient):
         """Test local login fails for disabled user account."""
         # Setup: Create a disabled user
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         password = "password123"
-        password_hash = pwd_context.hash(password)
+        password_hash = _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
         db_gen = app.dependency_overrides[get_db]()
         db = await db_gen.__anext__()
@@ -751,19 +759,17 @@ class TestLocalAdminBootstrap:
     @pytest.mark.asyncio
     async def test_bootstrap_creates_admin(self, async_client: AsyncClient):
         """Verify a local admin can be created and used to login."""
-        from passlib.context import CryptContext
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
         db_gen = app.dependency_overrides[get_db]()
         db = await db_gen.__anext__()
 
         # Simulate bootstrap: create admin with known password
+        password_hash = _bcrypt.hashpw("bootstrap_pass_123".encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
         user = User(
             username="bootstrap_admin",
             email="bootstrap@example.com",
             role="admin",
             is_active=True,
-            local_password_hash=pwd_context.hash("bootstrap_pass_123"),
+            local_password_hash=password_hash,
         )
         db.add(user)
         await db.commit()

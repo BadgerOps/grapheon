@@ -17,9 +17,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from passlib.context import CryptContext
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +35,15 @@ from utils.audit import audit
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    """Hash a password with bcrypt."""
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    """Verify a password against a bcrypt hash."""
+    return _bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
 
 # ── Schemas ────────────────────────────────────────────────────────────
@@ -276,7 +285,7 @@ async def local_login(
     )
     user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(request.password, user.local_password_hash):
+    if not user or not _verify_password(request.password, user.local_password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",

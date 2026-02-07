@@ -50,20 +50,23 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import select as sa_select
         from database import AsyncSessionLocal
         from models import User
-        from passlib.context import CryptContext
+        import bcrypt
 
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 sa_select(User).where(User.username == settings.LOCAL_ADMIN_USERNAME)
             )
             if not result.scalar_one_or_none():
-                pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+                hashed = bcrypt.hashpw(
+                    settings.LOCAL_ADMIN_PASSWORD.encode("utf-8"),
+                    bcrypt.gensalt(),
+                ).decode("utf-8")
                 admin = User(
                     username=settings.LOCAL_ADMIN_USERNAME,
                     email=settings.LOCAL_ADMIN_EMAIL or f"{settings.LOCAL_ADMIN_USERNAME}@localhost",
                     display_name=settings.LOCAL_ADMIN_USERNAME,
                     role="admin",
-                    local_password_hash=pwd_ctx.hash(settings.LOCAL_ADMIN_PASSWORD),
+                    local_password_hash=hashed,
                     is_active=True,
                 )
                 db.add(admin)

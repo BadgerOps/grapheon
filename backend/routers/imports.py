@@ -8,7 +8,8 @@ from datetime import datetime
 from ipaddress import ip_address as parse_ip
 
 from database import get_db
-from models import RawImport, Host, Port, Connection, ARPEntry
+from models import RawImport, Host, Port, Connection, ARPEntry, User
+from auth.dependencies import require_any_authenticated, require_editor
 from schemas import RawImportResponse, PaginatedResponse
 from parsers import get_parser, PARSERS
 from utils.tagging import (
@@ -399,6 +400,7 @@ async def import_raw_data(
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -457,6 +459,7 @@ async def import_file(
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -515,6 +518,7 @@ async def list_imports(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     source_type: Optional[str] = Query(None),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -556,7 +560,7 @@ async def list_imports(
 
 
 @router.get("/parsers", response_model=dict)
-async def list_parsers():
+async def list_parsers(user: User = Depends(require_any_authenticated)):
     """List available parsers."""
     return {
         "parsers": list(PARSERS.keys()),
@@ -565,7 +569,7 @@ async def list_parsers():
 
 
 @router.get("/{import_id}", response_model=dict)
-async def get_import(import_id: int, db: AsyncSession = Depends(get_db)):
+async def get_import(import_id: int, user: User = Depends(require_any_authenticated), db: AsyncSession = Depends(get_db)):
     """
     Get import details by ID, including raw data.
     """
@@ -584,7 +588,7 @@ async def get_import(import_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{import_id}/reparse", response_model=RawImportResponse)
-async def reparse_import(import_id: int, db: AsyncSession = Depends(get_db)):
+async def reparse_import(import_id: int, user: User = Depends(require_editor), db: AsyncSession = Depends(get_db)):
     """
     Re-parse an existing import record.
     """
@@ -612,6 +616,7 @@ async def bulk_import_files(
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """

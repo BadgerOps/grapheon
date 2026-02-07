@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func, cast, String
 
 from database import get_db
-from models import Host, Port, Connection, ARPEntry, RawImport
+from auth.dependencies import require_any_authenticated
+from models import Host, Port, Connection, ARPEntry, RawImport, User
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -25,6 +26,7 @@ async def search_all(
     q: str = Query(..., min_length=1, description="Search query"),
     types: Optional[str] = Query(None, description="Comma-separated types: hosts,ports,connections,arp,imports"),
     limit: int = Query(50, ge=1, le=500, description="Results per type"),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -228,6 +230,7 @@ async def search_hosts(
     q: str = Query(..., min_length=1),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Search only hosts with pagination."""
@@ -280,6 +283,7 @@ async def search_hosts(
 async def get_suggestions(
     q: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """

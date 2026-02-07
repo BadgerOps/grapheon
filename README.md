@@ -32,9 +32,28 @@ nix develop -c bash -lc "cd frontend && npm run dev"
 nix develop -c .venv/bin/python -m pytest
 ```
 
+## Authentication
+
+Graphēon supports multi-provider OIDC authentication (Okta, Google, GitHub, GitLab, Authentik) with 3-tier RBAC (admin/editor/viewer) and a local admin fallback.
+
+**Quick start — local admin only:**
+
+```bash
+export LOCAL_ADMIN_USERNAME=admin
+export LOCAL_ADMIN_EMAIL=admin@example.com
+export LOCAL_ADMIN_PASSWORD=changeme
+export JWT_SECRET=$(openssl rand -hex 32)
+```
+
+The admin user is created automatically on first startup. Auth is enabled by default but not enforced (`ENFORCE_AUTH=False`), so existing deployments continue to work without interruption.
+
+Set `ENFORCE_AUTH=True` when ready to require login for all users.
+
+See `docs/AUTH_PROVIDER.md` for the full setup guide including OIDC provider configuration, role mapping, and container deployment.
+
 ## Docs
 
-See `docs/README.md` for architecture and workflow details.
+See `docs/README.md` for architecture and workflow details, and `docs/AUTH_PROVIDER.md` for authentication setup.
 
 ## Cloudflare Deployment
 

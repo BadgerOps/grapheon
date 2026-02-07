@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from database import get_db
-from models import ARPEntry
+from auth.dependencies import require_any_authenticated
+from models import ARPEntry, User
 from schemas import ARPEntryResponse, PaginatedResponse
 
 router = APIRouter(prefix="/api/arp", tags=["arp"])
@@ -17,6 +18,7 @@ async def list_arp_entries(
     ip_address: Optional[str] = Query(None),
     mac_address: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(ARPEntry)

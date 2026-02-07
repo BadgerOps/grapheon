@@ -2,10 +2,12 @@ const API_BASE = '/api'
 
 // Utility function for making API requests
 async function apiCall(method, endpoint, body = null, params = null) {
+  const token = localStorage.getItem('auth_token')
   const options = {
     method,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   }
 
@@ -31,6 +33,11 @@ async function apiCall(method, endpoint, body = null, params = null) {
   const response = await fetch(url, options)
 
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token')
+      window.location.href = '/login'
+      throw new Error('Session expired. Please log in again.')
+    }
     const error = await response.json().catch(() => ({}))
     throw new Error(error.detail || `API error: ${response.status} ${response.statusText}`)
   }
@@ -74,9 +81,11 @@ export async function importRaw(sourceType, sourceHost, rawData) {
     formData.append('source_host', sourceHost)
   }
 
+  const token = localStorage.getItem('auth_token')
   const response = await fetch(`${API_BASE}/imports/raw`, {
     method: 'POST',
     body: formData,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
     // Note: Don't set Content-Type header - browser will set it with boundary
   })
 
@@ -94,9 +103,11 @@ export async function importFile(file, sourceType, sourceHost) {
   formData.append('source_type', sourceType)
   formData.append('source_host', sourceHost)
 
+  const token = localStorage.getItem('auth_token')
   const response = await fetch(`${API_BASE}/imports/file`, {
     method: 'POST',
     body: formData,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   })
 
   if (!response.ok) {
@@ -233,7 +244,10 @@ export async function exportHosts(format = 'csv', includePorts = false, activeOn
     include_ports: includePorts,
     active_only: activeOnly,
   })
-  const response = await fetch(`${API_BASE}/export/hosts?${params}`)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(`${API_BASE}/export/hosts?${params}`, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -245,7 +259,10 @@ export async function exportPorts(format = 'csv', openOnly = true) {
     format,
     open_only: openOnly,
   })
-  const response = await fetch(`${API_BASE}/export/ports?${params}`)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(`${API_BASE}/export/ports?${params}`, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -255,7 +272,10 @@ export async function exportPorts(format = 'csv', openOnly = true) {
 export async function exportConnections(format = 'csv', state = null) {
   const params = new URLSearchParams({ format })
   if (state) params.append('state', state)
-  const response = await fetch(`${API_BASE}/export/connections?${params}`)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(`${API_BASE}/export/connections?${params}`, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -263,7 +283,10 @@ export async function exportConnections(format = 'csv', state = null) {
 }
 
 export async function exportAll(format = 'json') {
-  const response = await fetch(`${API_BASE}/export/all?format=${format}`)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(`${API_BASE}/export/all?format=${format}`, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -280,7 +303,10 @@ export async function exportNetworkGraphML(subnetFilter = null, showInternet = '
   if (showInternet) params.append('show_internet', showInternet)
   const paramStr = params.toString()
   const url = `${API_BASE}/export/network/graphml${paramStr ? '?' + paramStr : ''}`
-  const response = await fetch(url)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(url, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -293,7 +319,10 @@ export async function exportNetworkDrawio(subnetFilter = null, showInternet = 'c
   if (showInternet) params.append('show_internet', showInternet)
   const paramStr = params.toString()
   const url = `${API_BASE}/export/network/drawio${paramStr ? '?' + paramStr : ''}`
-  const response = await fetch(url)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(url, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Export error: ${response.status}`)
   }
@@ -335,7 +364,10 @@ export async function listBackups() {
 }
 
 export async function downloadBackup(filename) {
-  const response = await fetch(`${API_BASE}/maintenance/backup/download/${encodeURIComponent(filename)}`)
+  const token = localStorage.getItem('auth_token')
+  const response = await fetch(`${API_BASE}/maintenance/backup/download/${encodeURIComponent(filename)}`, {
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  })
   if (!response.ok) {
     throw new Error(`Download error: ${response.status}`)
   }
@@ -383,9 +415,11 @@ export async function importBulk(files, sourceType, sourceHost) {
     formData.append('source_host', sourceHost)
   }
 
+  const token = localStorage.getItem('auth_token')
   const response = await fetch(`${API_BASE}/imports/bulk`, {
     method: 'POST',
     body: formData,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   })
 
   if (!response.ok) {
@@ -454,4 +488,36 @@ export async function linkHostsToDevice(deviceId, hostIds) {
 
 export async function unlinkHostFromDevice(deviceId, hostId) {
   return apiCall('POST', `/device-identities/${deviceId}/unlink-host/${hostId}`)
+}
+
+// ============================================
+// Auth endpoints
+// ============================================
+
+export async function getProviders() {
+  return apiCall('GET', '/auth/providers')
+}
+
+export async function authCallback(data) {
+  return apiCall('POST', '/auth/callback', data)
+}
+
+export async function localLogin(username, password) {
+  return apiCall('POST', '/auth/login/local', { username, password })
+}
+
+export async function getCurrentUser() {
+  return apiCall('GET', '/auth/me')
+}
+
+export async function authLogout() {
+  return apiCall('POST', '/auth/logout')
+}
+
+export async function getUsers() {
+  return apiCall('GET', '/auth/users')
+}
+
+export async function updateUserRole(userId, role) {
+  return apiCall('PATCH', `/auth/users/${userId}/role`, { role })
 }

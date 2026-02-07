@@ -4,7 +4,8 @@ from sqlalchemy import select, func
 from datetime import datetime
 
 from database import get_db
-from models import Host, Port
+from models import Host, Port, User
+from auth.dependencies import require_any_authenticated, require_editor
 from schemas import (
     HostCreate,
     HostUpdate,
@@ -22,6 +23,7 @@ async def list_hosts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: bool = Query(True),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -69,7 +71,7 @@ async def list_hosts(
 
 
 @router.get("/{host_id}", response_model=dict)
-async def get_host(host_id: int, db: AsyncSession = Depends(get_db)):
+async def get_host(host_id: int, user: User = Depends(require_any_authenticated), db: AsyncSession = Depends(get_db)):
     """
     Get a single host by ID with its associated ports.
     """
@@ -95,6 +97,7 @@ async def get_host(host_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("", response_model=HostResponse, status_code=201)
 async def create_host(
     host: HostCreate,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -150,6 +153,7 @@ async def create_host(
 async def update_host(
     host_id: int,
     host_update: HostUpdate,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -177,7 +181,7 @@ async def update_host(
 
 
 @router.delete("/{host_id}", status_code=204)
-async def delete_host(host_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_host(host_id: int, user: User = Depends(require_editor), db: AsyncSession = Depends(get_db)):
     """
     Soft delete a host by setting is_active to False.
     """

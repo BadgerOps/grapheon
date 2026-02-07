@@ -34,9 +34,10 @@ cd frontend && npm install
 
 ```
 backend/
-  models/       # SQLAlchemy ORM (Host, Port, Connection, ARPEntry, RouteHop, RawImport, Conflict)
+  models/       # SQLAlchemy ORM (Host, Port, Connection, ARPEntry, RouteHop, RawImport, Conflict, User, AuthProvider, RoleMapping)
+  auth/         # Authentication: jwt_service, oidc_service, dependencies, abac_stubs
   parsers/      # 6 data parsers (nmap, netstat, arp, ping, traceroute, pcap)
-  routers/      # 12 API routers (hosts, imports, correlate, network, connections, arp, search, export, maintenance, vlans, updates, device_identities)
+  routers/      # 13 API routers (hosts, imports, correlate, network, connections, arp, search, export, maintenance, vlans, updates, device_identities, auth)
   export_converters/  # Graph format exporters (GraphML, draw.io)
   services/     # Correlation engine, vendor lookup, data aging
   main.py       # FastAPI entry point
@@ -45,8 +46,9 @@ backend/
   config.py     # Settings
 
 frontend/
-  src/pages/    # 10 pages (Dashboard, Hosts, Map, Import, Connections, ARP, Search, Config, HostDetail)
-  src/components/  # NetworkMap (vis-network), HostTable, etc.
+  src/pages/    # 11 pages (Dashboard, Hosts, Map, Import, Connections, ARP, Search, Config, HostDetail, Changelog, Login)
+  src/components/  # NetworkMap (Cytoscape.js), HostTable, ProtectedRoute, UserMenu, etc.
+  src/context/  # AuthContext provider
   src/api/client.js  # API client
 
 tasks/          # Task tracking and lessons learned
@@ -61,6 +63,7 @@ docs/           # Architecture, backend, frontend, deployment docs
 - **Visualization**: Cytoscape.js with compound nodes (VLAN→Subnet→Host), three layout modes (dagre/fcose/cola), device-type shapes/colors
 - **Graph Export**: Network topology exportable to GraphML (Gephi/yEd) and draw.io (diagrams.net) via `/api/export/network/{format}`
 - **Database**: SQLite with JSON columns for tags, source_types, conflict values
+- **Authentication**: Multi-provider OIDC via authlib + local admin fallback. JWT (HS256) tokens. 3-tier RBAC (admin/editor/viewer) enforced via FastAPI `Depends()`. Feature flags (`AUTH_ENABLED`, `ENFORCE_AUTH`) for gradual rollout.
 
 ## Data Hygiene
 

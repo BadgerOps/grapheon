@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from database import get_db
-from models import VLANConfig, Host
+from models import VLANConfig, Host, User
+from auth.dependencies import require_any_authenticated, require_editor
 from utils.audit import audit
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ VLAN_COLORS = [
 
 @router.get("")
 async def list_vlans(
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """List all configured VLANs with host counts."""
@@ -73,6 +75,7 @@ async def list_vlans(
 @router.get("/{vlan_id}")
 async def get_vlan(
     vlan_id: int,
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Get a specific VLAN configuration."""
@@ -115,6 +118,7 @@ async def create_vlan(
     subnet_cidrs: Optional[str] = Query(None, description="Comma-separated CIDR list, e.g. '192.168.10.0/24,10.0.0.0/8'"),
     color: Optional[str] = Query(None, description="Hex color for visualization, e.g. '#3b82f6'"),
     is_management: bool = Query(False, description="Management VLAN flag"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Create a new VLAN configuration."""
@@ -164,6 +168,7 @@ async def update_vlan(
     subnet_cidrs: Optional[str] = Query(None, description="Comma-separated CIDR list"),
     color: Optional[str] = Query(None),
     is_management: Optional[bool] = Query(None),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Update an existing VLAN configuration."""
@@ -204,6 +209,7 @@ async def update_vlan(
 @router.delete("/{vlan_id}")
 async def delete_vlan(
     vlan_id: int,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Delete a VLAN configuration."""
@@ -239,6 +245,7 @@ async def delete_vlan(
 
 @router.post("/auto-assign")
 async def auto_assign_vlans(
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """

@@ -11,7 +11,11 @@ import Connections from './pages/Connections'
 import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
 import Config from './pages/Config'
+import Login from './pages/Login'
+import ProtectedRoute from './components/ProtectedRoute'
+import UserMenu from './components/UserMenu'
 import UpdateBanner from './components/UpdateBanner'
+import { useAuth } from './context/AuthContext'
 import { version as frontendVersion } from '../package.json'
 import * as api from './api/client'
 
@@ -76,6 +80,7 @@ function NavLink({ to, children, icon }) {
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
+  const { isAuthenticated, hasRole, loading: authLoading } = useAuth()
   const [backendVersion, setBackendVersion] = useState('...')
   const location = useLocation()
 
@@ -91,7 +96,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
       {/* Navigation */}
-      {!isMapFullscreen && (<nav className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50">
+      {!isMapFullscreen && isAuthenticated && (<nav className="bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50">
         <div className="max-w-full mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
@@ -178,32 +183,37 @@ export default function App() {
                 Search
               </NavLink>
 
-              <NavLink
-                to="/import"
-                icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                }
-              >
-                Import
-              </NavLink>
+              {hasRole('editor') && (
+                <NavLink
+                  to="/import"
+                  icon={
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                  }
+                >
+                  Import
+                </NavLink>
+              )}
 
-              <NavLink
-                to="/config"
-                icon={
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                }
-              >
-                Settings
-              </NavLink>
+              {hasRole('admin') && (
+                <NavLink
+                  to="/config"
+                  icon={
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  }
+                >
+                  Settings
+                </NavLink>
+              )}
             </div>
 
             {/* Theme toggle */}
             <div className="flex items-center gap-3">
+              <UserMenu />
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -233,27 +243,28 @@ export default function App() {
       )}
 
       {/* Update notification banner */}
-      {!isMapFullscreen && <UpdateBanner />}
+      {!isMapFullscreen && isAuthenticated && <UpdateBanner />}
 
       {/* Main Content */}
       <main className="flex-1">
         <Routes>
-          <Route path="/map/fullscreen" element={<MapFullscreen />} />
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/hosts" element={<Hosts />} />
-          <Route path="/hosts/:id" element={<HostDetail />} />
-          <Route path="/map" element={<Map />} />
-          <Route path="/connections" element={<Connections />} />
-          <Route path="/arp" element={<Arp />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/import" element={<Import />} />
-          <Route path="/changelog" element={<Changelog />} />
-          <Route path="/config" element={<Config />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/map/fullscreen" element={<ProtectedRoute><MapFullscreen /></ProtectedRoute>} />
+          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/hosts" element={<ProtectedRoute><Hosts /></ProtectedRoute>} />
+          <Route path="/hosts/:id" element={<ProtectedRoute><HostDetail /></ProtectedRoute>} />
+          <Route path="/map" element={<ProtectedRoute><Map /></ProtectedRoute>} />
+          <Route path="/connections" element={<ProtectedRoute><Connections /></ProtectedRoute>} />
+          <Route path="/arp" element={<ProtectedRoute><Arp /></ProtectedRoute>} />
+          <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
+          <Route path="/import" element={<ProtectedRoute requiredRole="editor"><Import /></ProtectedRoute>} />
+          <Route path="/changelog" element={<ProtectedRoute><Changelog /></ProtectedRoute>} />
+          <Route path="/config" element={<ProtectedRoute requiredRole="admin"><Config /></ProtectedRoute>} />
         </Routes>
       </main>
 
       {/* Footer */}
-      {!isMapFullscreen && (<footer className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-6">
+      {!isMapFullscreen && isAuthenticated && (<footer className="bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-6">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">

@@ -4,6 +4,18 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.1 - 2026-02-07
+### Added
+- **In-app Identity & Access admin page** with three tabs: Providers, Role Mappings, and Users
+- Admin CRUD endpoints for auth provider management: `GET/POST /api/auth/admin/providers`, `PATCH/DELETE /api/auth/admin/providers/{id}`, `POST /api/auth/admin/providers/{id}/discover`
+- Admin CRUD endpoints for role mapping management: `GET/POST /api/auth/admin/providers/{id}/mappings`, `PATCH/DELETE /api/auth/admin/mappings/{id}`
+- User active status toggle endpoint: `PATCH /api/auth/users/{id}/active`
+- OIDC discovery trigger endpoint caches `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` on demand
+- 13 new admin CRUD tests covering provider CRUD, mapping CRUD, user active toggle, and authorization enforcement
+
+### Fixed
+- Login page now redirects to dashboard after successful local or OIDC login (was staying on login page)
+
 ## 0.8.0 - 2026-02-07
 ### Added
 - **Multi-provider OIDC authentication** with support for Okta, Google, GitHub, GitLab, Authentik, and any standards-compliant OIDC provider

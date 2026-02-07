@@ -889,3 +889,391 @@ class TestProviderRegistration:
         assert response.status_code == 200
         names = [p["name"] for p in response.json()["providers"]]
         assert "disabled_provider" not in names
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ADMIN CRUD TESTS (15 tests)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestAuthAdminProviders:
+    """Tests for admin provider CRUD endpoints."""
+
+    async def _make_admin(self, async_client):
+        """Helper: create admin user and return (user, token, db)."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        admin = User(
+            username="crud_admin",
+            email="crud_admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        db.add(admin)
+        await db.commit()
+        await db.refresh(admin)
+        token = create_access_token(user_id=admin.id, role="admin")
+        return admin, token, db
+
+    @pytest.mark.asyncio
+    async def test_create_provider(self, async_client: AsyncClient):
+        """Admin can create an auth provider."""
+        _, token, _ = await self._make_admin(async_client)
+        response = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_name": "test_github",
+                "display_name": "GitHub SSO",
+                "provider_type": "oauth2",
+                "issuer_url": "https://github.com",
+                "client_id": "gh-client-id",
+                "client_secret": "gh-secret",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["provider_name"] == "test_github"
+        assert data["display_name"] == "GitHub SSO"
+        assert data["is_enabled"] is True
+        assert "id" in data
+
+    @pytest.mark.asyncio
+    async def test_list_providers(self, async_client: AsyncClient):
+        """Admin can list all providers."""
+        _, token, _ = await self._make_admin(async_client)
+        # Create provider via API to avoid session conflicts
+        await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_name": "list_test",
+                "display_name": "List Test",
+                "provider_type": "oidc",
+                "issuer_url": "https://list.example.com",
+                "client_id": "list-id",
+                "client_secret": "list-secret",
+            },
+        )
+
+        response = await async_client.get(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        names = [prov["provider_name"] for prov in response.json()]
+        assert "list_test" in names
+
+    @pytest.mark.asyncio
+    async def test_update_provider(self, async_client: AsyncClient):
+        """Admin can update a provider."""
+        _, token, _ = await self._make_admin(async_client)
+        # Create via API first
+        create_resp = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_name": "update_test",
+                "display_name": "Before",
+                "provider_type": "oidc",
+                "issuer_url": "https://update.example.com",
+                "client_id": "upd-id",
+                "client_secret": "upd-secret",
+            },
+        )
+        provider_id = create_resp.json()["id"]
+
+        response = await async_client.patch(
+            f"/api/auth/admin/providers/{provider_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"display_name": "After", "is_enabled": False},
+        )
+        assert response.status_code == 200
+        assert response.json()["display_name"] == "After"
+        assert response.json()["is_enabled"] is False
+
+    @pytest.mark.asyncio
+    async def test_delete_provider(self, async_client: AsyncClient):
+        """Admin can delete a provider."""
+        _, token, _ = await self._make_admin(async_client)
+        # Create via API first
+        create_resp = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_name": "delete_test",
+                "display_name": "Delete Me",
+                "provider_type": "oidc",
+                "issuer_url": "https://delete.example.com",
+                "client_id": "del-id",
+                "client_secret": "del-secret",
+            },
+        )
+        provider_id = create_resp.json()["id"]
+
+        response = await async_client.delete(
+            f"/api/auth/admin/providers/{provider_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+        # Verify it's gone
+        response = await async_client.get(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        names = [prov["provider_name"] for prov in response.json()]
+        assert "delete_test" not in names
+
+    @pytest.mark.asyncio
+    async def test_duplicate_provider_rejected(self, async_client: AsyncClient):
+        """Creating a provider with duplicate name returns 400."""
+        _, token, _ = await self._make_admin(async_client)
+        payload = {
+            "provider_name": "dup_test",
+            "display_name": "Dup",
+            "provider_type": "oidc",
+            "issuer_url": "https://dup.example.com",
+            "client_id": "dup-id",
+            "client_secret": "dup-secret",
+        }
+        r1 = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert r1.status_code == 201
+
+        r2 = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert r2.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_provider_requires_admin(self, async_client: AsyncClient):
+        """Non-admin users get 403 on admin provider endpoints."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        viewer = User(
+            username="prov_viewer",
+            email="prov_viewer@example.com",
+            role="viewer",
+            is_active=True,
+        )
+        db.add(viewer)
+        await db.commit()
+        await db.refresh(viewer)
+        token = create_access_token(user_id=viewer.id, role="viewer")
+
+        response = await async_client.get(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+
+class TestAuthAdminMappings:
+    """Tests for admin role mapping CRUD endpoints."""
+
+    async def _setup(self, async_client):
+        """Helper: create admin + provider via API, return (token, provider_id)."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        admin = User(
+            username="map_admin",
+            email="map_admin@example.com",
+            role="admin",
+            is_active=True,
+        )
+        db.add(admin)
+        await db.commit()
+        await db.refresh(admin)
+        token = create_access_token(user_id=admin.id, role="admin")
+
+        # Create provider via API to avoid session conflicts
+        create_resp = await async_client.post(
+            "/api/auth/admin/providers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_name": "map_provider",
+                "display_name": "Mapping Provider",
+                "provider_type": "oidc",
+                "issuer_url": "https://map.example.com",
+                "client_id": "map-id",
+                "client_secret": "map-secret",
+            },
+        )
+        provider_id = create_resp.json()["id"]
+        return token, provider_id
+
+    @pytest.mark.asyncio
+    async def test_create_mapping(self, async_client: AsyncClient):
+        """Admin can create a role mapping for a provider."""
+        token, pid = await self._setup(async_client)
+        response = await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "idp_claim_path": "groups",
+                "idp_claim_value": "net-admins",
+                "app_role": "admin",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["idp_claim_path"] == "groups"
+        assert data["app_role"] == "admin"
+
+    @pytest.mark.asyncio
+    async def test_list_mappings(self, async_client: AsyncClient):
+        """Admin can list mappings for a provider."""
+        token, pid = await self._setup(async_client)
+        # Create mapping via API
+        await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "idp_claim_path": "groups",
+                "idp_claim_value": "editors",
+                "app_role": "editor",
+            },
+        )
+
+        response = await async_client.get(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert len(response.json()) >= 1
+
+    @pytest.mark.asyncio
+    async def test_update_mapping(self, async_client: AsyncClient):
+        """Admin can update a role mapping."""
+        token, pid = await self._setup(async_client)
+        # Create mapping via API
+        create_resp = await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "idp_claim_path": "groups",
+                "idp_claim_value": "upd-editors",
+                "app_role": "editor",
+            },
+        )
+        mapping_id = create_resp.json()["id"]
+
+        response = await async_client.patch(
+            f"/api/auth/admin/mappings/{mapping_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"app_role": "admin", "is_enabled": False},
+        )
+        assert response.status_code == 200
+        assert response.json()["app_role"] == "admin"
+        assert response.json()["is_enabled"] is False
+
+    @pytest.mark.asyncio
+    async def test_delete_mapping(self, async_client: AsyncClient):
+        """Admin can delete a role mapping."""
+        token, pid = await self._setup(async_client)
+        # Create mapping via API
+        create_resp = await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "idp_claim_path": "groups",
+                "idp_claim_value": "del-viewers",
+                "app_role": "viewer",
+            },
+        )
+        mapping_id = create_resp.json()["id"]
+
+        response = await async_client.delete(
+            f"/api/auth/admin/mappings/{mapping_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_mapping_rejected(self, async_client: AsyncClient):
+        """Duplicate mapping (same provider, path, value) returns 400."""
+        token, pid = await self._setup(async_client)
+        payload = {
+            "idp_claim_path": "groups",
+            "idp_claim_value": "unique-group",
+            "app_role": "viewer",
+        }
+        headers = {"Authorization": f"Bearer {token}"}
+        r1 = await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers=headers,
+            json=payload,
+        )
+        assert r1.status_code == 201
+
+        r2 = await async_client.post(
+            f"/api/auth/admin/providers/{pid}/mappings",
+            headers=headers,
+            json=payload,
+        )
+        assert r2.status_code == 400
+
+
+class TestAuthAdminUsers:
+    """Tests for admin user management extensions."""
+
+    @pytest.mark.asyncio
+    async def test_toggle_user_active(self, async_client: AsyncClient):
+        """Admin can disable and re-enable a user."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        admin = User(username="active_admin", email="active_admin@example.com", role="admin", is_active=True)
+        target = User(username="active_target", email="active_target@example.com", role="viewer", is_active=True)
+        db.add_all([admin, target])
+        await db.commit()
+        await db.refresh(admin)
+        await db.refresh(target)
+        token = create_access_token(user_id=admin.id, role="admin")
+
+        # Disable
+        r = await async_client.patch(
+            f"/api/auth/users/{target.id}/active",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"is_active": False},
+        )
+        assert r.status_code == 200
+        assert r.json()["is_active"] is False
+
+        # Re-enable
+        r = await async_client.patch(
+            f"/api/auth/users/{target.id}/active",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"is_active": True},
+        )
+        assert r.status_code == 200
+        assert r.json()["is_active"] is True
+
+    @pytest.mark.asyncio
+    async def test_inactive_user_cannot_login(self, async_client: AsyncClient):
+        """A deactivated user cannot login."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        password_hash = _bcrypt.hashpw("testpass".encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+        user = User(
+            username="inactive_login",
+            email="inactive_login@example.com",
+            role="viewer",
+            is_active=False,
+            local_password_hash=password_hash,
+        )
+        db.add(user)
+        await db.commit()
+
+        r = await async_client.post(
+            "/api/auth/login/local",
+            json={"username": "inactive_login", "password": "testpass"},
+        )
+        assert r.status_code == 403

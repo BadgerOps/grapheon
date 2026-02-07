@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook for Graphēon
+# Mirrors CI checks: backend lint, backend tests, frontend build
+#
+# Install:  git config core.hooksPath .githooks
+#   — or —  ./scripts/setup-hooks.sh
+#
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ── Colors ────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+pass()  { echo -e "  ${GREEN}✓${NC} $1"; }
+fail()  { echo -e "  ${RED}✗${NC} $1"; }
+info()  { echo -e "  ${YELLOW}→${NC} $1"; }
+
+echo ""
+echo "━━━ Pre-commit checks ━━━"
+echo ""
+
+ERRORS=0
+
+# ── 1. Backend lint (ruff) ────────────────────────────────────────────
+info "Running ruff lint..."
+if ruff check "$REPO_ROOT/backend"; then
+    pass "ruff check backend"
+else
+    fail "ruff check backend — run 'ruff check backend --fix' to auto-fix"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# ── 2. Backend tests (pytest) ────────────────────────────────────────
+info "Running backend tests..."
+if (cd "$REPO_ROOT/backend" && python -m pytest --tb=short -q); then
+    pass "pytest"
+else
+    fail "pytest — backend tests failed"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# ── 3. Version + changelog sync ──────────────────────────────────────
+info "Validating version sync..."
+if python "$REPO_ROOT/scripts/validate_versions.py"; then
+    pass "version sync"
+else
+    fail "version sync — run 'python scripts/validate_versions.py' to see details"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# ── 4. Frontend build ────────────────────────────────────────────────
+# Only run if frontend files are staged
+FRONTEND_CHANGED=$(git diff --cached --name-only -- frontend/ 2>/dev/null || true)
+if [ -n "$FRONTEND_CHANGED" ]; then
+    info "Frontend files changed — running build..."
+    if (cd "$REPO_ROOT/frontend" && npx vite build --logLevel error); then
+        pass "frontend build"
+    else
+        fail "frontend build — 'npm run build' failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    pass "frontend build (skipped — no frontend changes staged)"
+fi
+
+# ── Summary ──────────────────────────────────────────────────────────
+echo ""
+if [ "$ERRORS" -gt 0 ]; then
+    echo -e "${RED}✗ $ERRORS check(s) failed — commit aborted${NC}"
+    echo -e "  Tip: use ${YELLOW}git commit --no-verify${NC} to skip hooks in emergencies"
+    echo ""
+    exit 1
+else
+    echo -e "${GREEN}✓ All checks passed${NC}"
+    echo ""
+    exit 0
+fi

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 // Generate PKCE code verifier and challenge
@@ -18,6 +18,7 @@ async function generatePKCE() {
 
 export default function Login() {
   const { login, isAuthenticated } = useAuth()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [providers, setProviders] = useState([])
   const [localAuthEnabled, setLocalAuthEnabled] = useState(false)
@@ -77,12 +78,13 @@ export default function Login() {
       sessionStorage.removeItem('oidc_provider')
       sessionStorage.removeItem('oidc_code_verifier')
       login(tokenResponse)
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {
       setCallbackLoading(false)
     }
-  }, [searchParams, login])
+  }, [searchParams, login, navigate])
 
   useEffect(() => {
     handleCallback()
@@ -133,6 +135,7 @@ export default function Login() {
 
       const tokenResponse = await res.json()
       login(tokenResponse)
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {

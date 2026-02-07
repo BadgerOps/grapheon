@@ -4,6 +4,15 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.1 - 2026-02-07
+### Added
+- **Identity & Access admin page** (`/auth-admin`, admin-only) with three tabs: Providers, Role Mappings, and Users
+- Admin API client functions for provider CRUD, role mapping CRUD, OIDC discovery, and user active toggle
+- "Identity" nav link with shield icon (admin-only, next to Settings)
+
+### Fixed
+- Login page now redirects to dashboard after successful local or OIDC login (was staying on login modal)
+
 ## 0.8.0 - 2026-02-07
 ### Added
 - **Login page** with OIDC provider buttons (PKCE flow) and local admin credential form

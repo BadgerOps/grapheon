@@ -191,7 +191,7 @@ export default function Map() {
   const hasActiveFilters = selectedDeviceTypes.length > 0 || searchQuery || selectedVlan
 
   return (
-    <div className="p-6 h-[calc(100vh-8rem)]">
+    <div className="p-6 h-[calc(100vh-8rem)] flex flex-col">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
         <div>
@@ -378,43 +378,43 @@ export default function Map() {
 
       {/* ── Stats bar ──────────────────────────────────────── */}
       {stats.total_hosts !== undefined && (
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-4">
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Hosts</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.total_hosts || 0}</p>
+        <div className="flex flex-nowrap gap-2 mb-2 overflow-x-auto">
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Hosts</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.total_hosts || 0}</p>
           </div>
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Edges</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.total_edges || 0}</p>
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Edges</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.total_edges || 0}</p>
           </div>
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">VLANs</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.vlans || 0}</p>
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">VLANs</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.vlans || 0}</p>
           </div>
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Subnets</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.subnets || 0}</p>
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Subnets</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.subnets || 0}</p>
           </div>
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Cross-VLAN</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.cross_vlan_edges || 0}</p>
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Cross-VLAN</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.cross_vlan_edges || 0}</p>
           </div>
           {stats.internet_connections > 0 && (
-            <div className="card p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Internet</p>
-              <p className="text-xl font-bold text-sky-600 dark:text-sky-400">{stats.internet_connections}</p>
+            <div className="card px-3 py-2 flex-1 min-w-0">
+              <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Internet</p>
+              <p className="text-lg font-bold text-sky-600 dark:text-sky-400">{stats.internet_connections}</p>
             </div>
           )}
-          <div className="card p-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Load Time</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{stats.generation_time_ms || 0}ms</p>
+          <div className="card px-3 py-2 flex-1 min-w-0">
+            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Load Time</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{stats.generation_time_ms || 0}ms</p>
           </div>
         </div>
       )}
 
       {/* ── Network Map ────────────────────────────────────── */}
       {!error && (
-        <div className="card" style={{ height: 'calc(100% - 180px)', minHeight: '500px' }}>
+        <div className="card flex-1 min-h-0" style={{ minHeight: '400px' }}>
           <MapErrorBoundary>
             <CytoscapeNetworkMap
               elements={mergedElements}

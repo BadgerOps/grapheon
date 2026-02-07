@@ -271,6 +271,36 @@ export async function exportAll(format = 'json') {
 }
 
 // ============================================
+// Network topology graph exports
+// ============================================
+
+export async function exportNetworkGraphML(subnetFilter = null, showInternet = 'cloud') {
+  const params = new URLSearchParams()
+  if (subnetFilter) params.append('subnet_filter', subnetFilter)
+  if (showInternet) params.append('show_internet', showInternet)
+  const paramStr = params.toString()
+  const url = `${API_BASE}/export/network/graphml${paramStr ? '?' + paramStr : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Export error: ${response.status}`)
+  }
+  return response
+}
+
+export async function exportNetworkDrawio(subnetFilter = null, showInternet = 'cloud') {
+  const params = new URLSearchParams()
+  if (subnetFilter) params.append('subnet_filter', subnetFilter)
+  if (showInternet) params.append('show_internet', showInternet)
+  const paramStr = params.toString()
+  const url = `${API_BASE}/export/network/drawio${paramStr ? '?' + paramStr : ''}`
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Export error: ${response.status}`)
+  }
+  return response
+}
+
+// ============================================
 // Maintenance endpoints
 // ============================================
 

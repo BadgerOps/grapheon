@@ -4,7 +4,7 @@
 
 Graphēon ingests network scan outputs (nmap, netstat, arp, ping, traceroute, pcap), normalizes them, correlates related hosts, and provides interactive network topology visualization. The goal is fusing disparate network signals into a coherent graph of hosts, edges, and topology.
 
-**Stack**: FastAPI + SQLite (async via aiosqlite) backend | React 18 + Vite + vis-network frontend
+**Stack**: FastAPI + SQLite (async via aiosqlite) backend | React 18 + Vite + Cytoscape.js frontend
 **Runtime**: Python 3.12, Node 18+
 **Environment**: Nix dev shell (`nix develop`)
 
@@ -36,7 +36,8 @@ cd frontend && npm install
 backend/
   models/       # SQLAlchemy ORM (Host, Port, Connection, ARPEntry, RouteHop, RawImport, Conflict)
   parsers/      # 6 data parsers (nmap, netstat, arp, ping, traceroute, pcap)
-  routers/      # 9 API routers (hosts, imports, correlate, network, connections, arp, search, export, maintenance)
+  routers/      # 12 API routers (hosts, imports, correlate, network, connections, arp, search, export, maintenance, vlans, updates, device_identities)
+  export_converters/  # Graph format exporters (GraphML, draw.io)
   services/     # Correlation engine, vendor lookup, data aging
   main.py       # FastAPI entry point
   database.py   # SQLAlchemy async setup + migrations
@@ -57,7 +58,8 @@ docs/           # Architecture, backend, frontend, deployment docs
 - **Async everything**: SQLAlchemy AsyncSession with aiosqlite throughout
 - **Parser registry**: Auto-detection of input format (XML/grep/plain text) via `parsers/__init__.py`
 - **Correlation engine**: IP → MAC → tag-based host merging with conflict detection
-- **Visualization**: vis-network with forceAtlas2Based physics, subnet grouping, device-type shapes/colors
+- **Visualization**: Cytoscape.js with compound nodes (VLAN→Subnet→Host), three layout modes (dagre/fcose/cola), device-type shapes/colors
+- **Graph Export**: Network topology exportable to GraphML (Gephi/yEd) and draw.io (diagrams.net) via `/api/export/network/{format}`
 - **Database**: SQLite with JSON columns for tags, source_types, conflict values
 
 ## Data Hygiene

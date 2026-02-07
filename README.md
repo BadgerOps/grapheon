@@ -2,7 +2,9 @@
 
 Graphēon ingests network scan outputs (nmap, netstat, arp, ping, traceroute, pcap), normalizes them, tags entities, and correlates related hosts. The stack is FastAPI + SQLite on the backend and Vite + React on the frontend. Python 3.12 is the standard runtime.
 
-**Why Graphēon?** The name evokes graphing and mapping: this project fuses disparate network signals into a coherent graph of hosts, edges, and topology, which is exactly the product’s core purpose.
+**Why Graphēon?** The name evokes graphing and mapping: this project fuses disparate network signals into a coherent graph of hosts, edges, and topology, which is exactly the product's core purpose.
+
+Network topologies can be exported as **GraphML** (for Gephi, yEd, Cytoscape Desktop) or **draw.io** (for diagrams.net) directly from the map UI or the REST API.
 
 ## Quickstart
 

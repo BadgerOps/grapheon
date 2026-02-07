@@ -4,6 +4,16 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.7.0 - 2026-02-07
+### Added
+- **Export dropdown** on the network map replacing the single PNG button: hover menu offers PNG image, SVG vector, GraphML (for Gephi/yEd), and draw.io (for diagrams.net) exports
+- `exportNetworkGraph()` helper in `mapExport.js` that fetches graph exports from the backend API and triggers browser file download
+- `exportNetworkGraphML()` and `exportNetworkDrawio()` API client methods
+
+### Changed
+- Changelog page completely rewritten: replaces raw `react-markdown` rendering with a structured, interactive timeline UI featuring version badges, category icons (Added/Changed/Fixed), collapsible release cards, search filtering, combined "All Changes" view interleaving frontend and backend releases, and summary stats bar
+- Removed `react-markdown` and `remark-gfm` dependencies (no longer used anywhere in the codebase)
+
 ## 0.6.0 - 2026-02-06
 ### Fixed
 - Legend shape mismatches: Switch now shows vee (was triangle), Server shows round-rectangle (was square), Printer shows rectangle (was square) to match actual Cytoscape node shapes

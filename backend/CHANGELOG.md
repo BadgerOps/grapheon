@@ -4,6 +4,16 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.7.0 - 2026-02-07
+### Added
+- Network topology export in **GraphML** format (`GET /api/export/network/graphml`): standard XML graph format importable by Gephi, yEd, Cytoscape Desktop, and other graph analysis tools
+- Network topology export in **draw.io** format (`GET /api/export/network/drawio`): produces `.drawio` XML files openable in draw.io (desktop or web) with collapsible VLAN/subnet containers, device-type styling, and auto-positioned nodes
+- New `export_converters` package with `graphml_exporter` and `drawio_exporter` modules
+- `_fetch_network_elements()` helper in the export router that reuses the full `/api/network/map` pipeline (node building, edge building, gateway resolution) for export endpoints
+- Both endpoints accept `subnet_filter` and `show_internet` query parameters matching the map API
+- 28 new unit tests covering both converter modules (XML structure, hierarchy, data attributes, special characters, empty inputs) and API endpoints (status codes, content types, content-disposition headers)
+- Added `networkx>=3.2` and `drawpyo>=0.2.5` to `requirements.txt`
+
 ## 0.6.0 - 2026-02-06
 ### Changed
 - Refactored `routers/network.py` (1060+ lines) into `backend/network/` package with 7 extracted modules: constants, validators, styles, queries, nodes, edges, legacy_format

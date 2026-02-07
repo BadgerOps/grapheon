@@ -521,3 +521,49 @@ export async function getUsers() {
 export async function updateUserRole(userId, role) {
   return apiCall('PATCH', `/auth/users/${userId}/role`, { role })
 }
+
+// ── Auth Admin - Provider management ─────────────────────────────────
+
+export async function getAdminProviders() {
+  return apiCall('GET', '/auth/admin/providers')
+}
+
+export async function createAuthProvider(data) {
+  return apiCall('POST', '/auth/admin/providers', data)
+}
+
+export async function updateAuthProvider(id, data) {
+  return apiCall('PATCH', `/auth/admin/providers/${id}`, data)
+}
+
+export async function deleteAuthProvider(id) {
+  return apiCall('DELETE', `/auth/admin/providers/${id}`)
+}
+
+export async function discoverProviderEndpoints(id) {
+  return apiCall('POST', `/auth/admin/providers/${id}/discover`)
+}
+
+// ── Auth Admin - Role mapping management ─────────────────────────────
+
+export async function getRoleMappings(providerId) {
+  return apiCall('GET', `/auth/admin/providers/${providerId}/mappings`)
+}
+
+export async function createRoleMapping(providerId, data) {
+  return apiCall('POST', `/auth/admin/providers/${providerId}/mappings`, data)
+}
+
+export async function updateRoleMapping(id, data) {
+  return apiCall('PATCH', `/auth/admin/mappings/${id}`, data)
+}
+
+export async function deleteRoleMapping(id) {
+  return apiCall('DELETE', `/auth/admin/mappings/${id}`)
+}
+
+// ── Auth Admin - User management ─────────────────────────────────────
+
+export async function updateUserActiveStatus(userId, isActive) {
+  return apiCall('PATCH', `/auth/users/${userId}/active`, { is_active: isActive })
+}

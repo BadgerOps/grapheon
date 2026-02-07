@@ -52,6 +52,45 @@ export function exportMapAsSVG(cy, filename = 'network-map.svg') {
 }
 
 /**
+ * Download a network topology export from the backend API.
+ * Triggers a file download in the browser.
+ *
+ * @param {'graphml'|'drawio'} format - Export format
+ * @param {string|null} subnetFilter - Optional subnet CIDR filter
+ * @param {string} showInternet - Public IP mode (cloud/hide/show)
+ */
+export async function exportNetworkGraph(format, subnetFilter = null, showInternet = 'cloud') {
+  const params = new URLSearchParams()
+  if (subnetFilter) params.append('subnet_filter', subnetFilter)
+  if (showInternet) params.append('show_internet', showInternet)
+  const paramStr = params.toString()
+  const url = `/api/export/network/${format}${paramStr ? '?' + paramStr : ''}`
+
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Export error: ${response.status}`)
+  }
+
+  // Get filename from Content-Disposition header or generate one
+  const disposition = response.headers.get('content-disposition')
+  let filename = `network-topology.${format}`
+  if (disposition) {
+    const match = disposition.match(/filename=(.+)/)
+    if (match) filename = match[1]
+  }
+
+  const blob = await response.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(blobUrl)
+}
+
+/**
  * Toggle fullscreen mode on the given element.
  * Returns true if entering fullscreen, false if exiting.
  */

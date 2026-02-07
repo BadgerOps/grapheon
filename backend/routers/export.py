@@ -1,7 +1,8 @@
 """
 Data export API endpoints.
 
-Provides CSV and JSON export for hosts, ports, connections, and full database dumps.
+Provides CSV and JSON export for hosts, ports, connections, full database
+dumps, and network topology exports in GraphML and draw.io formats.
 """
 
 import logging
@@ -17,6 +18,7 @@ from sqlalchemy import select
 
 from database import get_db
 from models import Host, Port, Connection, ARPEntry
+from export_converters import cytoscape_to_graphml, cytoscape_to_drawio
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -411,5 +413,146 @@ async def export_full_database(
     return Response(
         content=json.dumps(data, indent=2),
         media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# =====================================================
+# Network topology graph exports
+# =====================================================
+
+
+async def _fetch_network_elements(
+    db: AsyncSession,
+    subnet_filter: Optional[str] = None,
+    show_internet: str = "cloud",
+) -> dict:
+    """Fetch network map elements using the same pipeline as /api/network/map.
+
+    Returns the ``{"nodes": [...], "edges": [...]}`` elements dict.
+    """
+    from collections import defaultdict
+    from ipaddress import ip_network
+    from network.queries import (
+        fetch_hosts,
+        fetch_vlan_configs,
+        fetch_connections,
+        fetch_port_counts,
+        fetch_device_identities,
+        build_device_id_to_hosts,
+    )
+    from network.nodes import build_all_nodes
+    from network.edges import build_all_edges
+
+    hosts = await fetch_hosts(db, include_inactive=False)
+    vlan_configs = await fetch_vlan_configs(db)
+    connections = await fetch_connections(db)
+    port_counts = await fetch_port_counts(db, [h.id for h in hosts])
+    device_id_to_hosts = build_device_id_to_hosts(hosts)
+    device_identities = (
+        await fetch_device_identities(db) if device_id_to_hosts else {}
+    )
+
+    # Build subnet→VLAN lookup
+    subnet_to_vlan = {}
+    for vid, vconfig in vlan_configs.items():
+        for cidr in (vconfig.subnet_cidrs or []):
+            try:
+                subnet_to_vlan[ip_network(cidr, strict=False)] = vconfig
+            except ValueError:
+                pass
+
+    nodes, _, _, ip_to_host_id, shared_gw_nodes, shared_gw_devices, _, gw_edges = (
+        build_all_nodes(
+            hosts=hosts,
+            vlan_configs=vlan_configs,
+            port_counts=port_counts,
+            device_id_to_hosts=device_id_to_hosts,
+            device_identities=device_identities,
+            subnet_prefix=24,
+            subnet_filter=subnet_filter,
+            show_internet=show_internet,
+            subnet_to_vlan=subnet_to_vlan,
+        )
+    )
+
+    edges, _ = build_all_edges(
+        connections=connections,
+        hosts=hosts,
+        nodes=nodes,
+        ip_to_host_id=ip_to_host_id,
+        show_internet=show_internet,
+        route_through_gateway=False,
+        subnet_prefix=24,
+        shared_gateway_nodes=shared_gw_nodes,
+        shared_gateway_devices=shared_gw_devices,
+    )
+    edges = gw_edges + edges
+
+    return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/network/graphml")
+async def export_network_graphml(
+    subnet_filter: Optional[str] = Query(None, description="Filter by subnet CIDR"),
+    show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export the network topology as a GraphML XML file.
+
+    GraphML is an open standard supported by Gephi, yEd, Cytoscape Desktop,
+    and many other graph analysis tools. The export preserves the compound
+    node hierarchy (VLAN → Subnet → Host) via nested graph elements.
+    """
+    start_time = time.perf_counter()
+    logger.info(f"EXPORT NETWORK GRAPHML: subnet_filter={subnet_filter}")
+
+    elements = await _fetch_network_elements(db, subnet_filter, show_internet)
+    graphml_xml = cytoscape_to_graphml(elements)
+
+    filename = generate_filename("network-topology", "graphml")
+    logger.info(
+        f"GraphML export: {len(elements['nodes'])} nodes, "
+        f"{len(elements['edges'])} edges in "
+        f"{(time.perf_counter() - start_time) * 1000:.1f}ms"
+    )
+
+    return Response(
+        content=graphml_xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/network/drawio")
+async def export_network_drawio(
+    subnet_filter: Optional[str] = Query(None, description="Filter by subnet CIDR"),
+    show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export the network topology as a draw.io / diagrams.net XML file.
+
+    The exported ``.drawio`` file can be opened in draw.io (desktop or web)
+    for editing, sharing, and collaborative diagramming. VLANs and subnets
+    become collapsible container shapes; hosts are styled by device type.
+    """
+    start_time = time.perf_counter()
+    logger.info(f"EXPORT NETWORK DRAWIO: subnet_filter={subnet_filter}")
+
+    elements = await _fetch_network_elements(db, subnet_filter, show_internet)
+    drawio_xml = cytoscape_to_drawio(elements)
+
+    filename = generate_filename("network-topology", "drawio")
+    logger.info(
+        f"draw.io export: {len(elements['nodes'])} nodes, "
+        f"{len(elements['edges'])} edges in "
+        f"{(time.perf_counter() - start_time) * 1000:.1f}ms"
+    )
+
+    return Response(
+        content=drawio_xml,
+        media_type="application/xml",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

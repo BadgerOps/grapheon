@@ -8,3 +8,5 @@ pydantic-settings==2.1.0
 python-multipart==0.0.22
 mac-vendor-lookup>=0.1.12
 httpx>=0.27.0
+networkx>=3.2
+drawpyo>=0.2.5

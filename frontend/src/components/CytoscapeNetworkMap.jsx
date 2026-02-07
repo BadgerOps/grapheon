@@ -5,7 +5,7 @@ import dagre from 'cytoscape-dagre'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
 import { getLightStyles, getDarkStyles, layoutPresets, deviceLegend, getEdgeLegend } from '../styles/cytoscape-theme'
-import { exportMapAsPNG, exportMapAsSVG, toggleFullscreen } from '../services/mapExport'
+import { exportMapAsPNG, exportMapAsSVG, exportNetworkGraph, toggleFullscreen } from '../services/mapExport'
 
 // Register layout extensions
 cytoscape.use(dagre)
@@ -337,19 +337,54 @@ export default function CytoscapeNetworkMap({
             </svg>
           </button>
 
-          {/* Export PNG */}
-          <button
-            onClick={() => {
-              const date = new Date().toISOString().slice(0, 10)
-              exportMapAsPNG(cyRef.current, `network-map-${date}.png`)
-            }}
-            className="p-2 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            title="Export as PNG"
-          >
-            <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
-          </button>
+          {/* Export dropdown */}
+          <div className="relative group">
+            <button
+              className="p-2 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              title="Export map"
+            >
+              <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </button>
+            <div className="invisible group-hover:visible absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
+              <button
+                onClick={() => {
+                  const date = new Date().toISOString().slice(0, 10)
+                  exportMapAsPNG(cyRef.current, `network-map-${date}.png`)
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-xs font-mono px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded">PNG</span>
+                Image
+              </button>
+              <button
+                onClick={() => {
+                  const date = new Date().toISOString().slice(0, 10)
+                  exportMapAsSVG(cyRef.current, `network-map-${date}.svg`)
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-xs font-mono px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded">SVG</span>
+                Vector
+              </button>
+              <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+              <button
+                onClick={() => exportNetworkGraph('graphml')}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-xs font-mono px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded">GML</span>
+                GraphML
+              </button>
+              <button
+                onClick={() => exportNetworkGraph('drawio')}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-xs font-mono px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded">DIO</span>
+                draw.io
+              </button>
+            </div>
+          </div>
 
           {/* Pop out */}
           <button

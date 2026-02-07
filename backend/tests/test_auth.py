@@ -22,6 +22,7 @@ from models.user import User
 from models.auth_provider import AuthProvider
 from models.role_mapping import RoleMapping
 from main import app
+from config import settings
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -685,3 +686,200 @@ class TestOIDCService:
         result = _get_nested_claim(claims, "resource_access.app.roles")
 
         assert result == ["admin", "editor"]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FEATURE FLAGS TESTS (3 tests)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestFeatureFlags:
+    """Tests for AUTH_ENABLED and ENFORCE_AUTH feature flags."""
+
+    @pytest.mark.asyncio
+    async def test_auth_disabled_allows_anonymous(self, async_client: AsyncClient):
+        """When AUTH_ENABLED=False, endpoints work without any token."""
+        original = settings.AUTH_ENABLED
+        try:
+            settings.AUTH_ENABLED = False
+            # Access a protected endpoint without token - should get 200
+            # Use /api/hosts which requires require_any_authenticated
+            response = await async_client.get("/api/hosts")
+            assert response.status_code == 200
+        finally:
+            settings.AUTH_ENABLED = original
+
+    @pytest.mark.asyncio
+    async def test_enforce_auth_false_allows_anonymous(self, async_client: AsyncClient):
+        """When AUTH_ENABLED=True but ENFORCE_AUTH=False, unauthenticated requests still work."""
+        original_enabled = settings.AUTH_ENABLED
+        original_enforce = settings.ENFORCE_AUTH
+        try:
+            settings.AUTH_ENABLED = True
+            settings.ENFORCE_AUTH = False
+            # Should work without token (anonymous admin mode)
+            response = await async_client.get("/api/hosts")
+            assert response.status_code == 200
+        finally:
+            settings.AUTH_ENABLED = original_enabled
+            settings.ENFORCE_AUTH = original_enforce
+
+    @pytest.mark.asyncio
+    async def test_enforce_auth_true_rejects_anonymous(self, async_client: AsyncClient):
+        """When ENFORCE_AUTH=True, unauthenticated requests are rejected."""
+        original_enabled = settings.AUTH_ENABLED
+        original_enforce = settings.ENFORCE_AUTH
+        try:
+            settings.AUTH_ENABLED = True
+            settings.ENFORCE_AUTH = True
+            # Should fail without token
+            response = await async_client.get("/api/hosts")
+            assert response.status_code == 401
+        finally:
+            settings.AUTH_ENABLED = original_enabled
+            settings.ENFORCE_AUTH = original_enforce
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# LOCAL ADMIN BOOTSTRAP TESTS (2 tests)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestLocalAdminBootstrap:
+    """Tests for local admin bootstrap from environment variables."""
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_creates_admin(self, async_client: AsyncClient):
+        """Verify a local admin can be created and used to login."""
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+
+        # Simulate bootstrap: create admin with known password
+        user = User(
+            username="bootstrap_admin",
+            email="bootstrap@example.com",
+            role="admin",
+            is_active=True,
+            local_password_hash=pwd_context.hash("bootstrap_pass_123"),
+        )
+        db.add(user)
+        await db.commit()
+
+        # Verify login works
+        response = await async_client.post(
+            "/api/auth/login/local",
+            json={"username": "bootstrap_admin", "password": "bootstrap_pass_123"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["role"] == "admin"
+        assert "access_token" in data
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_admin_can_manage_users(self, async_client: AsyncClient):
+        """Verify bootstrapped admin can list and manage users."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+
+        admin = User(
+            username="mgmt_admin",
+            email="mgmt@example.com",
+            role="admin",
+            is_active=True,
+        )
+        viewer = User(
+            username="mgmt_viewer",
+            email="mgmt_viewer@example.com",
+            role="viewer",
+            is_active=True,
+        )
+        db.add_all([admin, viewer])
+        await db.commit()
+        await db.refresh(admin)
+        await db.refresh(viewer)
+
+        token = create_access_token(user_id=admin.id, role="admin")
+
+        # Admin can list users
+        response = await async_client.get(
+            "/api/auth/users",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        users = response.json()
+        assert len(users) >= 2
+
+        # Admin can promote viewer to editor
+        response = await async_client.patch(
+            f"/api/auth/users/{viewer.id}/role",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"role": "editor"},
+        )
+        assert response.status_code == 200
+        assert response.json()["role"] == "editor"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PROVIDER REGISTRATION TESTS (2 tests)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestProviderRegistration:
+    """Tests for OIDC provider registration and listing."""
+
+    @pytest.mark.asyncio
+    async def test_registered_provider_appears_in_list(self, async_client: AsyncClient):
+        """Provider registered in DB appears in GET /api/auth/providers."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+
+        provider = AuthProvider(
+            provider_name="test_okta",
+            display_name="Test Okta",
+            provider_type="oidc",
+            issuer_url="https://test.okta.com",
+            client_id="test-client-id",
+            client_secret="test-secret",
+            authorization_endpoint="https://test.okta.com/authorize",
+            scope="openid profile email",
+            display_order=1,
+            is_enabled=True,
+        )
+        db.add(provider)
+        await db.commit()
+
+        response = await async_client.get("/api/auth/providers")
+        assert response.status_code == 200
+        data = response.json()
+        names = [p["name"] for p in data["providers"]]
+        assert "test_okta" in names
+
+        # Verify no secrets leaked
+        for p in data["providers"]:
+            assert "client_secret" not in p or p.get("client_secret") is None
+
+    @pytest.mark.asyncio
+    async def test_disabled_provider_hidden(self, async_client: AsyncClient):
+        """Disabled provider does NOT appear in GET /api/auth/providers."""
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+
+        provider = AuthProvider(
+            provider_name="disabled_provider",
+            display_name="Disabled",
+            provider_type="oidc",
+            issuer_url="https://disabled.example.com",
+            client_id="disabled-client",
+            client_secret="disabled-secret",
+            is_enabled=False,
+        )
+        db.add(provider)
+        await db.commit()
+
+        response = await async_client.get("/api/auth/providers")
+        assert response.status_code == 200
+        names = [p["name"] for p in response.json()["providers"]]
+        assert "disabled_provider" not in names

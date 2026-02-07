@@ -127,7 +127,6 @@ class TestGraphMLExporter:
     def test_contains_all_nodes(self):
         result = cytoscape_to_graphml(SAMPLE_ELEMENTS)
         root = ET.fromstring(result)
-        ns = {"g": "http://graphml.graphdrawing.org/xmlns"}
         # Recursively find all <node> elements
         all_nodes = root.iter("{http://graphml.graphdrawing.org/xmlns}node")
         node_ids = {n.get("id") for n in all_nodes}

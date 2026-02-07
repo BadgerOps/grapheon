@@ -431,7 +431,6 @@ async def _fetch_network_elements(
 
     Returns the ``{"nodes": [...], "edges": [...]}`` elements dict.
     """
-    from collections import defaultdict
     from ipaddress import ip_network
     from network.queries import (
         fetch_hosts,

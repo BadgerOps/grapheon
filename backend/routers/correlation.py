@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import Conflict
+from models import Conflict, User
+from auth.dependencies import require_any_authenticated, require_editor
 from services import (
     correlate_hosts,
     find_conflicts,
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/api/correlate", tags=["correlation"])
 
 @router.post("", response_model=Dict)
 async def run_correlation(
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -75,6 +77,7 @@ async def list_conflicts(
     resolved: Optional[bool] = Query(None, description="Filter by resolved status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -122,7 +125,7 @@ async def list_conflicts(
 
 
 @router.get("/conflicts/{conflict_id}", response_model=Dict)
-async def get_conflict(conflict_id: int, db: AsyncSession = Depends(get_db)):
+async def get_conflict(conflict_id: int, user: User = Depends(require_any_authenticated), db: AsyncSession = Depends(get_db)):
     """
     Get details of a specific conflict.
 
@@ -161,6 +164,7 @@ async def mark_conflict_resolved(
     conflict_id: int,
     resolution: str = Query(..., min_length=1, description="How the conflict was resolved"),
     resolved_by: str = Query("manual", description="Who/what resolved it"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -200,6 +204,7 @@ async def manually_merge_hosts(
     primary_id: int,
     secondary_id: int,
     resolved_by: str = Query("manual_merge", description="Who triggered the merge"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -246,6 +251,7 @@ async def manually_merge_hosts(
 @router.get("/hosts/{host_id}/unified", response_model=Dict)
 async def get_unified_host_view(
     host_id: int,
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """

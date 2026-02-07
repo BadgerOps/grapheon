@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from auth.dependencies import require_any_authenticated
+from models import User
 from network.constants import COMPOUND_NODE_TYPES
 from network.validators import get_subnet
 from network.queries import (
@@ -53,6 +55,7 @@ async def get_network_map(
     format: str = Query("cytoscape", description="Response format: 'cytoscape' or 'legacy'"),
     show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
     route_through_gateway: bool = Query(False, description="Route cross-subnet edges through gateway nodes"),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -196,6 +199,7 @@ async def get_network_map(
 @router.get("/routes")
 async def get_network_routes(
     destination: Optional[str] = Query(None, description="Filter by destination IP"),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -259,6 +263,7 @@ async def get_network_routes(
 @router.get("/subnets")
 async def get_subnets(
     prefix: int = Query(24, ge=8, le=32, description="Subnet prefix length"),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Get a summary of detected subnets with VLAN association."""

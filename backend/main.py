@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from config import settings
 from database import init_db, close_db
 from routers import (
+    auth_router,
     hosts_router,
     imports_router,
     correlation_router,
@@ -43,6 +44,31 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"Database initialized in {(time.perf_counter() - start) * 1000:.1f}ms"
     )
+
+    # Bootstrap local admin from env vars (first-run only)
+    if settings.LOCAL_ADMIN_USERNAME and settings.LOCAL_ADMIN_PASSWORD:
+        from sqlalchemy import select as sa_select
+        from database import AsyncSessionLocal
+        from models import User
+        from passlib.context import CryptContext
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                sa_select(User).where(User.username == settings.LOCAL_ADMIN_USERNAME)
+            )
+            if not result.scalar_one_or_none():
+                pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+                admin = User(
+                    username=settings.LOCAL_ADMIN_USERNAME,
+                    email=settings.LOCAL_ADMIN_EMAIL or f"{settings.LOCAL_ADMIN_USERNAME}@localhost",
+                    display_name=settings.LOCAL_ADMIN_USERNAME,
+                    role="admin",
+                    local_password_hash=pwd_ctx.hash(settings.LOCAL_ADMIN_PASSWORD),
+                    is_active=True,
+                )
+                db.add(admin)
+                await db.commit()
+                logger.info(f"Bootstrap admin user '{settings.LOCAL_ADMIN_USERNAME}' created")
 
     logger.info("STARTUP COMPLETE - Ready to accept requests")
     logger.info("=" * 60)
@@ -112,6 +138,16 @@ async def request_lifecycle(request: Request, call_next):
     request_id = str(uuid.uuid4())
     audit.set_request_id(request_id)
 
+    # Extract actor from JWT for audit context
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from auth.jwt_service import verify_access_token
+            payload = verify_access_token(auth_header[7:])
+            audit.set_actor(f"user:{payload.get('sub', 'unknown')}")
+        except Exception:
+            pass
+
     start_time = time.perf_counter()
     logger.debug(f"→ {request.method} {request.url.path}")
 
@@ -138,6 +174,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth_router)
 app.include_router(hosts_router)
 app.include_router(imports_router)
 app.include_router(correlation_router)
@@ -190,6 +227,7 @@ async def api_root():
         "docs": "/docs",
         "openapi": "/openapi.json",
         "endpoints": {
+            "auth": "/api/auth",
             "hosts": "/api/hosts",
             "imports": "/api/imports",
             "correlate": "/api/correlate",

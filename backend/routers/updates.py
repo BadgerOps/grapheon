@@ -13,10 +13,12 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
 from config import settings
 from utils.audit import audit
+from models import User
+from auth.dependencies import require_admin
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -156,6 +158,7 @@ def _get_release_info(releases: list[dict], tag_name: str) -> Optional[dict]:
 @router.get("")
 async def check_updates(
     force: bool = Query(False, description="Bypass the cache and fetch fresh data from GitHub"),
+    user: User = Depends(require_admin),
 ):
     """
     Check for available updates.
@@ -262,7 +265,7 @@ async def check_updates(
 
 
 @router.post("/upgrade")
-async def trigger_upgrade():
+async def trigger_upgrade(user: User = Depends(require_admin)):
     """
     Trigger a system upgrade.
 
@@ -341,7 +344,7 @@ async def trigger_upgrade():
 
 
 @router.get("/status")
-async def get_upgrade_status():
+async def get_upgrade_status(user: User = Depends(require_admin)):
     """
     Get the current upgrade status.
 

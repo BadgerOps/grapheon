@@ -7,6 +7,9 @@ from .conflict import Conflict
 from .route_hop import RouteHop
 from .vlan_config import VLANConfig
 from .device_identity import DeviceIdentity
+from .user import User
+from .auth_provider import AuthProvider
+from .role_mapping import RoleMapping
 
 __all__ = [
     "Host",
@@ -18,4 +21,7 @@ __all__ = [
     "RouteHop",
     "VLANConfig",
     "DeviceIdentity",
+    "User",
+    "AuthProvider",
+    "RoleMapping",
 ]

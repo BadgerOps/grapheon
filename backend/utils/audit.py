@@ -24,6 +24,11 @@ _request_id_context: ContextVar[Optional[str]] = ContextVar(
     'request_id', default=None
 )
 
+# Context variable for tracking actor (authenticated user) across async calls
+_actor_context: ContextVar[Optional[str]] = ContextVar(
+    'actor', default=None
+)
+
 
 class AuditLogger:
     """
@@ -56,6 +61,14 @@ class AuditLogger:
         """
         return _request_id_context.get()
     
+    def set_actor(self, actor: str) -> None:
+        """Set the authenticated user for this request context."""
+        _actor_context.set(actor)
+    
+    def get_actor(self) -> Optional[str]:
+        """Get the current actor from context, or None."""
+        return _actor_context.get()
+    
     def log(
         self,
         action: str,
@@ -79,7 +92,7 @@ class AuditLogger:
         event = {
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'action': action,
-            'actor': actor,
+            'actor': actor if actor != 'user' else (self.get_actor() or 'user'),
             'resource': resource,
             'resource_id': resource_id,
             'status': status,

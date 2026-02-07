@@ -16,10 +16,11 @@ from sqlalchemy import select, func
 
 from config import settings
 from database import get_db
-from models import Host, Port, Connection, ARPEntry, RawImport, Conflict
+from models import Host, Port, Connection, ARPEntry, RawImport, Conflict, User
 from services.data_aging import run_cleanup, get_data_age_stats, CleanupPolicy
 from services.mac_vendor import lookup_mac_vendor, get_vendor_lookup
 from utils.audit import audit
+from auth.dependencies import require_admin
 
 DATABASE_URL = settings.DATABASE_URL
 
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/api/maintenance", tags=["maintenance"])
 
 
 @router.get("/stats")
-async def get_database_stats(db: AsyncSession = Depends(get_db)):
+async def get_database_stats(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     """
     Get overall database statistics.
     """
@@ -85,6 +86,7 @@ async def preview_cleanup(
     connection_max_age_days: int = Query(7, ge=1, description="Days to keep connections"),
     arp_max_age_days: int = Query(7, ge=1, description="Days to keep ARP entries"),
     import_max_age_days: int = Query(30, ge=1, description="Days to keep import raw data"),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -131,6 +133,7 @@ async def run_cleanup_now(
     connection_max_age_days: int = Query(7, ge=1),
     arp_max_age_days: int = Query(7, ge=1),
     import_max_age_days: int = Query(30, ge=1),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -168,7 +171,7 @@ async def run_cleanup_now(
 
 
 @router.get("/health")
-async def database_health(db: AsyncSession = Depends(get_db)):
+async def database_health(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     """
     Check database health and connectivity.
     """
@@ -194,6 +197,7 @@ async def database_health(db: AsyncSession = Depends(get_db)):
 @router.post("/vendor-lookup")
 async def update_vendor_info(
     overwrite: bool = Query(False, description="Overwrite existing vendor info"),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -242,7 +246,7 @@ async def update_vendor_info(
 
 
 @router.get("/vendor-lookup/{mac}")
-async def lookup_single_vendor(mac: str):
+async def lookup_single_vendor(mac: str, user: User = Depends(require_admin)):
     """
     Lookup vendor for a single MAC address.
     """
@@ -262,7 +266,7 @@ async def lookup_single_vendor(mac: str):
 
 
 @router.post("/backup")
-async def create_backup(db: AsyncSession = Depends(get_db)):
+async def create_backup(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     """
     Create a backup of the database.
 
@@ -309,7 +313,7 @@ async def create_backup(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/backup/download/{filename}")
-async def download_backup(filename: str):
+async def download_backup(filename: str, user: User = Depends(require_admin)):
     """
     Download a backup file.
     """
@@ -336,7 +340,7 @@ async def download_backup(filename: str):
 
 
 @router.get("/backup/list")
-async def list_backups():
+async def list_backups(user: User = Depends(require_admin)):
     """
     List available backup files.
     """
@@ -367,7 +371,7 @@ async def list_backups():
 
 
 @router.post("/restore/{filename}")
-async def restore_backup(filename: str):
+async def restore_backup(filename: str, user: User = Depends(require_admin)):
     """
     Restore database from a backup file.
 
@@ -417,7 +421,7 @@ async def restore_backup(filename: str):
 
 
 @router.delete("/backup/{filename}")
-async def delete_backup(filename: str):
+async def delete_backup(filename: str, user: User = Depends(require_admin)):
     """
     Delete a backup file.
     """
@@ -446,7 +450,7 @@ async def delete_backup(filename: str):
 
 
 @router.post("/backup/upload")
-async def upload_backup(file: UploadFile = File(...)):
+async def upload_backup(file: UploadFile = File(...), user: User = Depends(require_admin)):
     """
     Upload a backup file (.db) from the client to the server's backup directory.
 
@@ -508,6 +512,7 @@ async def upload_backup(file: UploadFile = File(...)):
 @router.post("/seed-demo")
 async def seed_demo_data(
     append: bool = Query(False, description="Append to existing data instead of clearing"),
+    user: User = Depends(require_admin),
 ):
     """
     Generate demo/test data by running the built-in seed script.

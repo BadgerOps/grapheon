@@ -4,6 +4,17 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.0 - 2026-02-07
+### Added
+- **Login page** with OIDC provider buttons (PKCE flow) and local admin credential form
+- **AuthContext** provider with JWT token management, automatic validation on mount, role-based access helpers
+- **ProtectedRoute** component wrapping all app routes with auth check and role-based access control
+- **UserMenu** dropdown in navigation showing username, role badge, and sign-out button
+- Bearer token automatically attached to all API requests via `api/client.js`
+- 401 response handling: automatic token clearance and redirect to login
+- Role-based nav link visibility (Import hidden for viewers, Settings hidden for non-admins)
+- New auth API client functions: `getProviders()`, `authCallback()`, `localLogin()`, `getCurrentUser()`, `authLogout()`, `getUsers()`, `updateUserRole()`
+
 ## 0.7.0 - 2026-02-07
 ### Added
 - **Export dropdown** on the network map replacing the single PNG button: hover menu offers PNG image, SVG vector, GraphML (for Gephi/yEd), and draw.io (for diagrams.net) exports

@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from database import get_db
-from models import Connection
+from auth.dependencies import require_any_authenticated
+from models import Connection, User
 from schemas import ConnectionResponse, PaginatedResponse
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
@@ -18,6 +19,7 @@ async def list_connections(
     remote_ip: Optional[str] = Query(None),
     protocol: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Connection)

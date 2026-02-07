@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 
 
@@ -26,6 +28,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "Graphēon"
     APP_VERSION: str = _load_version()
     DEBUG: bool = False
+
+    # ── Authentication & Authorization ─────────────────────────────────
+    # JWT
+    JWT_SECRET: str = "change-me-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_MINUTES: int = 60
+
+    # Auth feature flags
+    AUTH_ENABLED: bool = True  # Master switch — False = all endpoints public
+    ENFORCE_AUTH: bool = False  # Gradual rollout — False = auth optional
+
+    # Local admin bootstrap (set via env vars for first-run setup)
+    LOCAL_ADMIN_USERNAME: Optional[str] = None
+    LOCAL_ADMIN_EMAIL: Optional[str] = None
+    LOCAL_ADMIN_PASSWORD: Optional[str] = None
 
     class Config:
         env_file = ".env"

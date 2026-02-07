@@ -4,6 +4,21 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.0 - 2026-02-07
+### Added
+- **Multi-provider OIDC authentication** with support for Okta, Google, GitHub, GitLab, Authentik, and any standards-compliant OIDC provider
+- **3-tier RBAC** (admin/editor/viewer) enforced on all 53 API endpoints via FastAPI dependencies
+- **Local admin fallback** for bootstrap/break-glass scenarios with bcrypt password hashing
+- New `auth` package: `jwt_service.py` (HS256 JWT creation/validation), `oidc_service.py` (OIDC discovery, code exchange, userinfo, role mapping), `dependencies.py` (FastAPI auth dependencies), `abac_stubs.py` (future ABAC placeholder)
+- New models: `User`, `AuthProvider`, `RoleMapping` with full SQLAlchemy async support
+- Auth API endpoints: `GET /api/auth/providers`, `POST /api/auth/callback`, `POST /api/auth/login/local`, `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/users` (admin), `PATCH /api/auth/users/{id}/role` (admin)
+- Feature flags: `AUTH_ENABLED` (master switch) and `ENFORCE_AUTH` (gradual rollout) for backward-compatible deployment
+- Automatic local admin bootstrap from `LOCAL_ADMIN_USERNAME/EMAIL/PASSWORD` environment variables on first startup
+- IdP-to-app role mapping via `RoleMapping` table with support for dotted claim paths (e.g., `resource_access.app.roles`)
+- Audit logger now tracks authenticated actor via ContextVar (replaces hardcoded "user" strings)
+- 26 new auth tests covering JWT, endpoints, RBAC, role mapping, and OIDC service
+- Added `authlib`, `passlib[bcrypt]`, `python-jose[cryptography]` to dependencies
+
 ## 0.7.0 - 2026-02-07
 ### Added
 - Network topology export in **GraphML** format (`GET /api/export/network/graphml`): standard XML graph format importable by Gephi, yEd, Cytoscape Desktop, and other graph analysis tools

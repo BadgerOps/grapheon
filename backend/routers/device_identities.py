@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from database import get_db
-from models import DeviceIdentity, Host
+from models import DeviceIdentity, Host, User
+from auth.dependencies import require_any_authenticated, require_editor
 from schemas import (
     DeviceIdentityCreate,
     DeviceIdentityUpdate,
@@ -33,6 +34,7 @@ async def list_device_identities(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     active_only: bool = Query(True),
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -92,6 +94,7 @@ async def list_device_identities(
 @router.get("/{device_id}", response_model=Dict)
 async def get_device_identity(
     device_id: int,
+    user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a device identity by ID, including linked hosts."""
@@ -145,6 +148,7 @@ async def get_device_identity(
 @router.post("", response_model=Dict)
 async def create_device_identity(
     data: DeviceIdentityCreate,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new device identity."""
@@ -184,6 +188,7 @@ async def create_device_identity(
 async def update_device_identity(
     device_id: int,
     data: DeviceIdentityUpdate,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an existing device identity."""
@@ -225,6 +230,7 @@ async def update_device_identity(
 @router.delete("/{device_id}", response_model=Dict)
 async def delete_device_identity(
     device_id: int,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """Soft-delete a device identity. Unlinks all hosts (sets device_id=NULL)."""
@@ -267,6 +273,7 @@ async def delete_device_identity(
 async def link_hosts_to_device(
     device_id: int,
     data: LinkHostsRequest,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -329,6 +336,7 @@ async def link_hosts_to_device(
 async def unlink_host_from_device(
     device_id: int,
     host_id: int,
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """Unlink a specific host from a device identity."""

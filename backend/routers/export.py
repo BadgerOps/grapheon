@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from database import get_db
-from models import Host, Port, Connection, ARPEntry
+from models import Host, Port, Connection, ARPEntry, User
+from auth.dependencies import require_editor
 from export_converters import cytoscape_to_graphml, cytoscape_to_drawio
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ async def export_hosts(
     format: str = Query("csv", enum=["csv", "json"], description="Export format"),
     include_ports: bool = Query(False, description="Include ports in export"),
     active_only: bool = Query(True, description="Only export active hosts"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -175,6 +177,7 @@ async def export_hosts(
 async def export_ports(
     format: str = Query("csv", enum=["csv", "json"]),
     state: Optional[str] = Query(None, description="Filter by state (open, closed, filtered)"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -251,6 +254,7 @@ async def export_ports(
 async def export_connections(
     format: str = Query("csv", enum=["csv", "json"]),
     state: Optional[str] = Query(None, description="Filter by state (ESTABLISHED, LISTEN, etc)"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -326,6 +330,7 @@ async def export_connections(
 @router.get("/full")
 async def export_full_database(
     format: str = Query("json", enum=["json"]),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -495,6 +500,7 @@ async def _fetch_network_elements(
 async def export_network_graphml(
     subnet_filter: Optional[str] = Query(None, description="Filter by subnet CIDR"),
     show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -528,6 +534,7 @@ async def export_network_graphml(
 async def export_network_drawio(
     subnet_filter: Optional[str] = Query(None, description="Filter by subnet CIDR"),
     show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
+    user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
     """

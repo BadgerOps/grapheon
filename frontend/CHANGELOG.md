@@ -4,6 +4,9 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.3 - 2026-02-08
+_No frontend changes — version bump to stay in sync with backend._
+
 ## 0.8.2 - 2026-02-08
 ### Fixed
 - **OAuth2 provider form**: endpoint URL fields (`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`) now shown in provider form — required for OAuth2, optional for OIDC

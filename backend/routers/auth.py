@@ -269,7 +269,7 @@ async def oidc_callback(
         logger.error(f"Token exchange failed for {request.provider}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token exchange failed",
+            detail=f"Token exchange failed: {exc}",
         )
 
     # Get user info (prefer ID token claims, fall back to userinfo endpoint)
@@ -280,7 +280,7 @@ async def oidc_callback(
         logger.error(f"Userinfo fetch failed for {request.provider}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to fetch user information",
+            detail=f"Failed to fetch user information: {exc}",
         )
 
     # Extract identity fields

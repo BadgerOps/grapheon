@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 ### Fixed
 - **OAuth2 provider configuration**: added `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` fields to provider create/update schemas so non-OIDC OAuth2 providers (e.g. GitHub) can be fully configured without relying on OIDC discovery
 - **OIDC discovery guard**: discover endpoint now returns a clear 400 error for `oauth2`-type providers instead of attempting `.well-known/openid-configuration` lookup (which always 404s for pure OAuth2 providers)
+- **GitHub token exchange**: `exchange_code()` now sends `Accept: application/json` header and handles form-encoded responses (GitHub returns `application/x-www-form-urlencoded` by default)
+- **OAuth2 userinfo normalisation**: `fetch_userinfo()` maps non-standard claim names to OIDC equivalents (`id` → `sub`, `login` → `preferred_username`) so downstream identity extraction works for GitHub and similar OAuth2 providers
+- **GitHub private email fallback**: when GitHub's `/user` endpoint returns `email: null` (user has private email), the service fetches the primary verified email from `/user/emails`
 
 ## 0.8.1 - 2026-02-07
 ### Added

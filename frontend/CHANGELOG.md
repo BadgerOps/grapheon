@@ -9,6 +9,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - **OAuth2 provider form**: endpoint URL fields (`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`) now shown in provider form — required for OAuth2, optional for OIDC
 - **GitHub OAuth2 preset**: "Quick fill" button auto-populates GitHub's OAuth2 endpoint URLs when creating a GitHub provider
 - **Discover button hidden for OAuth2**: the "Discover" action is no longer shown for `oauth2`-type providers since they don't support OIDC discovery
+- **PKCE skipped for OAuth2**: login flow no longer sends `code_challenge`/`code_challenge_method` for `oauth2`-type providers (GitHub OAuth Apps don't support PKCE)
+- **Scope defaults**: OAuth2 providers default to `read:user user:email` instead of `openid profile email` when no scope is configured
 
 ## 0.8.1 - 2026-02-07
 ### Added

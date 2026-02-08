@@ -90,10 +90,25 @@ async def exchange_code(
     if code_verifier:
         data["code_verifier"] = code_verifier
 
+    # Request JSON response — GitHub returns form-encoded by default
+    headers = {"Accept": "application/json"}
+
     async with httpx.AsyncClient() as client:
-        resp = await client.post(token_endpoint, data=data, timeout=10.0)
+        resp = await client.post(
+            token_endpoint, data=data, headers=headers, timeout=10.0,
+        )
         resp.raise_for_status()
-        return resp.json()
+
+        # Some OAuth2 providers may still return form-encoded despite Accept header
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            return resp.json()
+        else:
+            # Parse form-encoded: "access_token=xxx&token_type=bearer&scope=..."
+            from urllib.parse import parse_qs
+
+            parsed = parse_qs(resp.text)
+            return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
 
 async def fetch_userinfo(
@@ -103,12 +118,17 @@ async def fetch_userinfo(
     """
     Fetch user information from the provider's userinfo endpoint.
 
+    For OAuth2 providers that don't return standard OIDC claims (e.g. GitHub),
+    the response is normalised so that downstream code can always rely on
+    ``sub``, ``email``, ``name``, and ``preferred_username``.
+
     Args:
         provider: AuthProvider model instance.
         access_token: Bearer access token from token exchange.
 
     Returns:
-        User info claims dict.
+        User info claims dict with at least ``sub``, ``email``,
+        ``name``, and ``preferred_username`` keys.
     """
     userinfo_endpoint = provider.userinfo_endpoint
     if not userinfo_endpoint:
@@ -122,7 +142,59 @@ async def fetch_userinfo(
             timeout=10.0,
         )
         resp.raise_for_status()
-        return resp.json()
+        claims = resp.json()
+
+    # Normalise non-OIDC responses into standard claim names.
+    # GitHub returns "id" (int), "login", "name", "email" (may be null).
+    if "sub" not in claims and "id" in claims:
+        claims["sub"] = str(claims["id"])
+    if "preferred_username" not in claims and "login" in claims:
+        claims["preferred_username"] = claims["login"]
+
+    # GitHub may return email=null if the user's email is private.
+    # In that case, fall back to fetching from /user/emails.
+    if not claims.get("email") and provider.provider_type == "oauth2":
+        claims["email"] = await _fetch_github_primary_email(
+            userinfo_endpoint, access_token,
+        )
+
+    return claims
+
+
+async def _fetch_github_primary_email(
+    userinfo_endpoint: str,
+    access_token: str,
+) -> Optional[str]:
+    """
+    Try to fetch the user's primary verified email from the GitHub
+    ``/user/emails`` endpoint. Returns ``None`` on failure.
+    """
+    # Only attempt if userinfo looks like the GitHub API
+    if "api.github.com" not in userinfo_endpoint:
+        return None
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            emails = resp.json()
+            # Prefer primary+verified, fall back to first verified, then first
+            for entry in emails:
+                if entry.get("primary") and entry.get("verified"):
+                    return entry["email"]
+            for entry in emails:
+                if entry.get("verified"):
+                    return entry["email"]
+            if emails:
+                return emails[0].get("email")
+    except Exception as exc:
+        logger.warning(f"Failed to fetch GitHub user emails: {exc}")
+
+    return None
 
 
 async def resolve_role(

@@ -17,6 +17,11 @@ from models import AuthProvider, RoleMapping
 
 logger = logging.getLogger(__name__)
 
+
+class OAuthTokenError(Exception):
+    """Raised when an OAuth2 token exchange returns an error response."""
+
+
 # Role priority: admin > editor > viewer
 _ROLE_PRIORITY = {"viewer": 1, "editor": 2, "admin": 3}
 
@@ -102,13 +107,30 @@ async def exchange_code(
         # Some OAuth2 providers may still return form-encoded despite Accept header
         content_type = resp.headers.get("content-type", "")
         if "application/json" in content_type:
-            return resp.json()
+            result = resp.json()
         else:
             # Parse form-encoded: "access_token=xxx&token_type=bearer&scope=..."
             from urllib.parse import parse_qs
 
             parsed = parse_qs(resp.text)
-            return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+
+    # GitHub (and some other OAuth2 providers) return errors as HTTP 200
+    # with an "error" field instead of a proper HTTP error status.
+    if "error" in result:
+        error = result["error"]
+        desc = result.get("error_description", "")
+        raise OAuthTokenError(
+            f"Token endpoint returned error: {error}"
+            + (f" — {desc}" if desc else "")
+        )
+
+    if "access_token" not in result:
+        raise OAuthTokenError(
+            "Token endpoint response missing access_token"
+        )
+
+    return result
 
 
 async def fetch_userinfo(

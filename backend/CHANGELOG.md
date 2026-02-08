@@ -4,6 +4,11 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.3 - 2026-02-08
+### Fixed
+- **OAuth2 error-in-200 handling**: `exchange_code()` now detects error responses returned as HTTP 200 (GitHub pattern: `{"error": "bad_verification_code", ...}`) and raises `OAuthTokenError` instead of silently passing through a response with no `access_token`
+- **Callback error detail**: `/api/auth/callback` now surfaces the upstream provider error message in the 400 response detail instead of generic "Token exchange failed" / "Failed to fetch user information", making OAuth2 login failures debuggable from the browser
+
 ## 0.8.2 - 2026-02-08
 ### Fixed
 - **OAuth2 provider configuration**: added `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` fields to provider create/update schemas so non-OIDC OAuth2 providers (e.g. GitHub) can be fully configured without relying on OIDC discovery

@@ -4,52 +4,73 @@ import * as api from '../api/client'
 const TABS = ['Providers', 'Role Mappings', 'Users']
 
 // Reusable inline edit/add form for providers
+// Well-known OAuth2 endpoint presets
+const OAUTH2_PRESETS = {
+  github: {
+    issuer_url: 'https://github.com',
+    authorization_endpoint: 'https://github.com/login/oauth/authorize',
+    token_endpoint: 'https://github.com/login/oauth/access_token',
+    userinfo_endpoint: 'https://api.github.com/user',
+    scope: 'read:user user:email',
+  },
+}
+
 function ProviderForm({ initial, onSave, onCancel, saving }) {
   const [form, setForm] = useState(initial || {
     provider_name: '', display_name: '', provider_type: 'oidc',
     issuer_url: '', client_id: '', client_secret: '',
-    scope: 'openid profile email', display_order: 0, is_enabled: true,
+    scope: 'openid profile email',
+    authorization_endpoint: '', token_endpoint: '', userinfo_endpoint: '',
+    display_order: 0, is_enabled: true,
   })
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
+  const isOAuth2 = form.provider_type === 'oauth2'
+
+  const applyPreset = (presetKey) => {
+    const preset = OAUTH2_PRESETS[presetKey]
+    if (preset) setForm(prev => ({ ...prev, ...preset }))
+  }
+
+  const inputClass = "w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
 
   return (
     <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Provider Name (slug)</label>
-          <input className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.provider_name} onChange={e => set('provider_name', e.target.value)} placeholder="e.g. okta, github" disabled={!!initial} />
+          <input className={inputClass} value={form.provider_name} onChange={e => set('provider_name', e.target.value)} placeholder="e.g. okta, github" disabled={!!initial} />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
-          <input className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.display_name} onChange={e => set('display_name', e.target.value)} placeholder="e.g. Okta SSO" />
+          <input className={inputClass} value={form.display_name} onChange={e => set('display_name', e.target.value)} placeholder="e.g. Okta SSO" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-          <select className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.provider_type} onChange={e => set('provider_type', e.target.value)}>
+          <select className={inputClass} value={form.provider_type} onChange={e => set('provider_type', e.target.value)}>
             <option value="oidc">OIDC</option>
             <option value="oauth2">OAuth2</option>
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Issuer URL</label>
-          <input className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.issuer_url} onChange={e => set('issuer_url', e.target.value)} placeholder="https://your-idp.example.com" />
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{isOAuth2 ? 'Base URL' : 'Issuer URL'}</label>
+          <input className={inputClass} value={form.issuer_url} onChange={e => set('issuer_url', e.target.value)} placeholder={isOAuth2 ? 'https://github.com' : 'https://your-idp.example.com'} />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client ID</label>
-          <input className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.client_id} onChange={e => set('client_id', e.target.value)} />
+          <input className={inputClass} value={form.client_id} onChange={e => set('client_id', e.target.value)} />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client Secret</label>
-          <input type="password" className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.client_secret} onChange={e => set('client_secret', e.target.value)} />
+          <input type="password" className={inputClass} value={form.client_secret} onChange={e => set('client_secret', e.target.value)} />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
-          <input className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.scope} onChange={e => set('scope', e.target.value)} />
+          <input className={inputClass} value={form.scope} onChange={e => set('scope', e.target.value)} />
         </div>
         <div className="flex items-end gap-4">
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Order</label>
-            <input type="number" className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" value={form.display_order} onChange={e => set('display_order', parseInt(e.target.value) || 0)} />
+            <input type="number" className={inputClass} value={form.display_order} onChange={e => set('display_order', parseInt(e.target.value) || 0)} />
           </div>
           <label className="flex items-center gap-2 pb-2 cursor-pointer">
             <input type="checkbox" checked={form.is_enabled} onChange={e => set('is_enabled', e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
@@ -57,8 +78,47 @@ function ProviderForm({ initial, onSave, onCancel, saving }) {
           </label>
         </div>
       </div>
+
+      {/* Endpoint URLs — required for OAuth2, optional for OIDC (auto-discovered) */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Endpoint URLs
+            {isOAuth2 ? <span className="text-red-500 ml-1">*</span> : null}
+          </h4>
+          {isOAuth2 && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">Required for OAuth2 — no auto-discovery</span>
+          )}
+          {!isOAuth2 && (
+            <span className="text-xs text-gray-400 dark:text-gray-500">Optional — auto-populated by OIDC discovery</span>
+          )}
+        </div>
+        {isOAuth2 && !initial && (
+          <div className="flex gap-2 mb-3">
+            <span className="text-xs text-gray-500 dark:text-gray-400 self-center">Quick fill:</span>
+            {Object.keys(OAUTH2_PRESETS).map(key => (
+              <button key={key} type="button" onClick={() => applyPreset(key)} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors capitalize">{key}</button>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Authorization Endpoint</label>
+            <input className={inputClass} value={form.authorization_endpoint || ''} onChange={e => set('authorization_endpoint', e.target.value)} placeholder="https://..." />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Token Endpoint</label>
+            <input className={inputClass} value={form.token_endpoint || ''} onChange={e => set('token_endpoint', e.target.value)} placeholder="https://..." />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Userinfo Endpoint</label>
+            <input className={inputClass} value={form.userinfo_endpoint || ''} onChange={e => set('userinfo_endpoint', e.target.value)} placeholder="https://..." />
+          </div>
+        </div>
+      </div>
+
       <div className="flex gap-2 pt-2">
-        <button onClick={() => onSave(form)} disabled={saving || !form.provider_name || !form.issuer_url || !form.client_id} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        <button onClick={() => onSave(form)} disabled={saving || !form.provider_name || !form.client_id || (isOAuth2 && (!form.authorization_endpoint || !form.token_endpoint))} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
           {saving ? 'Saving...' : initial ? 'Update Provider' : 'Create Provider'}
         </button>
         <button onClick={onCancel} className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">Cancel</button>
@@ -405,9 +465,11 @@ export default function AuthAdmin() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {p.provider_type === 'oidc' && (
                           <button onClick={() => handleDiscover(p.id)} disabled={discovering === p.id} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors" title="Test OIDC Discovery">
                             {discovering === p.id ? '...' : 'Discover'}
                           </button>
+                          )}
                           <button onClick={() => { setEditingProvider(p); setShowProviderForm(true) }} className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                             Edit
                           </button>

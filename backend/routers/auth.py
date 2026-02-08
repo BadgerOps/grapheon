@@ -112,6 +112,9 @@ class AuthProviderCreateRequest(BaseModel):
     client_id: str
     client_secret: str
     scope: str = "openid profile email"
+    authorization_endpoint: Optional[str] = None
+    token_endpoint: Optional[str] = None
+    userinfo_endpoint: Optional[str] = None
     display_order: int = 0
     is_enabled: bool = True
 
@@ -123,6 +126,9 @@ class AuthProviderUpdateRequest(BaseModel):
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     scope: Optional[str] = None
+    authorization_endpoint: Optional[str] = None
+    token_endpoint: Optional[str] = None
+    userinfo_endpoint: Optional[str] = None
     display_order: Optional[int] = None
     is_enabled: Optional[bool] = None
 
@@ -531,6 +537,9 @@ async def admin_create_provider(
         client_id=body.client_id,
         client_secret=body.client_secret,
         scope=body.scope,
+        authorization_endpoint=body.authorization_endpoint,
+        token_endpoint=body.token_endpoint,
+        userinfo_endpoint=body.userinfo_endpoint,
         display_order=body.display_order,
         is_enabled=body.is_enabled,
     )
@@ -627,6 +636,16 @@ async def admin_discover_endpoints(
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
+
+    if provider.provider_type == "oauth2":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "OAuth2 providers do not support OIDC discovery. "
+                "Set authorization_endpoint, token_endpoint, and "
+                "userinfo_endpoint manually via the edit form."
+            ),
+        )
 
     if not provider.issuer_url:
         raise HTTPException(status_code=400, detail="Provider has no issuer_url configured")

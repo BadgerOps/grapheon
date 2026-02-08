@@ -27,7 +27,12 @@ ERRORS=0
 
 # ── 1. Backend lint (ruff) ────────────────────────────────────────────
 info "Running ruff lint..."
-if ruff check "$REPO_ROOT/backend"; then
+if command -v ruff &>/dev/null; then
+    RUFF_CMD="ruff"
+else
+    RUFF_CMD="python -m ruff"
+fi
+if $RUFF_CMD check "$REPO_ROOT/backend"; then
     pass "ruff check backend"
 else
     fail "ruff check backend — run 'ruff check backend --fix' to auto-fix"

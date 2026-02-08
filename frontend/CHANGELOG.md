@@ -4,6 +4,12 @@ All notable changes to the Grapheon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.2 - 2026-02-08
+### Fixed
+- **OAuth2 provider form**: endpoint URL fields (`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`) now shown in provider form — required for OAuth2, optional for OIDC
+- **GitHub OAuth2 preset**: "Quick fill" button auto-populates GitHub's OAuth2 endpoint URLs when creating a GitHub provider
+- **Discover button hidden for OAuth2**: the "Discover" action is no longer shown for `oauth2`-type providers since they don't support OIDC discovery
+
 ## 0.8.1 - 2026-02-07
 ### Added
 - **Identity & Access admin page** (`/auth-admin`, admin-only) with three tabs: Providers, Role Mappings, and Users

@@ -4,6 +4,11 @@ All notable changes to the Grapheon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.2 - 2026-02-08
+### Fixed
+- **OAuth2 provider configuration**: added `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` fields to provider create/update schemas so non-OIDC OAuth2 providers (e.g. GitHub) can be fully configured without relying on OIDC discovery
+- **OIDC discovery guard**: discover endpoint now returns a clear 400 error for `oauth2`-type providers instead of attempting `.well-known/openid-configuration` lookup (which always 404s for pure OAuth2 providers)
+
 ## 0.8.1 - 2026-02-07
 ### Added
 - **In-app Identity & Access admin page** with three tabs: Providers, Role Mappings, and Users

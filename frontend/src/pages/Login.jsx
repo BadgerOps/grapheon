@@ -90,24 +90,32 @@ export default function Login() {
     handleCallback()
   }, [handleCallback])
 
-  // Handle OIDC provider login redirect
+  // Handle OIDC/OAuth2 provider login redirect
   const handleOIDCLogin = async (provider) => {
     try {
-      const { verifier, challenge } = await generatePKCE()
       const redirectUri = `${window.location.origin}/login`
+      const isOIDC = provider.provider_type === 'oidc'
 
       sessionStorage.setItem('oidc_provider', provider.name)
-      sessionStorage.setItem('oidc_code_verifier', verifier)
 
       const params = new URLSearchParams({
         client_id: provider.client_id,
         redirect_uri: redirectUri,
         response_type: 'code',
-        scope: provider.scope || 'openid profile email',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
+        scope: provider.scope || (isOIDC ? 'openid profile email' : 'read:user user:email'),
         state: crypto.randomUUID(),
       })
+
+      // PKCE is only supported by OIDC providers (and GitHub Apps).
+      // Plain OAuth2 apps (e.g. GitHub OAuth Apps) don't support it.
+      if (isOIDC) {
+        const { verifier, challenge } = await generatePKCE()
+        sessionStorage.setItem('oidc_code_verifier', verifier)
+        params.set('code_challenge', challenge)
+        params.set('code_challenge_method', 'S256')
+      } else {
+        sessionStorage.removeItem('oidc_code_verifier')
+      }
 
       window.location.href = `${provider.authorization_endpoint}?${params}`
     } catch (err) {

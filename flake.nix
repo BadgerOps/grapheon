@@ -42,7 +42,7 @@
           ];
 
           shellHook = ''
-            echo "🌐 Network Aggregator Development Environment"
+            echo "🌐 Graphēon Development Environment"
             echo "Python: $(python --version)"
             echo "Node: $(node --version)"
             echo "SQLite: $(sqlite3 --version | cut -d' ' -f1)"

@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
     # Startup
     logger.info("=" * 60)
-    logger.info("NETWORK AGGREGATOR STARTING UP")
+    logger.info("GRAPHĒON STARTING UP")
     logger.info(f"App: {settings.APP_NAME} v{settings.APP_VERSION}")
 
     start = time.perf_counter()
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("NETWORK AGGREGATOR SHUTTING DOWN")
+    logger.info("GRAPHĒON SHUTTING DOWN")
     await close_db()
     logger.info("Shutdown complete")
 

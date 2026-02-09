@@ -4,6 +4,10 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.4 - 2026-02-09
+### Fixed
+- Renamed "Network Aggregator" to "Graphēon" in navbar header and npm package name
+
 ## 0.8.3 - 2026-02-08
 _No frontend changes — version bump to stay in sync with backend._
 

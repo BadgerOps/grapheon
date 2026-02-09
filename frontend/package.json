@@ -1,6 +1,6 @@
 {
-  "name": "network-aggregator-frontend",
-  "version": "0.8.3",
+  "name": "grapheon-frontend",
+  "version": "0.8.4",
   "type": "module",
   "scripts": {
     "dev": "vite",

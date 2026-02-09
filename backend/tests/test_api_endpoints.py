@@ -271,6 +271,62 @@ class TestNetworkMapEndpoint:
         # Legacy format should be dictionary
         assert isinstance(data, dict)
 
+    @pytest.mark.asyncio
+    async def test_network_map_cytoscape_format_has_nodes_edges(self, async_client: AsyncClient):
+        """GET /api/network/map?format=cytoscape returns elements with nodes and edges arrays.
+
+        This structure is consumed by both CytoscapeNetworkMap and
+        IsoflowNetworkMap (via the isoflowTransformer).
+        """
+        # Seed a host so the map has data
+        await async_client.post(
+            "/api/hosts",
+            json={"ip_address": "192.168.1.1", "hostname": "gw", "device_type": "router"},
+        )
+        response = await async_client.get("/api/network/map?format=cytoscape")
+        assert response.status_code == 200
+        data = response.json()
+        assert "elements" in data
+        elements = data["elements"]
+        assert "nodes" in elements
+        assert "edges" in elements
+        assert isinstance(elements["nodes"], list)
+        assert isinstance(elements["edges"], list)
+
+    @pytest.mark.asyncio
+    async def test_network_map_node_data_has_required_fields(self, async_client: AsyncClient):
+        """Host nodes include fields needed by the isoflow transformer (id, type, device_type, ip)."""
+        await async_client.post(
+            "/api/hosts",
+            json={"ip_address": "10.10.10.1", "hostname": "test-iso", "device_type": "server"},
+        )
+        response = await async_client.get("/api/network/map?format=cytoscape")
+        assert response.status_code == 200
+        elements = response.json()["elements"]
+        # Find host nodes (not compound nodes)
+        host_nodes = [
+            n for n in elements["nodes"]
+            if n["data"].get("type") not in ("vlan", "subnet", "internet", "public_ips")
+        ]
+        assert len(host_nodes) > 0
+        for node in host_nodes:
+            d = node["data"]
+            assert "id" in d
+            assert "type" in d
+            assert "ip" in d
+            assert "device_type" in d
+
+    @pytest.mark.asyncio
+    async def test_network_map_stats_included(self, async_client: AsyncClient):
+        """Network map response includes stats object."""
+        response = await async_client.get("/api/network/map")
+        assert response.status_code == 200
+        data = response.json()
+        assert "stats" in data
+        stats = data["stats"]
+        assert "total_hosts" in stats
+        assert "total_edges" in stats
+
 
 class TestRequestID:
     """Request ID header tests."""

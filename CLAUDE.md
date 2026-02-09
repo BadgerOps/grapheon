@@ -4,7 +4,7 @@
 
 Graphēon ingests network scan outputs (nmap, netstat, arp, ping, traceroute, pcap), normalizes them, correlates related hosts, and provides interactive network topology visualization. The goal is fusing disparate network signals into a coherent graph of hosts, edges, and topology.
 
-**Stack**: FastAPI + SQLite (async via aiosqlite) backend | React 18 + Vite + Cytoscape.js frontend
+**Stack**: FastAPI + SQLite (async via aiosqlite) backend | React 18 + Vite + Cytoscape.js + Isoflow (TESTING) frontend
 **Runtime**: Python 3.12, Node 18+
 **Environment**: Nix dev shell (`nix develop`)
 
@@ -47,7 +47,8 @@ backend/
 
 frontend/
   src/pages/    # 11 pages (Dashboard, Hosts, Map, Import, Connections, ARP, Search, Config, HostDetail, Changelog, Login)
-  src/components/  # NetworkMap (Cytoscape.js), HostTable, ProtectedRoute, UserMenu, etc.
+  src/components/  # NetworkMap (Cytoscape.js), IsoflowNetworkMap (TESTING), HostTable, ProtectedRoute, UserMenu, etc.
+  src/services/    # Graph filters, map export, isoflowTransformer (TESTING)
   src/context/  # AuthContext provider
   src/api/client.js  # API client
 
@@ -60,7 +61,7 @@ docs/           # Architecture, backend, frontend, deployment docs
 - **Async everything**: SQLAlchemy AsyncSession with aiosqlite throughout
 - **Parser registry**: Auto-detection of input format (XML/grep/plain text) via `parsers/__init__.py`
 - **Correlation engine**: IP → MAC → tag-based host merging with conflict detection
-- **Visualization**: Cytoscape.js with compound nodes (VLAN→Subnet→Host), three layout modes (dagre/fcose/cola), device-type shapes/colors
+- **Visualization**: Cytoscape.js with compound nodes (VLAN→Subnet→Host), three layout modes (dagre/fcose/cola), device-type shapes/colors. Experimental isoflow isometric view (TESTING — evaluating value)
 - **Graph Export**: Network topology exportable to GraphML (Gephi/yEd) and draw.io (diagrams.net) via `/api/export/network/{format}`
 - **Database**: SQLite with JSON columns for tags, source_types, conflict values
 - **Authentication**: Multi-provider OIDC via authlib + local admin fallback. JWT (HS256) tokens. 3-tier RBAC (admin/editor/viewer) enforced via FastAPI `Depends()`. Feature flags (`AUTH_ENABLED`, `ENFORCE_AUTH`) for gradual rollout.

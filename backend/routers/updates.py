@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -89,6 +90,34 @@ def _set_cache(data: dict) -> None:
     """Update the releases cache."""
     RELEASES_CACHE["data"] = data
     RELEASES_CACHE["timestamp"] = time.time()
+
+
+def _detect_frontend_version() -> Optional[str]:
+    """
+    Detect the frontend version.
+
+    Checks FRONTEND_VERSION env var first, then falls back to reading
+    frontend/package.json relative to the backend directory.
+    """
+    # 1. Environment variable (set in Docker/production)
+    env_version = os.environ.get("FRONTEND_VERSION")
+    if env_version:
+        return env_version
+
+    # 2. Fall back to frontend/package.json
+    backend_dir = Path(__file__).resolve().parent.parent
+    package_json = backend_dir.parent / "frontend" / "package.json"
+    try:
+        if package_json.exists():
+            data = json.loads(package_json.read_text())
+            version = data.get("version")
+            if version:
+                logger.debug(f"Read frontend version {version} from {package_json}")
+                return version
+    except Exception as e:
+        logger.debug(f"Could not read frontend version from {package_json}: {e}")
+
+    return None
 
 
 async def _fetch_github_releases() -> Optional[list[dict]]:
@@ -199,7 +228,7 @@ async def check_updates(
 
     # Parse current versions
     current_backend = settings.APP_VERSION
-    current_frontend = os.environ.get("FRONTEND_VERSION")
+    current_frontend = _detect_frontend_version()
 
     # Parse latest versions for comparison
     latest_backend = backend_tag if backend_tag else None
@@ -214,6 +243,12 @@ async def check_updates(
 
     if latest_frontend and current_frontend:
         frontend_update = _compare_versions(current_frontend, latest_frontend)
+    elif latest_frontend and not current_frontend:
+        logger.warning(
+            "Frontend version not detected (set FRONTEND_VERSION env var "
+            "or ensure frontend/package.json is accessible). "
+            "Cannot compare against latest release."
+        )
 
     update_available = backend_update or frontend_update
 
@@ -257,8 +292,8 @@ async def check_updates(
 
     logger.info(
         f"Update check complete: update_available={update_available}, "
-        f"backend={current_backend} -> {latest_backend}, "
-        f"frontend={current_frontend} -> {latest_frontend}"
+        f"backend={current_backend} -> {latest_backend_str}, "
+        f"frontend={current_frontend} -> {latest_frontend_str}"
     )
 
     return response

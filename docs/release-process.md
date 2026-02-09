@@ -34,5 +34,5 @@ The workflow builds and pushes:
 
 ## Notes
 
-- Use `docs/quadlet-release-updates.md` for current host-side update/deployment details (systemd + Podman services).
+- Use `docs/example_deployment.md` for current host-side update/deployment details (NixOS + Podman + systemd services).
 - The frontend includes an in-app changelog at `/changelog`.

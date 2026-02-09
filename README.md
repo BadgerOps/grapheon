@@ -81,7 +81,7 @@ The release workflow builds:
 - `ghcr.io/badgerops/grapheon-backend:latest` and `:vX.Y.Z`
 - `ghcr.io/badgerops/grapheon-frontend:latest` and `:vX.Y.Z`
 
-See `docs/release-process.md` and `docs/quadlet-release-updates.md` for the full workflow.
+See `docs/release-process.md` and `docs/example_deployment.md` for the full workflow.
 
 ## Data Hygiene
 

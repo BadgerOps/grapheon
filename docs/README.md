@@ -10,5 +10,5 @@ This folder documents how Graphēon works end-to-end. The codebase standardizes 
 - `docs/tagging-correlation.md` - Tagging rules and correlation behavior.
 - `docs/testing.md` - Test workflow and local checks.
 - `docs/deployment.md` - Cloudflare Pages deployment and OpenTofu setup.
-- `docs/quadlet-release-updates.md` - Systemd + Podman + GH release update pipeline.
+- `docs/example_deployment.md` - NixOS + Podman + systemd deployment and update workflow.
 - `docs/release-process.md` - Versioning and release workflow for backend/frontend images.

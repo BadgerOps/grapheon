@@ -33,4 +33,4 @@ Add the following secrets in the GitHub repo settings:
 
 The FastAPI backend is not yet deployed on Cloudflare. To make the backend Cloudflare-native, plan a port to Workers + D1 or another Cloudflare-compatible runtime.
 
-The current backend/container runtime flow is documented in `docs/quadlet-release-updates.md` (systemd + Podman services, no Quadlet dependency).
+The current backend/container runtime flow is documented in `docs/example_deployment.md` (NixOS + Podman + systemd services).

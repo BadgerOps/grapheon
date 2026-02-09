@@ -14,7 +14,7 @@
 4. [Configuring OIDC Providers](#configuring-oidc-providers)
 5. [Role Mapping](#role-mapping)
 6. [Docker / Container Setup](#docker--container-setup)
-7. [Quadlet / Podman Setup](#quadlet--podman-setup)
+7. [Systemd / Podman Setup](#systemd--podman-setup)
 8. [API Reference](#api-reference)
 9. [Troubleshooting](#troubleshooting)
 10. [Security Considerations](#security-considerations)
@@ -762,96 +762,22 @@ Access:
 
 ---
 
-## Quadlet / Podman Setup
+## Systemd / Podman Setup
 
-Graphēon supports Podman via Quadlet files (systemd container declarations).
+Current host deployments run Podman containers managed by systemd services (not Quadlet-specific units).
 
-### Container File (.container)
+- Expected service names:
+  - `grapheon-backend.service`
+  - `grapheon-frontend.service` (optional when frontend is hosted on Cloudflare Pages)
+- Persistent backend data should be mounted to `/app/data`.
+- For complete NixOS + Podman + systemd examples (including upgrade automation), use:
+  - `docs/example_deployment.md`
 
-Save as `/etc/containers/systemd/grapheon.container`:
+Authentication-specific production defaults remain:
 
-```ini
-[Unit]
-Description=Grapheon Network Topology Tool
-After=network-online.target
-Wants=network-online.target
-
-[Container]
-Image=grapheon:latest
-ContainerName=grapheon
-PublishPort=8000:8000
-Volume=grapheon-db:/app/data
-
-Environment=AUTH_ENABLED=True
-Environment=ENFORCE_AUTH=True
-Environment=JWT_SECRET=your-production-secret-key-min-32-chars
-Environment=JWT_ALGORITHM=HS256
-Environment=JWT_EXPIRATION_MINUTES=60
-Environment=LOCAL_ADMIN_USERNAME=admin
-Environment=LOCAL_ADMIN_EMAIL=admin@example.com
-Environment=LOCAL_ADMIN_PASSWORD=AdminPassword123!
-
-RestartPolicy=on-failure:3
-Restart=on-success
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Network File (.network, optional)
-
-Create a custom network for multi-container setups:
-
-```ini
-[Unit]
-Description=Grapheon Network
-
-[Network]
-```
-
-Save as `/etc/containers/systemd/grapheon.network`.
-
-### Managing the Service
-
-```bash
-# Reload systemd to recognize the new Quadlet files
-sudo systemctl daemon-reload
-
-# Start Graphēon
-sudo systemctl start grapheon
-
-# Check status
-sudo systemctl status grapheon
-
-# View logs
-journalctl -u grapheon -f
-
-# Stop Graphēon
-sudo systemctl stop grapheon
-
-# Enable auto-start on boot
-sudo systemctl enable grapheon
-```
-
-### Persistent Volume
-
-By default, Quadlet creates named volumes. To use a host directory:
-
-```ini
-[Container]
-Volume=/var/lib/grapheon:/app/data
-```
-
-Then ensure the directory exists and has proper permissions:
-
-```bash
-sudo mkdir -p /var/lib/grapheon
-sudo chown -R $(id -u):$(id -g) /var/lib/grapheon
-```
-
-### Multi-Container Setup (Podman Pod)
-
-For more complex deployments (e.g., with a proxy or additional services), use Podman pods. See the main deployment documentation for pod examples.
+- Set `ENFORCE_AUTH=True`
+- Set a strong `JWT_SECRET`
+- Configure local admin bootstrap and/or OIDC providers before enforcing auth
 
 ---
 

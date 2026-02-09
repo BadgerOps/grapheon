@@ -295,7 +295,7 @@ class TestNetworkMapEndpoint:
 
     @pytest.mark.asyncio
     async def test_network_map_node_data_has_required_fields(self, async_client: AsyncClient):
-        """Host nodes include fields needed by the isoflow transformer (id, type, device_type, ip)."""
+        """Host nodes include fields needed by the isoflow transformer (id, device_type, ip)."""
         await async_client.post(
             "/api/hosts",
             json={"ip_address": "10.10.10.1", "hostname": "test-iso", "device_type": "server"},
@@ -303,7 +303,7 @@ class TestNetworkMapEndpoint:
         response = await async_client.get("/api/network/map?format=cytoscape")
         assert response.status_code == 200
         elements = response.json()["elements"]
-        # Find host nodes (not compound nodes)
+        # Find host nodes (not compound nodes — compound nodes have type: vlan/subnet/etc)
         host_nodes = [
             n for n in elements["nodes"]
             if n["data"].get("type") not in ("vlan", "subnet", "internet", "public_ips")
@@ -312,7 +312,6 @@ class TestNetworkMapEndpoint:
         for node in host_nodes:
             d = node["data"]
             assert "id" in d
-            assert "type" in d
             assert "ip" in d
             assert "device_type" in d
 

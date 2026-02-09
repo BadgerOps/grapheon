@@ -4,6 +4,12 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.5 - 2026-02-09
+### Fixed
+- **Update check frontend version detection**: `check_updates` now reads the frontend version from `frontend/package.json` as a fallback when `FRONTEND_VERSION` env var is not set (was always `None` in dev/local setups)
+- **Update check log output**: Log message now shows clean version strings (e.g., `0.8.4 -> 0.8.4`) instead of raw tag names (`0.8.4 -> backend-v0.8.4`) which made it look like version comparison was broken
+- **Missing frontend version warning**: When frontend version cannot be detected, logs a clear warning with instructions to set `FRONTEND_VERSION` env var or ensure `frontend/package.json` is accessible
+
 ## 0.8.4 - 2026-02-09
 ### Fixed
 - Renamed all remaining "Network Aggregator" references to "Graphēon" in log messages, docstrings, and dev shell banner

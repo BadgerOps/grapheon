@@ -41,6 +41,11 @@ Patterns to watch for, mistakes to avoid, and rules discovered through iteration
 - **`mac-vendor-lookup` package is async-incompatible with uvicorn.** Its sync `MacLookup.lookup()` calls `asyncio.get_event_loop().run_until_complete()` internally, which crashes with "this event loop is already running" inside uvicorn. Fix: read the package's downloaded `mac-vendors.txt` file directly and build a plain dict.
 - **Locally administered MACs cannot be OUI-resolved.** If bit 1 of the first octet is set (second hex char is 2/3/6/7/A/B/E/F), the MAC is randomly generated (Tailscale, WireGuard, VMs, Docker). Detect these early and label them rather than reporting "not found."
 
+## Update / Release Checks
+
+- **Don't rely solely on env vars for version detection.** The `FRONTEND_VERSION` env var was never set in dev/local setups, causing the update check to always report `frontend=None`. Add fallbacks like reading `package.json` or a VERSION file.
+- **Log clean values, not raw internal representations.** Logging raw tag names (`backend-v0.8.4`) next to clean versions (`0.8.4`) made the update check look broken even though the comparison logic was correct. Always transform values before logging user-facing messages.
+
 ## Process
 
 - **Check the actual input data before blaming the parser.** The nmap parser appeared broken because hosts had no OS/hostname, but the real issue was that `nmap.xml` was a minimal scan without `-O`/`-A` flags. Always inspect the raw import data.

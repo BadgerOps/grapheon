@@ -1,8 +1,22 @@
 # Backend
 
-The Graphēon backend is a FastAPI app in `backend/`, using async SQLAlchemy with SQLite. Python 3.12 is required.
+The Grapheon backend is a FastAPI app in `backend/`, using async SQLAlchemy with SQLite. Python 3.12 is required. The backend runs as a Docker container (port 8000) alongside the frontend container.
 
-Cloudflare Pages currently hosts only the frontend. The backend runs as a separate FastAPI service until a Workers + D1 port is completed.
+```mermaid
+graph TD
+    subgraph "Backend Container"
+        MAIN[main.py<br/>FastAPI + Middleware]
+        MAIN --> ROUTERS[Routers x13]
+        MAIN --> AUTH_DEP[Auth Dependencies]
+        ROUTERS --> MODELS[SQLAlchemy Models]
+        ROUTERS --> PARSERS[Parser Registry]
+        ROUTERS --> SERVICES[Services<br/>correlation / vendor / aging]
+        ROUTERS --> EXPORT[Export Converters<br/>GraphML / draw.io]
+        MODELS --> DB[(SQLite<br/>/app/data/network.db)]
+        AUTH_DEP --> JWT[JWT Service]
+        AUTH_DEP --> OIDC[OIDC Service]
+    end
+```
 
 ## Run Locally
 
@@ -21,7 +35,7 @@ nix develop -c bash -lc "cd backend && uvicorn main:app --reload"
 
 ## Container
 
-`backend/Dockerfile` packages the FastAPI app for GHCR. The container exposes port 8000 and expects a writable `/app/data` for the SQLite database.
+`backend/Dockerfile` packages the FastAPI app as a `python:3.12-slim` image published to GHCR. The container exposes port 8000 and expects a writable `/app/data` for the SQLite database. See `docs/deployment.md` for the full deployment guide.
 
 ## Changelog
 

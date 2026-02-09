@@ -1,15 +1,13 @@
-# Example Deployment (NixOS + Podman + systemd)
+# Alternative Deployment: NixOS + Podman + systemd
 
-This document captures the current host-side deployment model for Graphēon.
+This document describes an alternative deployment model using NixOS with Podman containers managed by systemd services. For the standard Docker deployment, see `docs/deployment.md`.
 
-- Frontend app can be hosted on Cloudflare Pages (documented in `docs/deployment.md`).
-- Backend and optional containerized frontend run on a NixOS host via Podman containers managed by systemd services.
-- In-app upgrades are driven by `deploy/grapheon-upgrade.path`, `deploy/grapheon-upgrade.service`, and `scripts/grapheon-upgrade.sh`.
+This approach adds systemd-driven lifecycle management and in-app upgrade automation via `deploy/grapheon-upgrade.path`, `deploy/grapheon-upgrade.service`, and `scripts/grapheon-upgrade.sh`.
 
 ## Runtime Topology
 
-- `grapheon-backend.service` runs `ghcr.io/badgerops/grapheon-backend`.
-- `grapheon-frontend.service` runs `ghcr.io/badgerops/grapheon-frontend` (optional if you are using Cloudflare Pages instead).
+- `grapheon-backend.service` runs `ghcr.io/badgerops/grapheon-backend` (port 8000).
+- `grapheon-frontend.service` runs `ghcr.io/badgerops/grapheon-frontend` (port 8080).
 - Backend data persists on host storage and is mounted to `/app/data` in the backend container.
 - Backend health endpoint is `http://localhost:8000/health`.
 
@@ -136,4 +134,4 @@ rm -f /data/upgrade-requested /data/upgrade-status.json
 - Ensure GHCR access on the host if images are private: `podman login ghcr.io`.
 - Keep `/var/lib/grapheon/data` persistent and backed up.
 - Service names should stay `grapheon-backend.service` and `grapheon-frontend.service`; upgrade automation depends on those names.
-- If you deploy frontend on Cloudflare Pages, only backend service is required on the host.
+- For the standard Docker deployment (without systemd/Podman), see `docs/deployment.md`.

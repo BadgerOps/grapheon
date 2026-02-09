@@ -23,7 +23,65 @@
 
 ## Overview
 
-Graphēon v0.8.0 introduces a complete authentication and authorization system designed for enterprise network topology management. The system provides:
+Grapheon v0.8.0 introduces a complete authentication and authorization system designed for enterprise network topology management.
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User Browser
+    participant FE as Frontend (React)
+    participant BE as Backend (FastAPI)
+    participant IdP as OIDC Provider
+
+    U->>FE: Navigate to /login
+    FE->>BE: GET /api/auth/providers
+    BE-->>FE: Provider list + local_auth_enabled
+
+    alt OIDC Login
+        U->>FE: Click provider button
+        FE->>FE: Generate PKCE verifier + challenge
+        FE->>FE: Store provider + verifier in sessionStorage
+        FE->>IdP: Redirect to authorization_endpoint
+        U->>IdP: Authenticate
+        IdP->>FE: Redirect to /login?code=...&state=...
+        FE->>BE: POST /api/auth/callback
+        BE->>IdP: Exchange code for tokens (with PKCE)
+        IdP-->>BE: access_token + id_token
+        BE->>IdP: GET userinfo_endpoint
+        IdP-->>BE: User claims (sub, email, groups)
+        BE->>BE: Resolve role from claim mappings
+        BE->>BE: Create/update User + generate JWT
+        BE-->>FE: TokenResponse (access_token, role)
+    else Local Login
+        U->>FE: Enter username + password
+        FE->>BE: POST /api/auth/login/local
+        BE->>BE: Verify bcrypt hash + generate JWT
+        BE-->>FE: TokenResponse (access_token, role)
+    end
+
+    FE->>FE: Store token in localStorage
+    FE->>U: Redirect to Dashboard
+```
+
+### RBAC Enforcement
+
+```mermaid
+flowchart TD
+    REQ[API Request] --> CHECK{AUTH_ENABLED?}
+    CHECK -->|false| ADMIN[Synthetic admin user<br/>full access]
+    CHECK -->|true| TOKEN{JWT in<br/>Authorization header?}
+    TOKEN -->|yes| VERIFY[Verify JWT signature + expiry]
+    TOKEN -->|no| ENFORCE{ENFORCE_AUTH?}
+    ENFORCE -->|false| ADMIN
+    ENFORCE -->|true| REJECT[401 Unauthorized]
+    VERIFY -->|valid| ROLE{User role<br/>meets requirement?}
+    VERIFY -->|invalid| REJECT
+    ROLE -->|yes| ALLOW[Process request]
+    ROLE -->|no| FORBIDDEN[403 Forbidden]
+```
+
+The system provides:
 
 - **Three-tier role-based access control (RBAC):**
   - **Admin:** Full access to all features, user management, maintenance, backups
@@ -671,37 +729,19 @@ sqlite> UPDATE role_mappings SET is_enabled = 0 WHERE id = 1;
 
 ## Docker / Container Setup
 
-### Basic Docker Run
+Grapheon runs as two containers: a backend (FastAPI on port 8000) and a frontend (nginx on port 8080). See `docs/deployment.md` for the full deployment guide.
 
-```bash
-docker run -d \
-  --name grapheon \
-  -p 8000:8000 \
-  -v grapheon-db:/app/data \
-  -e AUTH_ENABLED=True \
-  -e ENFORCE_AUTH=True \
-  -e JWT_SECRET="your-secret-key-at-least-32-characters" \
-  -e JWT_ALGORITHM="HS256" \
-  -e JWT_EXPIRATION_MINUTES="60" \
-  -e LOCAL_ADMIN_USERNAME="admin" \
-  -e LOCAL_ADMIN_EMAIL="admin@example.com" \
-  -e LOCAL_ADMIN_PASSWORD="AdminPassword123!" \
-  grapheon:latest
-```
-
-### Docker Compose Example
+### Docker Compose with Auth
 
 ```yaml
-version: '3.8'
-
 services:
-  grapheon:
-    image: grapheon:latest
-    container_name: grapheon
+  grapheon-backend:
+    image: ghcr.io/badgerops/grapheon-backend:latest
+    container_name: grapheon-backend
     ports:
       - "8000:8000"
     volumes:
-      - grapheon-db:/app/data
+      - grapheon-data:/app/data
     environment:
       # Auth Feature Flags
       AUTH_ENABLED: "True"
@@ -716,39 +756,29 @@ services:
       LOCAL_ADMIN_USERNAME: "admin"
       LOCAL_ADMIN_EMAIL: "admin@example.com"
       LOCAL_ADMIN_PASSWORD: "AdminPassword123!"
-
-      # Optional: Application Settings
-      LOG_LEVEL: "INFO"
-      WORKERS: "4"
-
     restart: unless-stopped
 
-  # Optional: SQLite browser for debugging
-  adminer:
-    image: adminer
-    container_name: grapheon-adminer
+  grapheon-frontend:
+    image: ghcr.io/badgerops/grapheon-frontend:latest
+    container_name: grapheon-frontend
     ports:
-      - "8081:8080"
-    environment:
-      ADMINER_DEFAULT_SERVER: "grapheon"
+      - "8080:8080"
     depends_on:
-      - grapheon
+      - grapheon-backend
     restart: unless-stopped
 
 volumes:
-  grapheon-db:
+  grapheon-data:
     driver: local
 ```
 
-Save as `docker-compose.yml` and run:
-
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Access:
-- **Graphēon:** `http://localhost:8000`
-- **SQLite Browser (Adminer):** `http://localhost:8081` (optional)
+- **Grapheon UI:** `http://localhost:8080`
+- **Backend API:** `http://localhost:8000` (also accessible via the frontend proxy)
 
 ### Production Notes
 
@@ -768,7 +798,7 @@ Current host deployments run Podman containers managed by systemd services (not 
 
 - Expected service names:
   - `grapheon-backend.service`
-  - `grapheon-frontend.service` (optional when frontend is hosted on Cloudflare Pages)
+  - `grapheon-frontend.service`
 - Persistent backend data should be mounted to `/app/data`.
 - For complete NixOS + Podman + systemd examples (including upgrade automation), use:
   - `docs/example_deployment.md`

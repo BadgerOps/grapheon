@@ -1,4 +1,4 @@
-# Grapheon Tagging and Correlation
+# Graphēon Tagging and Correlation
 
 Tags capture normalized identifiers so data from different sources can be linked. Correlation uses tags plus MAC and IP logic to merge hosts. Python 3.12 is required for the tagging utilities.
 

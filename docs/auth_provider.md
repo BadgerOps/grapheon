@@ -23,7 +23,7 @@
 
 ## Overview
 
-Grapheon v0.8.0 introduces a complete authentication and authorization system designed for enterprise network topology management.
+Graphēon v0.8.0 introduces a complete authentication and authorization system designed for enterprise network topology management.
 
 ### Authentication Flow
 
@@ -259,7 +259,7 @@ The `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` can be d
 1. Log in to Authentik admin panel
 2. Navigate to **Applications** → **OAuth2/OpenID Provider** → **Create**
 3. Set these fields:
-   - **Name:** `Grapheon`
+   - **Name:** `Graphēon`
    - **Slug:** `grapheon`
    - **Redirect URIs:** `https://your-domain.com/auth/callback`
    - **Authorization flow:** Choose one with implicit approval or user consent
@@ -325,7 +325,7 @@ On the login page, you should see a button for "Authentik (Corporate)".
 2. **Applications** → **Applications** → **Create App Integration**
 3. Choose **OIDC - OpenID Connect** → **Web Application**
 4. Fill in:
-   - **App name:** `Grapheon`
+   - **App name:** `Graphēon`
    - **Sign-in redirect URIs:** `https://your-domain.com/auth/callback`
    - **Sign-out redirect URIs:** (optional)
    - **Allowed grant types:** Authorization Code, Refresh Token
@@ -432,7 +432,7 @@ EOF
 
 1. Go to GitHub Settings → **Developer settings** → **OAuth Apps** → **New OAuth App**
 2. Fill in:
-   - **Application name:** `Grapheon`
+   - **Application name:** `Graphēon`
    - **Homepage URL:** `https://your-domain.com`
    - **Authorization callback URL:** `https://your-domain.com/auth/callback`
 3. Save. Note the **Client ID** and generate a **Client Secret**
@@ -488,7 +488,7 @@ For role mapping, use claims returned by `/user` (for example `preferred_usernam
 1. Log in to your GitLab instance
 2. **User settings** → **Applications** → **New application**
 3. Fill in:
-   - **Name:** `Grapheon`
+   - **Name:** `Graphēon`
    - **Redirect URI:** `https://your-domain.com/auth/callback`
    - **Scopes:** `openid`, `profile`, `email`, `read_user` (select as needed)
 4. Save. Note the **Application ID** (client_id) and **Secret**
@@ -729,7 +729,7 @@ sqlite> UPDATE role_mappings SET is_enabled = 0 WHERE id = 1;
 
 ## Docker / Container Setup
 
-Grapheon runs as two containers: a backend (FastAPI on port 8000) and a frontend (nginx on port 8080). See `docs/deployment.md` for the full deployment guide.
+Graphēon runs as two containers: a backend (FastAPI on port 8000) and a frontend (nginx on port 8080). See `docs/deployment.md` for the full deployment guide.
 
 ### Docker Compose with Auth
 
@@ -777,7 +777,7 @@ docker compose up -d
 ```
 
 Access:
-- **Grapheon UI:** `http://localhost:8080`
+- **Graphēon UI:** `http://localhost:8080`
 - **Backend API:** `http://localhost:8000` (also accessible via the frontend proxy)
 
 ### Production Notes

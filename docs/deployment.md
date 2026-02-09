@@ -1,6 +1,6 @@
 # Deployment
 
-Grapheon deploys as two Docker containers: a **backend** (FastAPI + SQLite) and a **frontend** (React SPA served by nginx). The frontend container proxies `/api/` requests to the backend.
+Graphēon deploys as two Docker containers: a **backend** (FastAPI + SQLite) and a **frontend** (React SPA served by nginx). The frontend container proxies `/api/` requests to the backend.
 
 ```mermaid
 graph LR

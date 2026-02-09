@@ -1,6 +1,6 @@
 # Frontend
 
-The Grapheon frontend is a Vite + React SPA in `frontend/`. Use the Nix dev shell for any npm command.
+The Graphēon frontend is a Vite + React SPA in `frontend/`. Use the Nix dev shell for any npm command.
 
 ## Run Locally
 

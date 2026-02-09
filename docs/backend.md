@@ -1,6 +1,6 @@
 # Backend
 
-The Grapheon backend is a FastAPI app in `backend/`, using async SQLAlchemy with SQLite. Python 3.12 is required. The backend runs as a Docker container (port 8000) alongside the frontend container.
+The Graphēon backend is a FastAPI app in `backend/`, using async SQLAlchemy with SQLite. Python 3.12 is required. The backend runs as a Docker container (port 8000) alongside the frontend container.
 
 ```mermaid
 graph TD

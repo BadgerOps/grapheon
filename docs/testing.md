@@ -1,6 +1,6 @@
 # Testing
 
-Grapheon uses pytest for backend tests. The frontend has no unit test runner configured; it is validated by a successful build (`npm run build`) in CI.
+Graphēon uses pytest for backend tests. The frontend has no unit test runner configured; it is validated by a successful build (`npm run build`) in CI.
 
 ## Quick Reference
 

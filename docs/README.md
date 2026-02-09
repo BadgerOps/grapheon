@@ -1,6 +1,6 @@
 # Documentation Index
 
-This folder documents how Grapheon works end-to-end. The codebase standardizes on Python 3.12.
+This folder documents how Graphēon works end-to-end. The codebase standardizes on Python 3.12.
 
 - `docs/architecture.md` - System overview, container topology, and data flow diagrams.
 - `docs/backend.md` - Backend architecture, configuration, and API surface.

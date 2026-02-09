@@ -1,4 +1,4 @@
-# Grapheon Imports Pipeline
+# Graphēon Imports Pipeline
 
 Imports normalize raw network outputs into a consistent schema. Python 3.12 is required for parser execution.
 

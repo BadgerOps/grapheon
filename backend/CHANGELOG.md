@@ -4,6 +4,12 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.6 - 2026-02-09
+### Changed
+- **Upgrade script progress tracking**: `grapheon-upgrade.sh` now writes `step`, `total_steps`, and `progress` fields to `/data/upgrade-status.json` so the frontend can render a real progress bar
+- **Pre-upgrade backup**: upgrade script creates a dated tar.gz backup of database and config files to `/data/backups/grapheon-backup-YYYY-MM-DD-HHMMSS.tar.gz` before pulling containers. Upgrade aborts if backup fails
+- Upgrade steps are now: (1) Backup data, (2) Pull backend image, (3) Pull frontend image, (4) Restart services, (5) Health check
+
 ## 0.8.5 - 2026-02-09
 ### Fixed
 - **Update check frontend version detection**: `check_updates` now reads the frontend version from `frontend/package.json` as a fallback when `FRONTEND_VERSION` env var is not set (was always `None` in dev/local setups)

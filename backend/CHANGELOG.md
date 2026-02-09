@@ -4,6 +4,10 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.4 - 2026-02-09
+### Fixed
+- Renamed all remaining "Network Aggregator" references to "Graphēon" in log messages, docstrings, and dev shell banner
+
 ## 0.8.3 - 2026-02-08
 ### Fixed
 - **OAuth2 error-in-200 handling**: `exchange_code()` now detects error responses returned as HTTP 200 (GitHub pattern: `{"error": "bad_verification_code", ...}`) and raises `OAuthTokenError` instead of silently passing through a response with no `access_token`

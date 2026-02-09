@@ -1,1 +1,1 @@
-"""Tests package for network aggregator."""
+"""Tests package for Graphēon."""

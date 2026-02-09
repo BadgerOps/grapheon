@@ -111,7 +111,7 @@ export default function App() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight">Network Aggregator</h1>
+                <h1 className="text-xl font-bold tracking-tight">Graphēon</h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400 -mt-0.5">Data Analysis Platform</p>
               </div>
             </Link>

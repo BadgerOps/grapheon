@@ -1,5 +1,5 @@
 """
-Structured audit logging module for the Network Aggregator backend.
+Structured audit logging module for the Graphēon backend.
 
 This module provides an AuditLogger class that logs events to a dedicated 'audit' logger
 in structured JSON format. It supports context-aware request_id propagation across async

@@ -1,4 +1,4 @@
-"""Services package for network aggregator."""
+"""Services package for Graphēon."""
 
 from .correlation import (
     correlate_hosts,

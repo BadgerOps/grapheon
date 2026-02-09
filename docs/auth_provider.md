@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **For:** Graphēon v0.8.0+
-**Last Updated:** February 2025
+**Last Updated:** February 2026
 
 ---
 
@@ -33,10 +33,10 @@ Graphēon v0.8.0 introduces a complete authentication and authorization system d
 - **Multiple authentication backends:**
   - Local username/password (with bcrypt hashing)
   - OpenID Connect (OIDC) providers (generic, Authentik, Keycloak, Okta, Google, GitHub, GitLab)
-  - OAuth2 (roadmap)
+  - OAuth2 providers (for non-OIDC implementations)
 
 - **Flexible deployment modes:**
-  - **Public mode** (default): All endpoints are public; one synthetic admin user
+  - **Public mode** (optional): All endpoints are public; one synthetic admin user
   - **Transition mode** (AUTH_ENABLED=true, ENFORCE_AUTH=false): Unauthenticated requests get anonymous admin access
   - **Production mode** (AUTH_ENABLED=true, ENFORCE_AUTH=true): All endpoints require valid JWT
 
@@ -90,7 +90,7 @@ If the `admin` user already exists (from a previous startup), the new credential
 ### Notes
 
 - No OIDC providers are configured
-- All 53 endpoints are protected by role requirements
+- Endpoints use role requirements, but full JWT enforcement requires `ENFORCE_AUTH=True`
 - The admin user has full access
 - Change `LOCAL_ADMIN_PASSWORD` on each startup if you want to rotate it, but only the initial value is used
 - **Always set a strong password in production**
@@ -103,7 +103,7 @@ Most production deployments should roll out auth gradually using feature flags. 
 
 ### Phase 1: Pilot Testing (Development)
 
-Keep the default settings; all endpoints are public:
+Use explicit development settings if you want all endpoints public:
 
 ```bash
 AUTH_ENABLED=False
@@ -171,7 +171,7 @@ OIDC providers are registered by inserting rows into the `auth_providers` databa
 
 ### Prerequisites
 
-- Access to the SQLite database (typically at `/app/data/grapheon.db` in containers)
+- Access to the SQLite database (typically at `/app/data/network.db` in containers)
 - OIDC provider credentials (client_id, client_secret)
 - Redirect URI: `https://your-domain.com/auth/callback` (or `http://localhost:8000/auth/callback` for development)
 
@@ -224,7 +224,7 @@ The `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint` can be d
 Use `sqlite3` to insert the provider record:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO auth_providers (
   provider_name,
   display_name,
@@ -279,7 +279,7 @@ On the login page, you should see a button for "Authentik (Corporate)".
 #### Step 2: Register Provider in Graphēon
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO auth_providers (
   provider_name,
   display_name,
@@ -333,7 +333,7 @@ If you use Okta's custom claims (e.g., `groups`), ensure:
 Google is a standard OIDC provider. Use `https://accounts.google.com` as the issuer:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO auth_providers (
   provider_name,
   display_name,
@@ -381,10 +381,10 @@ EOF
 
 #### Step 2: Register Provider in Graphēon
 
-GitHub is a standard OIDC provider with issuer `https://github.com`:
+GitHub should be configured as an OAuth2 provider with explicit endpoints:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO auth_providers (
   provider_name,
   display_name,
@@ -393,17 +393,23 @@ INSERT INTO auth_providers (
   client_id,
   client_secret,
   scope,
+  authorization_endpoint,
+  token_endpoint,
+  userinfo_endpoint,
   display_order,
   is_enabled,
   created_at
 ) VALUES (
   'github',
   'GitHub',
-  'oidc',
+  'oauth2',
   'https://github.com',
   'your-github-client-id',
   'your-github-client-secret',
-  'openid profile email read:org',
+  'read:user user:email',
+  'https://github.com/login/oauth/authorize',
+  'https://github.com/login/oauth/access_token',
+  'https://api.github.com/user',
   4,
   1,
   datetime('now')
@@ -411,12 +417,9 @@ INSERT INTO auth_providers (
 EOF
 ```
 
-#### Step 3: GitHub Organizations & Teams
+#### Step 3: GitHub Role Mapping Notes
 
-To map GitHub organization/team membership to roles:
-1. Include `read:org` in the scope (see above)
-2. The ID token will include organization membership info
-3. See [Role Mapping](#role-mapping) for examples mapping `org_memberships` to roles
+For role mapping, use claims returned by `/user` (for example `preferred_username` or `email`). Organization/team-based mapping requires additional enrichment beyond the default userinfo call.
 
 ---
 
@@ -435,7 +438,7 @@ To map GitHub organization/team membership to roles:
 #### Step 2: Register Provider in Graphēon
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO auth_providers (
   provider_name,
   display_name,
@@ -516,7 +519,7 @@ When a user logs in:
 First, find the provider ID:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 SQLite version 3.x.x
 sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'authentik_prod';
 1|authentik_prod
@@ -525,7 +528,7 @@ sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'auth
 Then insert the mappings:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO role_mappings (provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled, created_at) VALUES
   (1, 'groups', 'grapheon-admins', 'admin', 1, datetime('now')),
   (1, 'groups', 'grapheon-editors', 'editor', 1, datetime('now')),
@@ -551,7 +554,7 @@ EOF
 Find the Okta provider:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'okta_prod';
 2|okta_prod
 ```
@@ -559,7 +562,7 @@ sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'okta
 Insert mappings:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO role_mappings (provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled, created_at) VALUES
   (2, 'app_roles', 'okta-admins', 'admin', 1, datetime('now')),
   (2, 'app_roles', 'okta-readers', 'viewer', 1, datetime('now'));
@@ -580,7 +583,7 @@ EOF
 Find the Google provider:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'google';
 3|google
 ```
@@ -588,7 +591,7 @@ sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'goog
 Insert mappings:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO role_mappings (provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled, created_at) VALUES
   (3, 'email', 'admin@example.com', 'admin', 1, datetime('now')),
   (3, 'email', 'editor@example.com', 'editor', 1, datetime('now'));
@@ -612,7 +615,7 @@ EOF
 Find the GitHub provider:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'github';
 4|github
 ```
@@ -620,7 +623,7 @@ sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'gith
 Insert mappings:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO role_mappings (provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled, created_at) VALUES
   (4, 'org_memberships', 'github-org/admins', 'admin', 1, datetime('now')),
   (4, 'org_memberships', 'github-org/editors', 'editor', 1, datetime('now'));
@@ -638,7 +641,7 @@ EOF
 Find the GitLab provider:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'gitlab_prod';
 5|gitlab_prod
 ```
@@ -646,7 +649,7 @@ sqlite> SELECT id, provider_name FROM auth_providers WHERE provider_name = 'gitl
 Insert mappings:
 
 ```bash
-sqlite3 /app/data/grapheon.db << 'EOF'
+sqlite3 /app/data/network.db << 'EOF'
 INSERT INTO role_mappings (provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled, created_at) VALUES
   (5, 'groups', 'gitlab-group/admins', 'admin', 1, datetime('now')),
   (5, 'groups', 'gitlab-group/editors', 'editor', 1, datetime('now'));
@@ -660,7 +663,7 @@ EOF
 To temporarily disable a mapping without deleting it:
 
 ```bash
-sqlite3 /app/data/grapheon.db
+sqlite3 /app/data/network.db
 sqlite> UPDATE role_mappings SET is_enabled = 0 WHERE id = 1;
 ```
 
@@ -1095,7 +1098,7 @@ Status: `404` if user not found, `403` if not admin.
 **Solution:**
 1. Check the providers table:
    ```bash
-   sqlite3 /app/data/grapheon.db "SELECT provider_name, display_name, is_enabled FROM auth_providers;"
+   sqlite3 /app/data/network.db "SELECT provider_name, display_name, is_enabled FROM auth_providers;"
    ```
 2. Verify at least one provider has `is_enabled = 1`
 3. If no providers exist, insert one using the steps in [Configuring OIDC Providers](#configuring-oidc-providers)
@@ -1219,7 +1222,7 @@ Status: `404` if user not found, `403` if not admin.
 
 4. If manual endpoints are known, you can specify them explicitly:
    ```bash
-   sqlite3 /app/data/grapheon.db << 'EOF'
+   sqlite3 /app/data/network.db << 'EOF'
    UPDATE auth_providers SET
      authorization_endpoint = 'https://auth.example.com/application/o/authorize/',
      token_endpoint = 'https://auth.example.com/application/o/token/',
@@ -1246,7 +1249,7 @@ Status: `404` if user not found, `403` if not admin.
 **Solution:**
 1. Verify mappings exist and are enabled:
    ```bash
-   sqlite3 /app/data/grapheon.db "SELECT id, provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled FROM role_mappings WHERE is_enabled = 1;"
+   sqlite3 /app/data/network.db "SELECT id, provider_id, idp_claim_path, idp_claim_value, app_role, is_enabled FROM role_mappings WHERE is_enabled = 1;"
    ```
 
 2. Inspect the user's actual token claims:
@@ -1264,7 +1267,7 @@ Status: `404` if user not found, `403` if not admin.
 
 4. Ensure the provider_id in the mapping matches the correct provider:
    ```bash
-   sqlite3 /app/data/grapheon.db "SELECT id, provider_name FROM auth_providers;"
+   sqlite3 /app/data/network.db "SELECT id, provider_name FROM auth_providers;"
    ```
 
 5. Restart Graphēon after updating role mappings
@@ -1480,16 +1483,16 @@ The SQLite database contains user credentials (hashed passwords) and OIDC secret
 **Protect the database:**
 1. **File permissions:**
    ```bash
-   chmod 600 /app/data/grapheon.db
+   chmod 600 /app/data/network.db
    ```
 2. **Backup encryption:**
    ```bash
-   sqlite3 /app/data/grapheon.db ".backup | gzip | openssl enc -aes-256-cbc -out backup.db.gz.enc"
+   sqlite3 /app/data/network.db ".backup | gzip | openssl enc -aes-256-cbc -out backup.db.gz.enc"
    ```
 3. **Access control:** Only Graphēon process should read the database
 4. **Audit logging:** Monitor database file modifications:
    ```bash
-   auditctl -w /app/data/grapheon.db -p wa -k grapheon_db
+   auditctl -w /app/data/network.db -p wa -k grapheon_db
    ```
 
 ---

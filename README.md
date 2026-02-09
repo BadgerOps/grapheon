@@ -49,11 +49,11 @@ The admin user is created automatically on first startup. Auth is enabled by def
 
 Set `ENFORCE_AUTH=True` when ready to require login for all users.
 
-See `docs/AUTH_PROVIDER.md` for the full setup guide including OIDC provider configuration, role mapping, and container deployment.
+See `docs/auth_provider.md` for the full setup guide including OIDC provider configuration, role mapping, and container deployment.
 
 ## Docs
 
-See `docs/README.md` for architecture and workflow details, and `docs/AUTH_PROVIDER.md` for authentication setup.
+See `docs/README.md` for architecture and workflow details, and `docs/auth_provider.md` for authentication setup.
 
 ## Cloudflare Deployment
 

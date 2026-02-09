@@ -1,6 +1,6 @@
 # Release Process
 
-Grapheon ships the backend and frontend as separate container images, each with its own semantic version.
+Graphēon ships the backend and frontend as separate container images, each with its own semantic version.
 
 ## Version Sources
 
@@ -34,5 +34,5 @@ The workflow builds and pushes:
 
 ## Notes
 
-- Use `docs/quadlet-release-updates.md` for NixOS + Quadlet deployment details.
+- Use `docs/quadlet-release-updates.md` for current host-side update/deployment details (systemd + Podman services).
 - The frontend includes an in-app changelog at `/changelog`.

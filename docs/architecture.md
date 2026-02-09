@@ -13,7 +13,7 @@ Cloudflare Pages hosts the frontend, and OpenTofu provisions Pages + DNS. The ba
 
 ## Data Flow
 
-1. Data arrives via raw text or file upload at `/api/import/*`.
+1. Data arrives via raw text or file upload at `/api/imports/*`.
 2. The parser normalizes the payload into hosts, ports, connections, ARP entries, or traceroute hops.
 3. Import pipeline upserts hosts and related records, and assigns tags (IP, MAC, port, service, subnet).
 4. Correlation merges related hosts using tag similarity while guarding against conflicting MACs.

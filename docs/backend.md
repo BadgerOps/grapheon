@@ -32,7 +32,7 @@ nix develop -c bash -lc "cd backend && uvicorn main:app --reload"
 Routers are registered in `backend/main.py`:
 
 - `hosts` at `/api/hosts`
-- `imports` at `/api/import*`
+- `imports` at `/api/imports`
 - `correlation` at `/api/correlate`
 - `network` at `/api/network`
 - `connections` at `/api/connections`
@@ -47,13 +47,13 @@ Routers are registered in `backend/main.py`:
 
 ## Authentication
 
-All API endpoints enforce role-based access control via JWT Bearer tokens. The system supports:
+API endpoints use role-based dependencies with JWT Bearer tokens. By default (`AUTH_ENABLED=True`, `ENFORCE_AUTH=False`), unauthenticated requests are still permitted; set `ENFORCE_AUTH=True` to require JWTs for all protected routes. The system supports:
 
 - **Multi-provider OIDC** — Okta, Google, GitHub, GitLab, Authentik, or any compliant IdP
 - **Local admin fallback** — bootstrap/break-glass credentials via environment variables
 - **3-tier RBAC** — admin, editor, viewer roles enforced per-endpoint
 
-Auth is configured via environment variables (see `backend/.env.example`) and OIDC providers are stored in the database. See `docs/AUTH_PROVIDER.md` for the complete setup guide.
+Auth is configured via environment variables (see `backend/.env.example`) and OIDC providers are stored in the database. See `docs/auth_provider.md` for the complete setup guide.
 
 Key environment variables:
 

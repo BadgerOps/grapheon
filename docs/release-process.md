@@ -34,5 +34,6 @@ The workflow builds and pushes:
 
 ## Notes
 
-- Use `docs/example_deployment.md` for current host-side update/deployment details (NixOS + Podman + systemd services).
+- See `docs/deployment.md` for the Docker container deployment guide.
+- See `docs/example_deployment.md` for the alternative NixOS + Podman + systemd deployment.
 - The frontend includes an in-app changelog at `/changelog`.

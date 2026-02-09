@@ -2,13 +2,13 @@
 
 This folder documents how Graphēon works end-to-end. The codebase standardizes on Python 3.12.
 
-- `docs/architecture.md` - System overview and data flow.
+- `docs/architecture.md` - System overview, container topology, and data flow diagrams.
 - `docs/backend.md` - Backend architecture, configuration, and API surface.
-- `docs/frontend.md` - Frontend architecture and API usage.
-- `docs/auth_provider.md` - Authentication providers, rollout modes, and RBAC setup.
-- `docs/imports.md` - Import pipeline and supported data sources.
+- `docs/frontend.md` - Frontend architecture, routing, and component structure.
+- `docs/auth_provider.md` - Authentication providers, OIDC setup, rollout modes, and RBAC.
+- `docs/imports.md` - Import pipeline, parsers, and supported data sources.
 - `docs/tagging-correlation.md` - Tagging rules and correlation behavior.
-- `docs/testing.md` - Test workflow and local checks.
-- `docs/deployment.md` - Cloudflare Pages deployment and OpenTofu setup.
-- `docs/example_deployment.md` - NixOS + Podman + systemd deployment and update workflow.
-- `docs/release-process.md` - Versioning and release workflow for backend/frontend images.
+- `docs/testing.md` - Test suite, pytest configuration, CI pipeline, and running tests.
+- `docs/deployment.md` - Docker container deployment (backend + frontend).
+- `docs/example_deployment.md` - Alternative deployment with NixOS + Podman + systemd.
+- `docs/release-process.md` - Versioning and release workflow for container images.

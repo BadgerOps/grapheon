@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Grapheon backend will be documented in this file.
+All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 

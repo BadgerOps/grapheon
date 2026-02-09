@@ -22,6 +22,11 @@ Patterns to watch for, mistakes to avoid, and rules discovered through iteration
 
 - **Derive from existing data before adding new models.** Segment grouping works by querying ARP interface names at map generation time — no `NetworkSegment` model was needed. Avoid schema complexity when runtime derivation is sufficient.
 - **Gateway detection is a data enrichment step, not a model concern.** Routers are identified by their MAC appearing as `.1` across multiple subnets — this runs as a migration/enrichment script, not embedded in the ORM.
+- **SQLite is a practical single-node store, not a high-concurrency write backbone.** Request-time imports, cleanup, and correlation can contend on the same DB file; isolate heavy writes or move them to a background pipeline as throughput grows.
+- **Request-path heavy compute amplifies availability risk.** Large imports/map generation in synchronous API paths can cause p95/p99 blowups and perceived outages under concurrency.
+- **Correlation correctness needs confidence gates, not just merge capability.** Favor conservative linking (e.g., `DeviceIdentity`) when evidence is ambiguous to avoid irreversible over-merges.
+- **Security posture is configuration-sensitive.** `ENFORCE_AUTH=False` is useful for rollout but dangerous as a production default; deployment guardrails must enforce secure auth settings.
+- **External IdP/API dependencies need degraded-mode planning.** OIDC and release-check HTTP calls should fail gracefully with clear operator/user signals.
 
 ## Database & Error Handling
 
@@ -39,3 +44,4 @@ Patterns to watch for, mistakes to avoid, and rules discovered through iteration
 ## Process
 
 - **Check the actual input data before blaming the parser.** The nmap parser appeared broken because hosts had no OS/hostname, but the real issue was that `nmap.xml` was a minimal scan without `-O`/`-A` flags. Always inspect the raw import data.
+- **Document inferred vs confirmed architecture facts during risk reviews.** Distinguishing code-confirmed behavior from deployment assumptions prevents overconfident mitigation plans.

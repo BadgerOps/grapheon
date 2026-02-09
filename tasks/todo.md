@@ -42,6 +42,24 @@ Goal: Accurate data, VLAN/segment-based grouping, connected entity visibility in
 - [ ] Re-import nmap data with `-O -A` flags to get hostname/OS enrichment
 - [ ] WebSocket support for real-time map updates
 
+## Architecture Failure Modes Review (2026-02-09)
+
+Top reliability/security risks identified from current architecture and code paths:
+
+- [ ] **SQLite write contention / latency collapse**: Inline import, correlation, cleanup, and map generation all hit one SQLite writer path. Trigger: concurrent ingest + map queries.
+- [ ] **Data-loss risk in maintenance flows**: Cleanup permanently deletes records; backup/restore uses file copies of the active SQLite DB. Trigger: restore/cleanup during active traffic or without validated recovery drills.
+- [ ] **Identity consistency drift**: Host correlation can over-merge when tag confidence is insufficient. Trigger: sparse or conflicting source data with overlapping hostnames/FQDNs.
+- [ ] **Auth misconfiguration exposure**: `AUTH_ENABLED=True` + `ENFORCE_AUTH=False` permits anonymous synthetic admin behavior. Trigger: production deployment without `ENFORCE_AUTH=True`.
+- [ ] **External dependency outages**: OIDC and GitHub update checks rely on outbound HTTP calls. Trigger: provider/API timeout or outage.
+
+Planned mitigation themes:
+
+- [ ] Move heavy ingest/correlation work off request path (or chunk and isolate transactions).
+- [ ] Add backup integrity checks and restore rehearsals; document operational guardrails for cleanup/restore.
+- [ ] Tighten merge heuristics and add post-correlation anomaly checks.
+- [ ] Add startup/runtime config guardrails for auth and JWT secret hardening.
+- [ ] Add degraded-mode handling/alerts for OIDC and update-check dependency failures.
+
 ## Review
 
 **Phase 1 root cause**: The ARP parser's `detect_format()` had a priority bug — lines starting with `?` (unresolved hostnames in Linux `arp -a`) were matched by the macOS check first. The macOS parser's `(.+?)` regex then captured `[ether]` as part of the MAC address. Fixed by checking for `[ether]` vs `[ethernet]`/`ifscope` markers to disambiguate platforms.

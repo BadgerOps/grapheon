@@ -16,7 +16,7 @@ Tag builders live in `backend/utils/tagging.py`.
 Correlation runs in `backend/services/correlation.py`:
 
 - Phase 1 merges hosts that share the same IP.
-- Phase 2 merges hosts that share the same MAC.
+- Phase 2 creates or updates `DeviceIdentity` links for same-MAC hosts across different IPs, and only merges true duplicate records (same MAC + same IP).
 - Phase 3 merges hosts that share high-confidence tags like hostname or FQDN.
 - MAC conflicts prevent tag-based merges.
-- Conflicts are recorded for MAC mismatches and OS mismatches.
+- Conflicts are recorded for MAC mismatches and hostname mismatches.

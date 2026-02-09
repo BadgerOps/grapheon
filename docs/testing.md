@@ -59,6 +59,10 @@ graph TD
         end
     end
 
+    subgraph "Frontend Tests (vitest)"
+        TISO[test isoflowTransformer<br/>35 tests]
+    end
+
     subgraph "Frontend Validation"
         BUILD[npm run build]
     end
@@ -169,7 +173,20 @@ pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
 ## Frontend Testing
 
-The frontend does not currently have a unit test runner (no Vitest/Jest configuration). Frontend validation is limited to a successful production build:
+The frontend uses [Vitest](https://vitest.dev/) for unit tests. Run with:
+
+```bash
+cd frontend && npm test        # single run
+cd frontend && npm run test:watch  # watch mode
+```
+
+### Frontend Test Files
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| `src/services/__tests__/isoflowTransformer.test.js` | 35 | Isoflow data transformer: node extraction, tile layout, connectors, rectangles, full pipeline, edge cases |
+
+Frontend validation also includes a successful production build:
 
 ```bash
 cd frontend && npm run build
@@ -189,14 +206,14 @@ The GitHub Actions CI workflow (`.github/workflows/ci.yml`) runs on every PR and
 flowchart LR
     PR[PR or Push to master] --> V[Version Check<br/>validate_versions.py]
     PR --> BE[Backend<br/>pip install → pytest → ruff]
-    PR --> FE[Frontend<br/>npm ci → npm run build]
+    PR --> FE[Frontend<br/>npm ci → npm test → npm run build]
 ```
 
 | Job | Steps | Failure means |
 |-----|-------|--------------|
 | **Version + Changelog Sync** | Run `scripts/validate_versions.py` | Version in `backend/VERSION` or `frontend/package.json` doesn't match changelog |
 | **Backend Tests & Lint** | Install deps -> `python -m pytest` -> `ruff check backend` | Test failure or lint violation |
-| **Frontend Build** | `npm ci` -> `npm run build` | Build-time error in the React SPA |
+| **Frontend Tests & Build** | `npm ci` -> `npm test` -> `npm run build` | Test failure or build-time error in the React SPA |
 
 ## Running Tests Without Nix
 

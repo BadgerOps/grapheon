@@ -7,7 +7,7 @@ Graphēon is a FastAPI backend with a React frontend, deployed as two Docker con
 ```mermaid
 graph TB
     subgraph "Frontend Container (nginx:8080)"
-        UI[React SPA<br/>Vite + Cytoscape.js]
+        UI[React SPA<br/>Vite + Cytoscape.js + Isoflow]
         NGINX[nginx reverse proxy]
     end
 
@@ -33,7 +33,7 @@ graph TB
 ## Components
 
 - **Backend:** FastAPI API server in `backend/` with SQLAlchemy async models and parser modules.
-- **Frontend:** Vite + React SPA in `frontend/` that visualizes hosts, ports, connections, and ARP data.
+- **Frontend:** Vite + React SPA in `frontend/` that visualizes hosts, ports, connections, and ARP data. Offers Cytoscape.js graph view and experimental isoflow isometric view.
 - **Database:** SQLite database at `data/network.db` (ignored by git). Schema is created on startup.
 - **Parsers:** Format-specific parsers in `backend/parsers/` (nmap, netstat, arp, ping, traceroute, pcap).
 

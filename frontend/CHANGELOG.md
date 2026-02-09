@@ -4,6 +4,19 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.0 - 2026-02-09
+### Added
+- **Isometric view (TESTING)**: Experimental isometric network diagram view using [isoflow](https://github.com/markmanx/isoflow), available as an alternative to the Cytoscape.js graph view. This is a test to evaluate whether isometric visualization provides value for network topology diagrams — it may be removed in a future release.
+- View mode switcher (Graph / Isometric) in the Map page toolbar
+- `IsoflowNetworkMap` component with lazy-loaded isoflow library
+- `isoflowTransformer` service for converting Cytoscape elements to isoflow's tile-based format
+- Automatic device type → isometric icon mapping (router, switch, firewall, server, workstation, printer, IoT)
+- Grid-based layout algorithm for placing hosts on the isometric tile plane, grouped by subnet/VLAN
+- Subnet/VLAN zone rectangles in isometric view
+- Connection type styling (solid, dashed, dotted) with color coding in isometric view
+- Graph-only controls (layout, filters, search, routes) auto-hide when in isometric mode
+- New dependencies: `isoflow` ^1.1.1, `@isoflow/isopacks` ^0.0.10
+
 ## 0.8.4 - 2026-02-09
 ### Fixed
 - Renamed "Network Aggregator" to "Graphēon" in navbar header and npm package name

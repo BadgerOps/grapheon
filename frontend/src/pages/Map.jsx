@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import CytoscapeNetworkMap from '../components/CytoscapeNetworkMap'
+import IsoflowNetworkMap from '../components/IsoflowNetworkMap'
 import MapErrorBoundary from '../components/MapErrorBoundary'
 import { searchAndFocus, filterByDeviceType, filterByVlan, clearAllFilters } from '../services/graphFilters'
 import { deviceLegend } from '../styles/cytoscape-theme'
@@ -10,6 +11,7 @@ import * as api from '../api/client'
  *
  * Features:
  * - Cytoscape.js interactive graph with compound node hierarchy
+ * - Isoflow isometric diagram view (TESTING / experimental)
  * - Layout mode switching (hierarchical, grouped, force-directed)
  * - VLAN, subnet, and device type filtering
  * - Search to find and focus on devices
@@ -26,6 +28,9 @@ export default function Map() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState([])
+
+  // ── View mode ──────────────────────────────────────────────────
+  const [viewMode, setViewMode] = useState('graph') // 'graph' | 'isometric'
 
   // ── Filter state ────────────────────────────────────────────────
   const [layoutMode, setLayoutMode] = useState('grouped')
@@ -203,7 +208,40 @@ export default function Map() {
 
         {/* Primary controls */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Layout mode */}
+          {/* View mode switcher */}
+          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+            <button
+              onClick={() => setViewMode('graph')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'graph'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+              title="Cytoscape.js graph view"
+            >
+              <svg className="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Graph
+            </button>
+            <button
+              onClick={() => setViewMode('isometric')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'isometric'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+              title="Isometric diagram view (experimental)"
+            >
+              <svg className="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              Isometric
+            </button>
+          </div>
+
+          {/* Layout mode (graph view only) */}
+          {viewMode === 'graph' && (
           <select
             value={layoutMode}
             onChange={(e) => setLayoutMode(e.target.value)}
@@ -213,7 +251,11 @@ export default function Map() {
             <option value="hierarchical">Hierarchical Layout</option>
             <option value="force">Force-Directed Layout</option>
           </select>
+          )}
 
+          {/* Graph-only controls */}
+          {viewMode === 'graph' && (
+          <>
           {/* Group by */}
           <select
             value={groupBy}
@@ -301,6 +343,8 @@ export default function Map() {
             />
             Route via GW
           </label>
+          </>
+          )}
 
           {/* Refresh */}
           <button onClick={handleRefresh} className="btn btn-secondary flex items-center gap-2" disabled={loading}>
@@ -312,8 +356,8 @@ export default function Map() {
         </div>
       </div>
 
-      {/* ── Filter bar (collapsible) ────────────────────────── */}
-      {showFilters && (
+      {/* ── Filter bar (collapsible, graph view only) ─────── */}
+      {showFilters && viewMode === 'graph' && (
         <div className="mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device Type Filter</h3>
@@ -416,13 +460,20 @@ export default function Map() {
       {!error && (
         <div className="card flex-1 min-h-0" style={{ minHeight: '400px' }}>
           <MapErrorBoundary>
-            <CytoscapeNetworkMap
-              elements={mergedElements}
-              layoutMode={layoutMode}
-              onNodeClick={() => {}}
-              onCyReady={handleCyReady}
-              loading={loading}
-            />
+            {viewMode === 'graph' ? (
+              <CytoscapeNetworkMap
+                elements={mergedElements}
+                layoutMode={layoutMode}
+                onNodeClick={() => {}}
+                onCyReady={handleCyReady}
+                loading={loading}
+              />
+            ) : (
+              <IsoflowNetworkMap
+                elements={mergedElements}
+                loading={loading}
+              />
+            )}
           </MapErrorBoundary>
         </div>
       )}

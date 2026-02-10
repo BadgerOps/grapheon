@@ -4,6 +4,12 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.1 - 2026-02-09
+### Changed
+- **Upgrade modal progress tracking**: replaced generic spinner with step-by-step progress view showing a progress bar, step counter (Step N/5), and a timeline of all upgrade phases with completed/active/pending indicators
+- Upgrade confirmation dialog now describes the full upgrade flow: backup, pull containers, restart, health check
+- `upgradeProgress` state changed from plain string to structured object (`message`, `step`, `total_steps`, `progress`) to support granular progress display
+
 ## 0.9.0 - 2026-02-09
 ### Added
 - **Isometric view (TESTING)**: Experimental isometric network diagram view using [isoflow](https://github.com/markmanx/isoflow), available as an alternative to the Cytoscape.js graph view. This is a test to evaluate whether isometric visualization provides value for network topology diagrams — it may be removed in a future release.

@@ -2,13 +2,15 @@
 # grapheon-upgrade.sh — Host-level upgrade watcher script
 #
 # Triggered by systemd path unit when /data/upgrade-requested appears.
-# Reads the requested version, pulls new container images, restarts services,
-# runs a health check, and writes status to /data/upgrade-status.json.
+# Reads the requested version, backs up data, pulls new container images,
+# restarts services, runs a health check, and writes status to
+# /data/upgrade-status.json with step-by-step progress tracking.
 set -euo pipefail
 
 DATA_DIR="${DATA_DIR:-/data}"
 REQUEST_FILE="${DATA_DIR}/upgrade-requested"
 STATUS_FILE="${DATA_DIR}/upgrade-status.json"
+BACKUP_DIR="${DATA_DIR}/backups"
 HEALTH_URL="http://localhost:8000/api/health"
 HEALTH_TIMEOUT=30
 PULL_TIMEOUT=300
@@ -16,22 +18,36 @@ PULL_TIMEOUT=300
 BACKEND_IMAGE="ghcr.io/badgerops/grapheon-backend"
 FRONTEND_IMAGE="ghcr.io/badgerops/grapheon-frontend"
 
+TOTAL_STEPS=5
+
 log() { echo "[$(date -Iseconds)] $*"; }
 
 write_status() {
   local status="$1"
-  shift
-  local msg="${*:-}"
+  local step="$2"
+  local msg="$3"
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Calculate progress percentage from step number
+  local progress=0
+  if [[ "${step}" -gt 0 ]]; then
+    progress=$(( (step * 100) / TOTAL_STEPS ))
+  fi
+  # Clamp completed to 100
+  if [[ "${status}" == "completed" ]]; then
+    progress=100
+  fi
   cat > "${STATUS_FILE}" <<EOF
 {
   "status": "${status}",
   "message": "${msg}",
+  "step": ${step},
+  "total_steps": ${TOTAL_STEPS},
+  "progress": ${progress},
   "updated_at": "${ts}"
 }
 EOF
-  log "Status → ${status}: ${msg}"
+  log "Status → ${status} (step ${step}/${TOTAL_STEPS}, ${progress}%): ${msg}"
 }
 
 cleanup() {
@@ -57,44 +73,74 @@ except Exception as e:
 " 2>/dev/null || echo "")"
 
 if [[ -z "${TARGET_VERSION}" ]]; then
-  write_status "failed" "Could not read target version from ${REQUEST_FILE}"
+  write_status "failed" 0 "Could not read target version from ${REQUEST_FILE}"
   cleanup
   exit 1
 fi
 
 log "Upgrade requested → v${TARGET_VERSION}"
 
-# ── Mark upgrade as running ────────────────────────────────────────
-write_status "running" "Pulling images for v${TARGET_VERSION}..."
+# ── Step 1: Backup data ───────────────────────────────────────────
+BACKUP_TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
+BACKUP_FILENAME="grapheon-backup-${BACKUP_TIMESTAMP}.tar.gz"
+BACKUP_PATH="${BACKUP_DIR}/${BACKUP_FILENAME}"
 
-# ── Pull new images ────────────────────────────────────────────────
+write_status "running" 1 "Backing up data to ${BACKUP_FILENAME}..."
+
+mkdir -p "${BACKUP_DIR}"
+
+# Build list of items to back up (only those that exist)
+BACKUP_ITEMS=()
+for item in "${DATA_DIR}/grapheon.db" "${DATA_DIR}/grapheon.db-wal" "${DATA_DIR}/grapheon.db-shm" "${DATA_DIR}/config.json" "${DATA_DIR}/.env"; do
+  if [[ -e "${item}" ]]; then
+    BACKUP_ITEMS+=("${item}")
+  fi
+done
+
+if [[ ${#BACKUP_ITEMS[@]} -gt 0 ]]; then
+  if ! tar -czf "${BACKUP_PATH}" "${BACKUP_ITEMS[@]}" 2>/dev/null; then
+    write_status "failed" 1 "Failed to create backup at ${BACKUP_PATH}"
+    cleanup
+    exit 1
+  fi
+  log "Backup created: ${BACKUP_PATH}"
+else
+  log "No data files found to back up, continuing"
+fi
+
+# ── Step 2: Pull backend image ────────────────────────────────────
+write_status "running" 2 "Pulling backend image v${TARGET_VERSION}..."
+
 log "Pulling ${BACKEND_IMAGE}:v${TARGET_VERSION}"
 if ! timeout "${PULL_TIMEOUT}" podman pull "${BACKEND_IMAGE}:v${TARGET_VERSION}"; then
-  write_status "failed" "Failed to pull backend image v${TARGET_VERSION}"
+  write_status "failed" 2 "Failed to pull backend image v${TARGET_VERSION}"
   cleanup
   exit 1
 fi
+
+# ── Step 3: Pull frontend image ───────────────────────────────────
+write_status "running" 3 "Pulling frontend image v${TARGET_VERSION}..."
 
 log "Pulling ${FRONTEND_IMAGE}:v${TARGET_VERSION}"
 if ! timeout "${PULL_TIMEOUT}" podman pull "${FRONTEND_IMAGE}:v${TARGET_VERSION}"; then
-  write_status "failed" "Failed to pull frontend image v${TARGET_VERSION}"
+  write_status "failed" 3 "Failed to pull frontend image v${TARGET_VERSION}"
   cleanup
   exit 1
 fi
 
-write_status "running" "Images pulled. Restarting services..."
+# ── Step 4: Restart services ──────────────────────────────────────
+write_status "running" 4 "Restarting services..."
 
-# ── Restart systemd services ───────────────────────────────────────
 log "Restarting grapheon-backend and grapheon-frontend services"
 if ! systemctl restart grapheon-backend.service grapheon-frontend.service; then
-  write_status "failed" "Failed to restart systemd services"
+  write_status "failed" 4 "Failed to restart systemd services"
   cleanup
   exit 1
 fi
 
-write_status "running" "Services restarted. Running health check..."
+# ── Step 5: Health check ──────────────────────────────────────────
+write_status "running" 5 "Running health check..."
 
-# ── Health check ───────────────────────────────────────────────────
 log "Waiting for health check at ${HEALTH_URL} (timeout: ${HEALTH_TIMEOUT}s)"
 HEALTH_OK=false
 for i in $(seq 1 "${HEALTH_TIMEOUT}"); do
@@ -107,12 +153,12 @@ for i in $(seq 1 "${HEALTH_TIMEOUT}"); do
 done
 
 if [[ "${HEALTH_OK}" != "true" ]]; then
-  write_status "failed" "Health check failed after ${HEALTH_TIMEOUT}s"
+  write_status "failed" 5 "Health check failed after ${HEALTH_TIMEOUT}s"
   cleanup
   exit 1
 fi
 
 # ── Success ────────────────────────────────────────────────────────
-write_status "completed" "Upgrade to v${TARGET_VERSION} completed successfully"
+write_status "completed" ${TOTAL_STEPS} "Upgrade to v${TARGET_VERSION} completed successfully"
 cleanup
 log "Upgrade to v${TARGET_VERSION} finished successfully"

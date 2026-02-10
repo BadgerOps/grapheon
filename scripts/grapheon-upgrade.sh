@@ -61,24 +61,31 @@ if [[ ! -f "${REQUEST_FILE}" ]]; then
   exit 0
 fi
 
-# ── Read target version from request ───────────────────────────────
-TARGET_VERSION="$(python3 -c "
+# ── Read target versions from request ──────────────────────────────
+read -r BACKEND_VERSION FRONTEND_VERSION < <(python3 -c "
 import json, sys
 try:
     data = json.load(open('${REQUEST_FILE}'))
-    print(data.get('target_version', ''))
+    bv = data.get('target_backend_version', data.get('target_version', ''))
+    fv = data.get('target_frontend_version', bv)
+    print(bv, fv)
 except Exception as e:
     print('', file=sys.stderr)
     sys.exit(1)
-" 2>/dev/null || echo "")"
+" 2>/dev/null || echo "")
 
-if [[ -z "${TARGET_VERSION}" ]]; then
+if [[ -z "${BACKEND_VERSION}" ]]; then
   write_status "failed" 0 "Could not read target version from ${REQUEST_FILE}"
   cleanup
   exit 1
 fi
 
-log "Upgrade requested → v${TARGET_VERSION}"
+# Fall back to backend version if frontend version is missing
+if [[ -z "${FRONTEND_VERSION}" ]]; then
+  FRONTEND_VERSION="${BACKEND_VERSION}"
+fi
+
+log "Upgrade requested → backend v${BACKEND_VERSION}, frontend v${FRONTEND_VERSION}"
 
 # ── Step 1: Backup data ───────────────────────────────────────────
 BACKUP_TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
@@ -109,21 +116,21 @@ else
 fi
 
 # ── Step 2: Pull backend image ────────────────────────────────────
-write_status "running" 2 "Pulling backend image v${TARGET_VERSION}..."
+write_status "running" 2 "Pulling backend image v${BACKEND_VERSION}..."
 
-log "Pulling ${BACKEND_IMAGE}:v${TARGET_VERSION}"
-if ! timeout "${PULL_TIMEOUT}" podman pull "${BACKEND_IMAGE}:v${TARGET_VERSION}"; then
-  write_status "failed" 2 "Failed to pull backend image v${TARGET_VERSION}"
+log "Pulling ${BACKEND_IMAGE}:v${BACKEND_VERSION}"
+if ! timeout "${PULL_TIMEOUT}" podman pull "${BACKEND_IMAGE}:v${BACKEND_VERSION}"; then
+  write_status "failed" 2 "Failed to pull backend image v${BACKEND_VERSION}"
   cleanup
   exit 1
 fi
 
 # ── Step 3: Pull frontend image ───────────────────────────────────
-write_status "running" 3 "Pulling frontend image v${TARGET_VERSION}..."
+write_status "running" 3 "Pulling frontend image v${FRONTEND_VERSION}..."
 
-log "Pulling ${FRONTEND_IMAGE}:v${TARGET_VERSION}"
-if ! timeout "${PULL_TIMEOUT}" podman pull "${FRONTEND_IMAGE}:v${TARGET_VERSION}"; then
-  write_status "failed" 3 "Failed to pull frontend image v${TARGET_VERSION}"
+log "Pulling ${FRONTEND_IMAGE}:v${FRONTEND_VERSION}"
+if ! timeout "${PULL_TIMEOUT}" podman pull "${FRONTEND_IMAGE}:v${FRONTEND_VERSION}"; then
+  write_status "failed" 3 "Failed to pull frontend image v${FRONTEND_VERSION}"
   cleanup
   exit 1
 fi
@@ -159,6 +166,6 @@ if [[ "${HEALTH_OK}" != "true" ]]; then
 fi
 
 # ── Success ────────────────────────────────────────────────────────
-write_status "completed" ${TOTAL_STEPS} "Upgrade to v${TARGET_VERSION} completed successfully"
+write_status "completed" ${TOTAL_STEPS} "Upgrade completed (backend v${BACKEND_VERSION}, frontend v${FRONTEND_VERSION})"
 cleanup
-log "Upgrade to v${TARGET_VERSION} finished successfully"
+log "Upgrade finished (backend v${BACKEND_VERSION}, frontend v${FRONTEND_VERSION})"

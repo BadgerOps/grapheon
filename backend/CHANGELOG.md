@@ -4,6 +4,11 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.8.7 - 2026-02-10
+### Fixed
+- **Upgrade pulls wrong frontend image tag**: upgrade request now includes separate `target_backend_version` and `target_frontend_version` fields so each container image is pulled with its own release tag (was using the backend version for both, causing `manifest unknown` errors when versions diverge)
+- Upgrade script reads both version fields from the request file and falls back to `target_version` for backward compatibility with older request files
+
 ## 0.8.6 - 2026-02-09
 ### Changed
 - **Upgrade script progress tracking**: `grapheon-upgrade.sh` now writes `step`, `total_steps`, and `progress` fields to `/data/upgrade-status.json` so the frontend can render a real progress bar

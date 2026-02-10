@@ -336,25 +336,30 @@ async def trigger_upgrade(user: User = Depends(require_admin)):
                 detail="Could not fetch release information from GitHub",
             )
 
-    backend_tag, _ = _extract_latest_versions(releases)
+    backend_tag, frontend_tag = _extract_latest_versions(releases)
     if not backend_tag:
         raise HTTPException(
             status_code=500,
             detail="Could not determine target version",
         )
 
-    # Prepare upgrade request — extract clean version string
-    if "-v" in backend_tag:
-        target_version = backend_tag.split("-v")[-1]
-    elif backend_tag.startswith("v"):
-        target_version = backend_tag[1:]
-    else:
-        target_version = backend_tag
+    def _clean_tag(tag: str) -> str:
+        """Extract clean version string from tag like 'backend-v0.2.0' -> '0.2.0'."""
+        if "-v" in tag:
+            return tag.split("-v")[-1]
+        if tag.startswith("v"):
+            return tag[1:]
+        return tag
+
+    target_backend_version = _clean_tag(backend_tag)
+    target_frontend_version = _clean_tag(frontend_tag) if frontend_tag else target_backend_version
 
     upgrade_request = {
         "requested_at": datetime.utcnow().isoformat() + "Z",
         "current_version": settings.APP_VERSION,
-        "target_version": target_version,
+        "target_version": target_backend_version,
+        "target_backend_version": target_backend_version,
+        "target_frontend_version": target_frontend_version,
     }
 
     # Write upgrade request file
@@ -363,8 +368,11 @@ async def trigger_upgrade(user: User = Depends(require_admin)):
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(request_file, "w") as f:
             json.dump(upgrade_request, f, indent=2)
-        logger.info(f"Upgrade request written to {request_file}")
-        audit.log_upgrade_trigger(version=target_version)
+        logger.info(
+            f"Upgrade request written to {request_file} "
+            f"(backend=v{target_backend_version}, frontend=v{target_frontend_version})"
+        )
+        audit.log_upgrade_trigger(version=target_backend_version)
     except Exception as e:
         logger.error(f"Failed to write upgrade request: {e}")
         raise HTTPException(
@@ -374,7 +382,7 @@ async def trigger_upgrade(user: User = Depends(require_admin)):
 
     return {
         "status": "upgrade_requested",
-        "message": f"Upgrade to v{target_version} has been requested. The system will update shortly.",
+        "message": f"Upgrade to v{target_backend_version} has been requested. The system will update shortly.",
     }
 
 

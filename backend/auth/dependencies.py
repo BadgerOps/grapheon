@@ -139,7 +139,7 @@ def require_role(*allowed_roles: str):
         credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
         db: AsyncSession = Depends(get_db),
     ) -> User:
-        # Demo mode: allow all requests as a viewer (read-only access)
+        # Demo mode: allow read-only access as a viewer
         if settings.DEMO_MODE:
             # If they have a token, validate it normally
             if credentials:
@@ -149,7 +149,12 @@ def require_role(*allowed_roles: str):
                         return user
                 except Exception:
                     pass
-            # Otherwise, synthetic viewer user
+            # Synthetic viewer — only allowed on viewer-accessible endpoints
+            if "viewer" not in allowed_roles:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Demo mode is read-only. This action requires editor or admin access.",
+                )
             return User(
                 id=0,
                 username="demo-viewer",

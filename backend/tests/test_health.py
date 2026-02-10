@@ -90,3 +90,67 @@ class TestDemoInfoEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["demo_mode"] is False
+
+
+class TestDemoModeReadOnly:
+    """Demo mode blocks write operations."""
+
+    @pytest.mark.asyncio
+    async def test_demo_blocks_file_upload(self, async_client: AsyncClient):
+        """POST /api/imports/file is blocked for demo viewers."""
+        from config import settings
+        original = settings.DEMO_MODE
+        settings.DEMO_MODE = True
+        try:
+            response = await async_client.post(
+                "/api/imports/file",
+                files={"file": ("test.xml", b"<xml/>", "application/xml")},
+            )
+            assert response.status_code == 403
+            assert "read-only" in response.json()["detail"].lower()
+        finally:
+            settings.DEMO_MODE = original
+
+    @pytest.mark.asyncio
+    async def test_demo_blocks_raw_import(self, async_client: AsyncClient):
+        """POST /api/imports/raw is blocked for demo viewers."""
+        from config import settings
+        original = settings.DEMO_MODE
+        settings.DEMO_MODE = True
+        try:
+            response = await async_client.post(
+                "/api/imports/raw",
+                json={"source_type": "nmap", "raw_data": "<xml/>"},
+            )
+            assert response.status_code == 403
+            assert "read-only" in response.json()["detail"].lower()
+        finally:
+            settings.DEMO_MODE = original
+
+    @pytest.mark.asyncio
+    async def test_demo_blocks_bulk_import(self, async_client: AsyncClient):
+        """POST /api/imports/bulk is blocked for demo viewers."""
+        from config import settings
+        original = settings.DEMO_MODE
+        settings.DEMO_MODE = True
+        try:
+            response = await async_client.post(
+                "/api/imports/bulk",
+                files={"files": ("test.xml", b"<xml/>", "application/xml")},
+            )
+            assert response.status_code == 403
+            assert "read-only" in response.json()["detail"].lower()
+        finally:
+            settings.DEMO_MODE = original
+
+    @pytest.mark.asyncio
+    async def test_demo_allows_read_endpoints(self, async_client: AsyncClient):
+        """GET /api/imports is allowed for demo viewers."""
+        from config import settings
+        original = settings.DEMO_MODE
+        settings.DEMO_MODE = True
+        try:
+            response = await async_client.get("/api/imports")
+            assert response.status_code == 200
+        finally:
+            settings.DEMO_MODE = original

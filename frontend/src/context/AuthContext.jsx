@@ -7,28 +7,54 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(() => localStorage.getItem('auth_token'))
   const [loading, setLoading] = useState(true)
+  const [demoMode, setDemoMode] = useState(false)
   const navigate = useNavigate()
 
-  // Validate existing token on mount
+  // Validate existing token on mount, with demo mode support
   useEffect(() => {
-    if (token) {
-      fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(res => {
+    const init = async () => {
+      try {
+        // Check if demo mode is enabled
+        const demoRes = await fetch('/api/demo-info')
+        if (demoRes.ok) {
+          const demoData = await demoRes.json()
+          if (demoData.demo_mode) {
+            setDemoMode(true)
+            // In demo mode, /api/auth/me works without a token
+            if (!token) {
+              const meRes = await fetch('/api/auth/me')
+              if (meRes.ok) {
+                const userData = await meRes.json()
+                setUser(userData)
+                setLoading(false)
+                return
+              }
+            }
+          }
+        }
+      } catch {
+        // Demo info endpoint not available, continue normally
+      }
+
+      // Normal token validation
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
           if (!res.ok) throw new Error('Invalid token')
-          return res.json()
-        })
-        .then(userData => setUser(userData))
-        .catch(() => {
+          const userData = await res.json()
+          setUser(userData)
+        } catch {
           localStorage.removeItem('auth_token')
           setToken(null)
           setUser(null)
-        })
-        .finally(() => setLoading(false))
-    } else {
+        }
+      }
       setLoading(false)
     }
+
+    init()
   }, [token])
 
   const login = useCallback((tokenResponse) => {
@@ -67,10 +93,11 @@ export function AuthProvider({ children }) {
     user,
     token,
     loading,
-    isAuthenticated: !!user && !!token,
+    isAuthenticated: !!user,
     login,
     logout,
     hasRole,
+    demoMode,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

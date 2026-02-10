@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import * as api from '../api/client'
+import { useHealthStatus } from '../hooks/useHealthStatus'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -43,6 +44,8 @@ export default function Dashboard() {
 
     fetchData()
   }, [])
+
+  const { status: healthStatus, health } = useHealthStatus()
 
   return (
     <div className="p-6 lg:p-8">
@@ -248,20 +251,55 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 System Status
               </p>
-              <p className="text-xl font-semibold text-green-600 dark:text-green-400 mt-2">
-                Operational
+              <p className={`text-xl font-semibold mt-2 ${
+                healthStatus === 'healthy' ? 'text-green-600 dark:text-green-400' :
+                healthStatus === 'degraded' ? 'text-amber-600 dark:text-amber-400' :
+                'text-red-600 dark:text-red-400'
+              }`}>
+                {healthStatus === 'healthy' ? 'Operational' :
+                 healthStatus === 'degraded' ? 'Degraded' :
+                 healthStatus === 'unreachable' ? 'Unreachable' :
+                 'Unhealthy'}
               </p>
             </div>
             <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center">
               <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                {healthStatus === 'healthy' && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-3 w-3 ${
+                  healthStatus === 'healthy' ? 'bg-green-500' :
+                  healthStatus === 'degraded' ? 'bg-amber-500' :
+                  'bg-red-500'
+                }`}></span>
               </span>
             </div>
           </div>
-          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-            API connected
-          </p>
+          {health?.checks ? (
+            <div className="mt-3 space-y-1">
+              {health.checks.map((check) => (
+                <div key={check.name} className="flex items-center gap-2 text-sm">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    check.status === 'ok' ? 'bg-green-500' :
+                    check.status === 'degraded' ? 'bg-amber-500' :
+                    'bg-red-500'
+                  }`}></span>
+                  <span className="text-gray-600 dark:text-gray-400 capitalize">
+                    {check.name.replace(/_/g, ' ')}
+                  </span>
+                  {check.response_time_ms != null && (
+                    <span className="text-gray-400 dark:text-gray-500 text-xs">
+                      {check.response_time_ms.toFixed(0)}ms
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+              {healthStatus === 'unreachable' ? 'Cannot reach API' : 'Checking...'}
+            </p>
+          )}
         </div>
       </div>
 

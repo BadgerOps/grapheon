@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./data/network.db"
 
+    # File uploads
+    UPLOAD_DIR: str = "./data/uploads"
+
+    # Demo mode — enables viewer-only access without authentication,
+    # seeds demo data on first startup, shows demo banner in UI
+    DEMO_MODE: bool = False
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     CORS_ALLOW_CREDENTIALS: bool = True

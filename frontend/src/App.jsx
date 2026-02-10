@@ -17,6 +17,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import UserMenu from './components/UserMenu'
 import UpdateBanner from './components/UpdateBanner'
 import { useAuth } from './context/AuthContext'
+import { useHealthStatus } from './hooks/useHealthStatus'
 import { version as frontendVersion } from '../package.json'
 import * as api from './api/client'
 
@@ -81,9 +82,10 @@ function NavLink({ to, children, icon }) {
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
-  const { isAuthenticated, hasRole, loading: authLoading } = useAuth()
+  const { isAuthenticated, hasRole, loading: authLoading, demoMode } = useAuth()
   const [backendVersion, setBackendVersion] = useState('...')
   const location = useLocation()
+  const { status: healthStatus } = useHealthStatus()
 
   useEffect(() => {
     api.getBackendInfo()
@@ -259,6 +261,13 @@ export default function App() {
       {/* Update notification banner */}
       {!isMapFullscreen && isAuthenticated && <UpdateBanner />}
 
+      {/* Demo mode banner */}
+      {!isMapFullscreen && demoMode && (
+        <div className="bg-amber-500 text-white text-center py-1.5 px-4 text-sm font-medium">
+          Demo Mode — Browse with read-only access. Data resets periodically.
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="flex-1">
         <Routes>
@@ -298,8 +307,15 @@ export default function App() {
                 </span>
               </Link>
               <span className="flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                System Online
+                <span className={`w-2 h-2 rounded-full ${
+                  healthStatus === 'healthy' ? 'bg-green-500 animate-pulse' :
+                  healthStatus === 'degraded' ? 'bg-amber-500 animate-pulse' :
+                  'bg-red-500'
+                }`}></span>
+                {healthStatus === 'healthy' ? 'System Online' :
+                 healthStatus === 'degraded' ? 'System Degraded' :
+                 healthStatus === 'unreachable' ? 'API Unreachable' :
+                 'System Unhealthy'}
               </span>
             </div>
           </div>

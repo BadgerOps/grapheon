@@ -45,6 +45,26 @@ async def lifespan(app: FastAPI):
         f"Database initialized in {(time.perf_counter() - start) * 1000:.1f}ms"
     )
 
+    # Ensure upload directory exists
+    from pathlib import Path
+    upload_dir = Path(settings.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Upload directory: {upload_dir.resolve()}")
+
+    # Run startup health checks
+    from services.health import run_health_checks
+    health = await run_health_checks()
+    for check in health.checks:
+        status_icon = "+" if check.status == "ok" else "!"
+        detail = ""
+        if check.message:
+            detail += f" ({check.message})"
+        if check.response_time_ms is not None:
+            detail += f" [{check.response_time_ms:.1f}ms]"
+        logger.info(f"  {status_icon} {check.name}: {check.status}{detail}")
+    if health.status != "healthy":
+        logger.warning(f"STARTUP HEALTH: {health.status.upper()} - some checks failed")
+
     # Bootstrap local admin from env vars (first-run only)
     if settings.LOCAL_ADMIN_USERNAME and settings.LOCAL_ADMIN_PASSWORD:
         from sqlalchemy import select as sa_select
@@ -72,6 +92,30 @@ async def lifespan(app: FastAPI):
                 db.add(admin)
                 await db.commit()
                 logger.info(f"Bootstrap admin user '{settings.LOCAL_ADMIN_USERNAME}' created")
+
+    # Demo mode: auto-seed demo data on first startup
+    if settings.DEMO_MODE:
+        from database import AsyncSessionLocal
+        from sqlalchemy import func as sa_func
+        from models import Host
+        async with AsyncSessionLocal() as db:
+            count = await db.scalar(sa_func.count(Host.id))
+            if count == 0:
+                logger.info("DEMO_MODE: No data found, seeding demo data...")
+                import os
+                import subprocess
+                import sys
+                backend_dir = os.path.dirname(os.path.abspath(__file__))
+                script = os.path.join(backend_dir, "scripts", "seed_demo_data.py")
+                db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+                if os.path.exists(script):
+                    subprocess.run(
+                        [sys.executable, script, "--db", db_path],
+                        check=False,
+                    )
+                    logger.info("DEMO_MODE: Demo data seeded")
+                else:
+                    logger.warning("DEMO_MODE: Seed script not found")
 
     logger.info("STARTUP COMPLETE - Ready to accept requests")
     logger.info("=" * 60)
@@ -194,12 +238,17 @@ app.include_router(device_identities_router)
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-    }
+    """Health check endpoint with component status breakdown."""
+    from services.health import run_health_checks
+    health = await run_health_checks()
+    status_code = 200 if health.status in ("healthy", "degraded") else 503
+    return JSONResponse(content=health.model_dump(), status_code=status_code)
+
+
+@app.get("/api/demo-info", tags=["info"])
+async def demo_info():
+    """Check if demo mode is enabled."""
+    return {"demo_mode": settings.DEMO_MODE}
 
 
 @app.get("/api/info", tags=["info"])

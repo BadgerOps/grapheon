@@ -4,6 +4,16 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.0 - 2026-02-10
+### Added
+- **Live system health indicator**: footer status indicator now reflects actual backend health — green (healthy), amber (degraded), red (unreachable/unhealthy) with 30-second polling
+- **Dashboard health card**: "System Status" card shows real health data with per-component breakdown (database, upload directory) including response times
+- **`useHealthStatus` hook**: shared React hook for health state polling across components
+- **Demo mode support**: auto-authenticates as read-only viewer when backend `DEMO_MODE` is enabled, shows amber "Demo Mode" banner below navigation
+
+### Fixed
+- Health check API call now uses correct endpoint URL (`/health` instead of `/api/health`)
+
 ## 0.9.1 - 2026-02-09
 ### Changed
 - **Upgrade modal progress tracking**: replaced generic spinner with step-by-step progress view showing a progress bar, step counter (Step N/5), and a timeline of all upgrade phases with completed/active/pending indicators

@@ -20,6 +20,7 @@ from typing import Optional
 import bcrypt as _bcrypt
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,8 @@ from utils.audit import audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _hash_password(password: str) -> str:
@@ -404,8 +407,39 @@ async def local_login(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(user: User = Depends(get_current_user)):
+async def get_me(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+):
     """Get the authenticated user's profile."""
+    # Demo mode: return synthetic viewer if no valid credentials
+    if settings.DEMO_MODE:
+        if not credentials:
+            return UserResponse(
+                id=0,
+                username="demo-viewer",
+                email="demo@localhost",
+                display_name="Demo Viewer",
+                role="viewer",
+                is_active=True,
+                created_at=datetime.now(timezone.utc),
+            )
+        # Try to validate the token; fall back to demo viewer
+        try:
+            user = await get_current_user(credentials, db)
+            return UserResponse.model_validate(user)
+        except Exception:
+            return UserResponse(
+                id=0,
+                username="demo-viewer",
+                email="demo@localhost",
+                display_name="Demo Viewer",
+                role="viewer",
+                is_active=True,
+                created_at=datetime.now(timezone.utc),
+            )
+    # Normal mode
+    user = await get_current_user(credentials, db)
     return UserResponse.model_validate(user)
 
 

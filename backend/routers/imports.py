@@ -7,11 +7,14 @@ from sqlalchemy import select, func
 from datetime import datetime
 from ipaddress import ip_address as parse_ip
 
+from pathlib import Path
+
 from database import get_db
 from models import RawImport, Host, Port, Connection, ARPEntry, User
 from auth.dependencies import require_any_authenticated, require_editor
 from schemas import RawImportResponse, PaginatedResponse
 from parsers import get_parser, PARSERS
+from config import settings
 from utils.tagging import (
     build_host_tags,
     build_port_tags,
@@ -43,6 +46,30 @@ def _is_unspecified_ip(value: str) -> bool:
         return parse_ip(value).is_unspecified
     except ValueError:
         return False
+
+
+def _save_upload_to_disk(filename: Optional[str], content: bytes) -> Optional[str]:
+    """Save uploaded file content to disk for audit trail and reprocessing.
+
+    Returns the saved file path, or None if save was skipped.
+    """
+    from services.file_validator import validate_upload
+
+    validation = validate_upload(filename, content)
+    if validation.warnings:
+        logger.info(f"Upload validation warnings for {filename}: {validation.warnings}")
+
+    upload_dir = Path(settings.UPLOAD_DIR)
+    if not upload_dir.exists():
+        logger.warning(f"Upload directory does not exist: {upload_dir}, skipping disk save")
+        return None
+
+    # UUID prefix avoids filename collisions
+    safe_filename = f"{uuid.uuid4().hex[:8]}_{filename or 'upload.dat'}"
+    disk_path = upload_dir / safe_filename
+    disk_path.write_bytes(content)
+    logger.info(f"Saved upload to disk: {disk_path}")
+    return str(disk_path)
 
 
 async def _upsert_host_from_value(
@@ -474,6 +501,8 @@ async def import_file(
     # Read file content
     try:
         content = await file.read()
+        # Save to disk for audit trail
+        _save_upload_to_disk(file.filename, content)
         raw_data = content.decode("utf-8")
     except Exception as e:
         raise HTTPException(
@@ -655,6 +684,8 @@ async def bulk_import_files(
         try:
             # Read file content
             content = await file.read()
+            # Save to disk for audit trail
+            _save_upload_to_disk(file.filename, content)
             try:
                 raw_data = content.decode("utf-8")
             except UnicodeDecodeError:

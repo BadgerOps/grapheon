@@ -4,6 +4,20 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.0 - 2026-02-10
+### Added
+- **Comprehensive health endpoint**: `GET /health` now checks database connectivity and upload directory writability, reports per-component status with response times, returns overall status (healthy/degraded/unhealthy), and includes server uptime
+- **Startup health report**: all health checks run during startup and results are logged to console
+- **File upload save-to-disk**: uploaded files via `/api/imports/file` and `/api/imports/bulk` are now saved to the configured upload directory (`UPLOAD_DIR`) for audit trail and reprocessing
+- **File validation skeleton**: `services/file_validator.py` with placeholder checks for file size limits (50 MB), extension allowlist, and magic byte detection — logs warnings but does not block uploads (designed as integration point for future virus scanning)
+- **Upload directory config**: new `UPLOAD_DIR` setting (default: `./data/uploads`), directory auto-created on startup
+- **Demo mode**: new `DEMO_MODE` setting — when enabled, grants read-only viewer access without authentication, auto-seeds demo data on first startup, and shows a demo banner in the UI
+- **Demo info endpoint**: `GET /api/demo-info` returns whether demo mode is active
+
+### Changed
+- Health endpoint returns 503 when database is unreachable (was always 200)
+- Auth dependencies support demo mode with synthetic viewer user for unauthenticated requests
+
 ## 0.8.7 - 2026-02-10
 ### Fixed
 - **Upgrade pulls wrong frontend image tag**: upgrade request now includes separate `target_backend_version` and `target_frontend_version` fields so each container image is pulled with its own release tag (was using the backend version for both, causing `manifest unknown` errors when versions diverge)

@@ -245,6 +245,15 @@ async def health_check():
     return JSONResponse(content=health.model_dump(), status_code=status_code)
 
 
+@app.get("/api/health", tags=["health"])
+async def api_health_check():
+    """Health check endpoint accessible through the /api/ proxy prefix."""
+    from services.health import run_health_checks
+    health = await run_health_checks()
+    status_code = 200 if health.status in ("healthy", "degraded") else 503
+    return JSONResponse(content=health.model_dump(), status_code=status_code)
+
+
 @app.get("/api/demo-info", tags=["info"])
 async def demo_info():
     """Check if demo mode is enabled."""

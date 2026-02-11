@@ -4,6 +4,10 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.1 - 2026-02-10
+### Added
+- **`/api/health` proxy endpoint**: health check now also available at `/api/health` so it's accessible through the nginx/Vite proxy (the original `/health` endpoint is outside the `/api/` proxy path and retained for Docker/K8s liveness probes)
+
 ## 0.9.0 - 2026-02-10
 ### Added
 - **Comprehensive health endpoint**: `GET /health` now checks database connectivity and upload directory writability, reports per-component status with response times, returns overall status (healthy/degraded/unhealthy), and includes server uptime

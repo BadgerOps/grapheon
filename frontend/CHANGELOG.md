@@ -4,6 +4,12 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.2 - 2026-02-11
+### Fixed
+- **Isoflow isometric view "error in your model"**: connector anchors now use correct `{ id, ref: { item } }` structure matching Isoflow's Zod schema — isometric view renders properly
+- **Self-loop edge filtering**: edges where source equals target are now skipped in both Isoflow and reduce Cytoscape "invalid endpoints" warnings
+- **Cytoscape wheel sensitivity warning**: removed custom `wheelSensitivity: 0.3` setting that caused console warnings on every render
+
 ## 0.10.1 - 2026-02-10
 ### Added
 - **Clickable status detail modal**: clicking the footer status indicator or Dashboard status card opens a modal showing API status, per-component health checks with response times, backend/frontend versions, and last check timestamp

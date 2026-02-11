@@ -213,8 +213,15 @@ describe('buildConnectors', () => {
     const connectors = buildConnectors(edges, hostIds)
 
     expect(connectors).toHaveLength(2)
-    expect(connectors[0].anchors).toEqual([{ item: 'h1' }, { item: 'h2' }])
-    expect(connectors[1].anchors).toEqual([{ item: 'h2' }, { item: 'h3' }])
+    // Anchors must have { id, ref: { item } } structure for Isoflow schema
+    expect(connectors[0].anchors).toEqual([
+      { id: 'e1-src', ref: { item: 'h1' } },
+      { id: 'e1-tgt', ref: { item: 'h2' } },
+    ])
+    expect(connectors[1].anchors).toEqual([
+      { id: 'e2-src', ref: { item: 'h2' } },
+      { id: 'e2-tgt', ref: { item: 'h3' } },
+    ])
   })
 
   it('filters out edges to non-host nodes', () => {
@@ -263,6 +270,39 @@ describe('buildConnectors', () => {
     ]
     const connectors = buildConnectors(edges, ['h1'])
     expect(connectors).toHaveLength(0)
+  })
+
+  it('filters out self-loop edges', () => {
+    const edges = [
+      makeEdge('e1', 'h1', 'h1', 'same_subnet'), // self-loop
+      makeEdge('e2', 'h1', 'h2', 'same_subnet'), // valid
+    ]
+    const connectors = buildConnectors(edges, ['h1', 'h2'])
+    expect(connectors).toHaveLength(1)
+    expect(connectors[0].id).toBe('e2')
+  })
+
+  it('produces anchors with id and ref structure for Isoflow schema', () => {
+    const edges = [makeEdge('e1', 'h1', 'h2', 'same_subnet')]
+    const connectors = buildConnectors(edges, ['h1', 'h2'])
+
+    expect(connectors).toHaveLength(1)
+    const anchor0 = connectors[0].anchors[0]
+    const anchor1 = connectors[0].anchors[1]
+
+    // Each anchor must have 'id' (string) and 'ref' (object with 'item')
+    expect(typeof anchor0.id).toBe('string')
+    expect(anchor0.id).toBeTruthy()
+    expect(anchor0.ref).toBeDefined()
+    expect(anchor0.ref.item).toBe('h1')
+
+    expect(typeof anchor1.id).toBe('string')
+    expect(anchor1.id).toBeTruthy()
+    expect(anchor1.ref).toBeDefined()
+    expect(anchor1.ref.item).toBe('h2')
+
+    // Anchor IDs must be unique
+    expect(anchor0.id).not.toBe(anchor1.id)
   })
 })
 

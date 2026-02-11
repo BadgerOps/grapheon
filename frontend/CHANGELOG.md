@@ -4,6 +4,11 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.1 - 2026-02-10
+### Added
+- **Clickable status detail modal**: clicking the footer status indicator or Dashboard status card opens a modal showing API status, per-component health checks with response times, backend/frontend versions, and last check timestamp
+- `StatusModal` component with escape-key and backdrop-click dismiss
+
 ## 0.10.0 - 2026-02-10
 ### Added
 - **Live system health indicator**: footer status indicator now reflects actual backend health — green (healthy), amber (degraded), red (unreachable/unhealthy) with 30-second polling

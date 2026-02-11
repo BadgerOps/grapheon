@@ -18,6 +18,7 @@ import UserMenu from './components/UserMenu'
 import UpdateBanner from './components/UpdateBanner'
 import { useAuth } from './context/AuthContext'
 import { useHealthStatus } from './hooks/useHealthStatus'
+import StatusModal from './components/StatusModal'
 import { version as frontendVersion } from '../package.json'
 import * as api from './api/client'
 
@@ -84,8 +85,9 @@ export default function App() {
   const { theme, toggleTheme } = useTheme()
   const { isAuthenticated, hasRole, loading: authLoading, demoMode } = useAuth()
   const [backendVersion, setBackendVersion] = useState('...')
+  const [statusModalOpen, setStatusModalOpen] = useState(false)
   const location = useLocation()
-  const { status: healthStatus } = useHealthStatus()
+  const { status: healthStatus, health, lastChecked } = useHealthStatus()
 
   useEffect(() => {
     api.getBackendInfo()
@@ -306,7 +308,10 @@ export default function App() {
                   API v{backendVersion}
                 </span>
               </Link>
-              <span className="flex items-center gap-1">
+              <button
+                onClick={() => setStatusModalOpen(true)}
+                className="flex items-center gap-1.5 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+              >
                 <span className={`w-2 h-2 rounded-full ${
                   healthStatus === 'healthy' ? 'bg-green-500 animate-pulse' :
                   healthStatus === 'degraded' ? 'bg-amber-500 animate-pulse' :
@@ -316,12 +321,14 @@ export default function App() {
                  healthStatus === 'degraded' ? 'System Degraded' :
                  healthStatus === 'unreachable' ? 'API Unreachable' :
                  'System Unhealthy'}
-              </span>
+              </button>
             </div>
           </div>
         </div>
       </footer>
       )}
+
+      <StatusModal open={statusModalOpen} onClose={() => setStatusModalOpen(false)} />
     </div>
   )
 }

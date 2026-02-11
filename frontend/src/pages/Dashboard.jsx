@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import * as api from '../api/client'
 import { useHealthStatus } from '../hooks/useHealthStatus'
+import StatusModal from '../components/StatusModal'
 
 export default function Dashboard() {
+  const { status: healthStatus, health, lastChecked } = useHealthStatus()
+  const [statusModalOpen, setStatusModalOpen] = useState(false)
   const [stats, setStats] = useState({
     hostsCount: 0,
     portsCount: 0,
@@ -44,8 +47,6 @@ export default function Dashboard() {
 
     fetchData()
   }, [])
-
-  const { status: healthStatus, health } = useHealthStatus()
 
   return (
     <div className="p-6 lg:p-8">
@@ -245,7 +246,10 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        <div className="card p-6">
+        <div
+          className="card p-6 cursor-pointer hover:shadow-lg transition-shadow"
+          onClick={() => setStatusModalOpen(true)}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -380,6 +384,8 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      <StatusModal open={statusModalOpen} onClose={() => setStatusModalOpen(false)} />
     </div>
   )
 }

@@ -4,6 +4,10 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.3 - 2026-02-11
+### Fixed
+- **Cytoscape "invalid endpoints" edge warnings**: tuned fcose layout parameters to prevent node overlap inside compound parents — increased `nodeSeparation` (100), `nodeRepulsion` (15000), `nestingFactor` (0.5), reduced `gravityCompound` (0.8), and widened `idealEdgeLength` (120)
+
 ## 0.10.2 - 2026-02-11
 ### Fixed
 - **Isoflow isometric view "error in your model"**: connector anchors now use correct `{ id, ref: { item } }` structure matching Isoflow's Zod schema — isometric view renders properly

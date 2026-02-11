@@ -4,6 +4,10 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.2 - 2026-02-11
+### Fixed
+- **Update check picks highest semver, not most recently created**: `_extract_latest_versions()` now compares all GitHub release tags by semantic version instead of taking the first match — re-published older tags no longer shadow newer releases
+
 ## 0.9.1 - 2026-02-10
 ### Added
 - **`/api/health` proxy endpoint**: health check now also available at `/api/health` so it's accessible through the nginx/Vite proxy (the original `/health` endpoint is outside the `/api/` proxy path and retained for Docker/K8s liveness probes)

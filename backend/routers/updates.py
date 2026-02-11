@@ -151,6 +151,10 @@ def _extract_latest_versions(releases: list[dict]) -> tuple[Optional[str], Optio
     """
     Extract the latest backend and frontend version tags from releases.
 
+    Compares all release tags by semantic version to find the highest,
+    since GitHub's API sorts by creation date (not semver) and re-published
+    older tags can appear before newer ones.
+
     Returns (backend_version, frontend_version) tuple.
     backend_version and frontend_version are tag names like "backend-v0.2.0".
     """
@@ -160,18 +164,16 @@ def _extract_latest_versions(releases: list[dict]) -> tuple[Optional[str], Optio
     for release in releases:
         tag = release.get("tag_name", "")
 
-        # Skip pre-releases if needed (optional)
+        # Skip pre-releases
         if release.get("prerelease", False):
             continue
 
-        if tag.startswith("backend-v") and backend_version is None:
-            backend_version = tag
-        elif tag.startswith("frontend-v") and frontend_version is None:
-            frontend_version = tag
-
-        # Stop once we have both
-        if backend_version and frontend_version:
-            break
+        if tag.startswith("backend-v"):
+            if backend_version is None or _parse_version(tag) > _parse_version(backend_version):
+                backend_version = tag
+        elif tag.startswith("frontend-v"):
+            if frontend_version is None or _parse_version(tag) > _parse_version(frontend_version):
+                frontend_version = tag
 
     return backend_version, frontend_version
 

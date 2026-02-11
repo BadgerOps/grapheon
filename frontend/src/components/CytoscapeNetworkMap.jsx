@@ -124,7 +124,6 @@ export default function CytoscapeNetworkMap({
         layout: { name: 'preset' }, // We'll run layout separately
         minZoom: 0.1,
         maxZoom: 5,
-        wheelSensitivity: 0.3,
         boxSelectionEnabled: true,
         selectionType: 'single',
       })

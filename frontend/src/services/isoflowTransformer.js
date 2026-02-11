@@ -199,17 +199,22 @@ export function buildConnectors(edges, hostNodeIds) {
   for (const edge of edges || []) {
     const { source, target, connection_type, id } = edge.data || {}
     if (!source || !target) continue
+    if (source === target) continue // Skip self-loop edges
     if (!hostIdSet.has(source) || !hostIdSet.has(target)) continue
 
     const colorDef = CONNECTION_COLORS[connection_type] || CONNECTION_COLORS.same_subnet
     const style = CONNECTION_STYLES[connection_type] || 'SOLID'
+    const connId = id || `conn-${source}-${target}`
 
     connectors.push({
-      id: id || `conn-${source}-${target}`,
+      id: connId,
       color: colorDef.id,
       style,
       width: connection_type === 'cross_vlan' ? 2 : 1,
-      anchors: [{ item: source }, { item: target }],
+      anchors: [
+        { id: `${connId}-src`, ref: { item: source } },
+        { id: `${connId}-tgt`, ref: { item: target } },
+      ],
     })
   }
 

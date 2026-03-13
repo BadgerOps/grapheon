@@ -22,6 +22,7 @@ from routers import (
     vlans_router,
     updates_router,
     device_identities_router,
+    tasks_router,
 )
 from utils.logging_utils import setup_logging, get_logger
 from utils.audit import audit
@@ -124,6 +125,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("GRAPHĒON SHUTTING DOWN")
+    from services.task_queue import task_queue
+    await task_queue.shutdown()
     await close_db()
     logger.info("Shutdown complete")
 
@@ -234,6 +237,7 @@ app.include_router(maintenance_router)
 app.include_router(vlans_router)
 app.include_router(updates_router)
 app.include_router(device_identities_router)
+app.include_router(tasks_router)
 
 
 @app.get("/health", tags=["health"])

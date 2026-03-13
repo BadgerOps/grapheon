@@ -7,16 +7,44 @@ import FileUpload from '../components/FileUpload'
 export default function Import() {
   const [activeTab, setActiveTab] = useState('paste')
   const [isLoading, setIsLoading] = useState(false)
+  const [taskStatus, setTaskStatus] = useState(null) // tracks background task progress
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  /**
+   * Handle an import API response. If it contains a task_id, poll for completion.
+   * Otherwise treat as a synchronous success.
+   */
+  const handleImportResponse = async (result, successMsg) => {
+    if (result.task_id) {
+      // Async mode — poll for task completion
+      setTaskStatus({ status: 'pending', message: 'Processing import...' })
+      try {
+        const finalStatus = await api.pollTask(result.task_id, (s) => {
+          setTaskStatus({ status: s.status, message: s.progress || `Status: ${s.status}` })
+        })
+        if (finalStatus.status === 'success') {
+          setSuccessMessage(successMsg)
+          setTimeout(() => setSuccessMessage(''), 5000)
+        } else {
+          setError(finalStatus.error || 'Import failed')
+        }
+      } finally {
+        setTaskStatus(null)
+      }
+    } else {
+      // Synchronous mode — already complete
+      setSuccessMessage(successMsg)
+      setTimeout(() => setSuccessMessage(''), 3000)
+    }
+  }
 
   const handlePasteSubmit = async (sourceType, sourceHost, rawData) => {
     try {
       setIsLoading(true)
       setError('')
-      await api.importRaw(sourceType, sourceHost, rawData)
-      setSuccessMessage('Data imported successfully')
-      setTimeout(() => setSuccessMessage(''), 3000)
+      const result = await api.importRaw(sourceType, sourceHost, rawData)
+      await handleImportResponse(result, 'Data imported successfully')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -28,9 +56,8 @@ export default function Import() {
     try {
       setIsLoading(true)
       setError('')
-      await api.importFile(file, sourceType, sourceHost)
-      setSuccessMessage('File imported successfully')
-      setTimeout(() => setSuccessMessage(''), 3000)
+      const result = await api.importFile(file, sourceType, sourceHost)
+      await handleImportResponse(result, 'File imported successfully')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -59,6 +86,16 @@ export default function Import() {
       {successMessage && (
         <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
           {successMessage}
+        </div>
+      )}
+
+      {taskStatus && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-300 text-blue-800 rounded flex items-center gap-3">
+          <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>{taskStatus.message}</span>
         </div>
       )}
 

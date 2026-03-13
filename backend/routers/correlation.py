@@ -13,7 +13,7 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
+from database import get_db, AsyncSessionLocal
 from models import Conflict, User
 from auth.dependencies import require_any_authenticated, require_editor
 from services import (
@@ -23,6 +23,7 @@ from services import (
     resolve_conflict,
     get_host_unified_view,
 )
+from services.task_queue import task_queue
 from utils.audit import audit
 
 logger = logging.getLogger(__name__)
@@ -30,8 +31,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/correlate", tags=["correlation"])
 
 
+async def _run_correlation_background() -> dict:
+    """Execute correlation in a background task with its own DB session."""
+    async with AsyncSessionLocal() as db:
+        result = await correlate_hosts(db)
+
+        audit.log_correlation(
+            status="success",
+            hosts_merged=result.hosts_merged,
+            conflicts_detected=result.conflicts_detected,
+            device_identities_created=result.device_identities_created,
+        )
+
+        return {
+            "hosts_merged": result.hosts_merged,
+            "conflicts_detected": result.conflicts_detected,
+            "conflicts_resolved": result.conflicts_resolved,
+            "hosts_updated": result.hosts_updated,
+            "device_identities_created": result.device_identities_created,
+            "timestamp": result.timestamp.isoformat(),
+        }
+
+
 @router.post("", response_model=Dict)
 async def run_correlation(
+    sync: bool = Query(False, description="Run synchronously (blocks until complete)"),
     user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
@@ -44,28 +68,46 @@ async def run_correlation(
     3. Conflict detection
 
     Returns stats on merges performed and conflicts found.
+
+    Query parameters:
+    - sync: If true, process synchronously (default: false, returns task_id)
     """
     try:
-        logger.info("Received correlation request")
-        result = await correlate_hosts(db)
+        if sync:
+            logger.info("Received synchronous correlation request")
+            result = await correlate_hosts(db)
 
-        audit.log_correlation(status="success", hosts_merged=result.hosts_merged, conflicts_detected=result.conflicts_detected, device_identities_created=result.device_identities_created)
+            audit.log_correlation(status="success", hosts_merged=result.hosts_merged, conflicts_detected=result.conflicts_detected, device_identities_created=result.device_identities_created)
+
+            return {
+                "success": True,
+                "data": {
+                    "hosts_merged": result.hosts_merged,
+                    "conflicts_detected": result.conflicts_detected,
+                    "conflicts_resolved": result.conflicts_resolved,
+                    "hosts_updated": result.hosts_updated,
+                    "device_identities_created": result.device_identities_created,
+                    "timestamp": result.timestamp.isoformat(),
+                },
+                "message": (
+                    f"Correlation completed: {result.hosts_merged} hosts merged, "
+                    f"{result.device_identities_created} device identities created, "
+                    f"{result.conflicts_detected} conflicts detected"
+                ),
+            }
+
+        # Async mode: enqueue and return task ID
+        logger.info("Received async correlation request — enqueuing")
+        task_id = task_queue.submit(
+            "correlation",
+            _run_correlation_background,
+        )
 
         return {
             "success": True,
-            "data": {
-                "hosts_merged": result.hosts_merged,
-                "conflicts_detected": result.conflicts_detected,
-                "conflicts_resolved": result.conflicts_resolved,
-                "hosts_updated": result.hosts_updated,
-                "device_identities_created": result.device_identities_created,
-                "timestamp": result.timestamp.isoformat(),
-            },
-            "message": (
-                f"Correlation completed: {result.hosts_merged} hosts merged, "
-                f"{result.device_identities_created} device identities created, "
-                f"{result.conflicts_detected} conflicts detected"
-            ),
+            "task_id": task_id,
+            "status": "pending",
+            "message": "Correlation queued for background processing. Poll /api/tasks/{task_id} for status.",
         }
     except Exception as e:
         logger.error(f"Correlation failed: {str(e)}", exc_info=True)

@@ -1,5 +1,36 @@
 # Graphēon — Current Tasks
 
+## Active: SQLite Write Contention Fix
+
+**Problem**: Imports, correlation, and cleanup all run synchronously on the HTTP request path, holding SQLite write locks for 1-60 seconds. Concurrent requests queue behind these long transactions.
+
+**Solution**: Three-part fix:
+
+### Part 1 — SQLite Pragma Tuning ✅
+- [x] Enable WAL journal mode (allows concurrent reads during writes)
+- [x] Set `synchronous=NORMAL` (safe with WAL, reduces fsync overhead)
+- [x] Set `cache_size=-64000` (64MB page cache)
+- [x] Set `busy_timeout=5000` (5s retry instead of immediate SQLITE_BUSY)
+
+### Part 2 — Background Task Queue
+- [ ] Create `services/task_queue.py` — in-process asyncio task queue with status tracking
+- [ ] Add task status model/schema for tracking background jobs
+- [ ] Add `/api/tasks/{id}` status endpoint for polling
+- [ ] Move import processing to background tasks (return task ID immediately)
+- [ ] Move correlation to background tasks
+- [ ] Maintain backward-compatible sync mode via `?async=false` query param
+
+### Part 3 — Frontend Task Polling
+- [ ] Update import page to poll task status
+- [ ] Update correlation trigger to poll task status
+- [ ] Show progress/status indicators
+
+### Part 4 — Verify
+- [ ] Run existing tests
+- [ ] Manual verification of import + correlation flow
+
+---
+
 ## Completed: Visualization Improvement — Phase 1 + Phase 2 + Phase 3
 
 Goal: Accurate data, VLAN/segment-based grouping, connected entity visibility in the network map.
@@ -51,14 +82,6 @@ Top reliability/security risks identified from current architecture and code pat
 - [ ] **Identity consistency drift**: Host correlation can over-merge when tag confidence is insufficient. Trigger: sparse or conflicting source data with overlapping hostnames/FQDNs.
 - [ ] **Auth misconfiguration exposure**: `AUTH_ENABLED=True` + `ENFORCE_AUTH=False` permits anonymous synthetic admin behavior. Trigger: production deployment without `ENFORCE_AUTH=True`.
 - [ ] **External dependency outages**: OIDC and GitHub update checks rely on outbound HTTP calls. Trigger: provider/API timeout or outage.
-
-Planned mitigation themes:
-
-- [ ] Move heavy ingest/correlation work off request path (or chunk and isolate transactions).
-- [ ] Add backup integrity checks and restore rehearsals; document operational guardrails for cleanup/restore.
-- [ ] Tighten merge heuristics and add post-correlation anomaly checks.
-- [ ] Add startup/runtime config guardrails for auth and JWT secret hardening.
-- [ ] Add degraded-mode handling/alerts for OIDC and update-check dependency failures.
 
 ## Review
 

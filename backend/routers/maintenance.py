@@ -7,12 +7,13 @@ Provides data aging, cleanup, database statistics, vendor lookup, and backup/res
 import logging
 import os
 import shutil
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 
 from config import settings
 from database import get_db
@@ -270,7 +271,9 @@ async def create_backup(user: User = Depends(require_admin), db: AsyncSession = 
     """
     Create a backup of the database.
 
-    Returns a downloadable backup file.
+    Performs a WAL checkpoint to flush pending writes, copies the database,
+    then validates the backup with an integrity check. Applies the configured
+    retention policy (max count / max age) after a successful backup.
     """
     logger.info("Creating database backup")
 
@@ -286,6 +289,21 @@ async def create_backup(user: User = Depends(require_admin), db: AsyncSession = 
     backup_dir = os.path.join(os.path.dirname(db_path), "backups")
     os.makedirs(backup_dir, exist_ok=True)
 
+    # ── WAL checkpoint ──────────────────────────────────────────────
+    # Flush all WAL pages into the main database file so the copy is
+    # fully self-contained and consistent.
+    try:
+        result = await db.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+        wal_result = result.fetchone()
+        # Returns (busy, log_pages, checkpointed_pages)
+        if wal_result:
+            logger.info(
+                "WAL checkpoint: busy=%s, log_pages=%s, checkpointed=%s",
+                wal_result[0], wal_result[1], wal_result[2],
+            )
+    except Exception as e:
+        logger.warning("WAL checkpoint failed (proceeding with backup): %s", e)
+
     # Generate backup filename
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     backup_filename = f"network_backup_{timestamp}.db"
@@ -298,10 +316,37 @@ async def create_backup(user: User = Depends(require_admin), db: AsyncSession = 
         logger.error(f"Backup failed: {e}")
         raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
 
+    # ── Integrity check on the backup ───────────────────────────────
+    integrity_ok = True
+    integrity_detail = "ok"
+    try:
+        conn = sqlite3.connect(backup_path)
+        cursor = conn.execute("PRAGMA integrity_check")
+        result = cursor.fetchone()
+        integrity_detail = result[0] if result else "unknown"
+        integrity_ok = integrity_detail == "ok"
+        conn.close()
+        if not integrity_ok:
+            logger.error("Backup integrity check FAILED: %s", integrity_detail)
+            os.remove(backup_path)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Backup integrity check failed: {integrity_detail}",
+            )
+        logger.info("Backup integrity check passed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Could not verify backup integrity: %s", e)
+        integrity_detail = f"check skipped: {e}"
+
     # Get backup file size
     backup_size = os.path.getsize(backup_path)
 
     audit.log_backup_restore(operation="backup", filename=backup_filename)
+
+    # ── Retention policy ────────────────────────────────────────────
+    pruned = _enforce_retention(backup_dir)
 
     return {
         "success": True,
@@ -309,7 +354,68 @@ async def create_backup(user: User = Depends(require_admin), db: AsyncSession = 
         "backup_path": backup_path,
         "size_bytes": backup_size,
         "timestamp": timestamp,
+        "integrity": integrity_detail,
+        "pruned_backups": pruned,
     }
+
+
+def _list_backup_files(backup_dir: str) -> list[dict]:
+    """Return backup metadata sorted oldest-first by filesystem ctime."""
+    files = []
+    for name in os.listdir(backup_dir):
+        if not name.endswith(".db"):
+            continue
+        path = os.path.join(backup_dir, name)
+        files.append({
+            "filename": name,
+            "path": path,
+            "created_at": datetime.fromtimestamp(os.path.getctime(path)),
+        })
+    files.sort(key=lambda f: f["created_at"])
+    return files
+
+
+def _enforce_retention(backup_dir: str) -> list[str]:
+    """
+    Delete backups that exceed the configured retention policy.
+
+    Returns the list of pruned filenames.
+    """
+    max_count = settings.BACKUP_MAX_COUNT
+    max_age_days = settings.BACKUP_MAX_AGE_DAYS
+
+    if max_count <= 0 and max_age_days <= 0:
+        return []
+
+    files = _list_backup_files(backup_dir)
+    pruned: list[str] = []
+    now = datetime.utcnow()
+
+    # Age-based pruning
+    if max_age_days > 0:
+        cutoff = now - timedelta(days=max_age_days)
+        for f in list(files):
+            if f["created_at"] < cutoff:
+                try:
+                    os.remove(f["path"])
+                    pruned.append(f["filename"])
+                    files.remove(f)
+                    logger.info("Retention: pruned old backup %s", f["filename"])
+                except OSError as e:
+                    logger.warning("Failed to prune %s: %s", f["filename"], e)
+
+    # Count-based pruning (remove oldest first)
+    if max_count > 0 and len(files) > max_count:
+        excess = files[:len(files) - max_count]
+        for f in excess:
+            try:
+                os.remove(f["path"])
+                pruned.append(f["filename"])
+                logger.info("Retention: pruned excess backup %s", f["filename"])
+            except OSError as e:
+                logger.warning("Failed to prune %s: %s", f["filename"], e)
+
+    return pruned
 
 
 @router.get("/backup/download/{filename}")
@@ -367,7 +473,14 @@ async def list_backups(user: User = Depends(require_admin)):
     # Sort by creation time, newest first
     backups.sort(key=lambda x: x["created_at"], reverse=True)
 
-    return {"backups": backups, "count": len(backups)}
+    return {
+        "backups": backups,
+        "count": len(backups),
+        "retention_policy": {
+            "max_count": settings.BACKUP_MAX_COUNT,
+            "max_age_days": settings.BACKUP_MAX_AGE_DAYS,
+        },
+    }
 
 
 @router.post("/restore/{filename}")

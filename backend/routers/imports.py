@@ -9,12 +9,13 @@ from ipaddress import ip_address as parse_ip
 
 from pathlib import Path
 
-from database import get_db
+from database import get_db, AsyncSessionLocal
 from models import RawImport, Host, Port, Connection, ARPEntry, User
 from auth.dependencies import require_any_authenticated, require_editor
 from schemas import RawImportResponse, PaginatedResponse
 from parsers import get_parser, PARSERS
 from config import settings
+from services.task_queue import task_queue
 from utils.tagging import (
     build_host_tags,
     build_port_tags,
@@ -419,7 +420,42 @@ async def _process_import(
         import_record.error_message = str(e)
 
 
-@router.post("/raw", response_model=RawImportResponse, status_code=201)
+async def _run_import_background(import_id: int, source_type: str, raw_data: str, source_host: Optional[str], filename: Optional[str]) -> dict:
+    """
+    Execute import processing in a background task with its own DB session.
+
+    Returns a result dict for the task queue.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(RawImport).where(RawImport.id == import_id))
+        import_record = result.scalar_one_or_none()
+        if not import_record:
+            raise ValueError(f"Import record {import_id} not found")
+
+        if source_host:
+            await _upsert_host_from_value(db, source_host, "import_source")
+        await _process_import(db, import_record, source_type, raw_data)
+
+        await db.commit()
+        await db.refresh(import_record)
+
+        audit.log_import(
+            source_type=source_type,
+            filename=filename,
+            status=import_record.parse_status,
+            record_count=import_record.parsed_count or 0,
+            error_message=import_record.error_message,
+        )
+
+        return {
+            "import_id": import_record.id,
+            "status": import_record.parse_status,
+            "parsed_count": import_record.parsed_count,
+            "error": import_record.error_message,
+        }
+
+
+@router.post("/raw", response_model=None, status_code=201)
 async def import_raw_data(
     source_type: str = Form(...),
     raw_data: str = Form(...),
@@ -427,6 +463,7 @@ async def import_raw_data(
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    sync: bool = Query(False, description="Run synchronously (blocks until complete)"),
     user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
@@ -439,9 +476,9 @@ async def import_raw_data(
     - filename: Optional filename for reference
     - tags: Optional comma-separated tags
     - notes: Optional notes about the import
+    - sync: If true, process synchronously (default: false, returns task_id)
     """
     logger.debug(f"POST /raw - source_type={source_type}, data_length={len(raw_data)}")
-    logger.debug(f"Raw data preview: {raw_data[:200]}...")
 
     # Parse tags
     parsed_tags = None
@@ -463,29 +500,40 @@ async def import_raw_data(
 
     db.add(import_record)
     await db.flush()
-    logger.debug(f"Created import record id={import_record.id}")
-
-    # Parse the data and create records
-    if source_host:
-        await _upsert_host_from_value(db, source_host, "import_source")
-    await _process_import(db, import_record, source_type, raw_data)
-    logger.debug(f"Parse complete: status={import_record.parse_status}, count={import_record.parsed_count}")
-
+    import_id = import_record.id
     await db.commit()
-    await db.refresh(import_record)
+    logger.debug(f"Created import record id={import_id}")
 
-    logger.debug(f"Import committed successfully: id={import_record.id}")
-    audit.log_import(source_type=source_type, filename=filename, status=import_record.parse_status, record_count=import_record.parsed_count or 0, error_message=import_record.error_message)
-    return RawImportResponse.model_validate(import_record)
+    if sync:
+        # Synchronous mode: process inline and return full result
+        await _run_import_background(import_id, source_type, raw_data, source_host, filename)
+        async with AsyncSessionLocal() as db2:
+            result = await db2.execute(select(RawImport).where(RawImport.id == import_id))
+            refreshed = result.scalar_one()
+            return RawImportResponse.model_validate(refreshed)
+
+    # Async mode: enqueue and return task ID immediately
+    task_id = task_queue.submit(
+        "import",
+        lambda _id=import_id, _st=source_type, _rd=raw_data, _sh=source_host, _fn=filename: _run_import_background(_id, _st, _rd, _sh, _fn),
+    )
+
+    return {
+        "import_id": import_id,
+        "task_id": task_id,
+        "status": "pending",
+        "message": "Import queued for background processing. Poll /api/tasks/{task_id} for status.",
+    }
 
 
-@router.post("/file", response_model=RawImportResponse, status_code=201)
+@router.post("/file", response_model=None, status_code=201)
 async def import_file(
     file: UploadFile = File(...),
     source_type: str = Form(...),
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    sync: bool = Query(False, description="Run synchronously (blocks until complete)"),
     user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
@@ -497,6 +545,7 @@ async def import_file(
     - source_type: Type of data source (nmap, netstat, arp, traceroute, ping)
     - tags: Optional comma-separated tags
     - notes: Optional notes about the import
+    - sync: If true, process synchronously (default: false, returns task_id)
     """
     # Read file content
     try:
@@ -514,7 +563,7 @@ async def import_file(
     if tags:
         parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-    # Create import record
+    # Create import record and commit so background task can see it
     import_record = RawImport(
         source_type=source_type,
         import_type="file",
@@ -529,17 +578,28 @@ async def import_file(
 
     db.add(import_record)
     await db.flush()
-
-    # Parse the data and create records
-    if source_host:
-        await _upsert_host_from_value(db, source_host, "import_source")
-    await _process_import(db, import_record, source_type, raw_data)
-
+    import_id = import_record.id
+    file_filename = file.filename
     await db.commit()
-    await db.refresh(import_record)
 
-    audit.log_import(source_type=source_type, filename=file.filename, status=import_record.parse_status, record_count=import_record.parsed_count or 0, error_message=import_record.error_message)
-    return RawImportResponse.model_validate(import_record)
+    if sync:
+        await _run_import_background(import_id, source_type, raw_data, source_host, file_filename)
+        async with AsyncSessionLocal() as db2:
+            result = await db2.execute(select(RawImport).where(RawImport.id == import_id))
+            refreshed = result.scalar_one()
+            return RawImportResponse.model_validate(refreshed)
+
+    task_id = task_queue.submit(
+        "import",
+        lambda _id=import_id, _st=source_type, _rd=raw_data, _sh=source_host, _fn=file_filename: _run_import_background(_id, _st, _rd, _sh, _fn),
+    )
+
+    return {
+        "import_id": import_id,
+        "task_id": task_id,
+        "status": "pending",
+        "message": "Import queued for background processing. Poll /api/tasks/{task_id} for status.",
+    }
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -638,6 +698,80 @@ async def reparse_import(import_id: int, user: User = Depends(require_editor), d
     return RawImportResponse.model_validate(import_record)
 
 
+async def _run_bulk_import_background(import_ids: list[int], source_type: str, file_data: list[dict], source_host: Optional[str]) -> dict:
+    """
+    Execute bulk import processing in a background task with its own DB session.
+    """
+    import time
+    start_time = time.perf_counter()
+
+    results = {
+        "total_files": len(import_ids),
+        "successful": 0,
+        "failed": 0,
+        "imports": [],
+        "errors": [],
+    }
+
+    for i, (import_id, fdata) in enumerate(zip(import_ids, file_data)):
+        file_start = time.perf_counter()
+        try:
+            async with AsyncSessionLocal() as db:
+                rec_result = await db.execute(select(RawImport).where(RawImport.id == import_id))
+                import_record = rec_result.scalar_one_or_none()
+                if not import_record:
+                    raise ValueError(f"Import record {import_id} not found")
+
+                if source_host:
+                    await _upsert_host_from_value(db, source_host, "import_source")
+                await _process_import(db, import_record, source_type, fdata["raw_data"])
+                await db.commit()
+                await db.refresh(import_record)
+
+                file_duration = (time.perf_counter() - file_start) * 1000
+                logger.info(
+                    f"[{i+1}/{len(import_ids)}] {fdata['filename']}: "
+                    f"status={import_record.parse_status}, "
+                    f"records={import_record.parsed_count}, "
+                    f"duration={file_duration:.1f}ms"
+                )
+
+                results["imports"].append({
+                    "id": import_record.id,
+                    "filename": fdata["filename"],
+                    "status": import_record.parse_status,
+                    "parsed_count": import_record.parsed_count,
+                    "error": import_record.error_message,
+                })
+
+                if import_record.parse_status in ("success", "partial"):
+                    results["successful"] += 1
+                else:
+                    results["failed"] += 1
+
+        except Exception as e:
+            logger.error(f"[{i+1}/{len(import_ids)}] {fdata['filename']}: Error - {e}")
+            results["errors"].append({"filename": fdata["filename"], "error": str(e)})
+            results["failed"] += 1
+
+    total_duration = (time.perf_counter() - start_time) * 1000
+    results["duration_ms"] = round(total_duration, 1)
+
+    logger.info(
+        f"BULK IMPORT COMPLETE: "
+        f"{results['successful']}/{results['total_files']} successful, "
+        f"duration={total_duration:.1f}ms"
+    )
+
+    audit.log_import(
+        source_type=source_type,
+        filename=f"bulk:{len(import_ids)} files",
+        status="success" if results["failed"] == 0 else "partial",
+        record_count=results["successful"],
+    )
+    return results
+
+
 @router.post("/bulk", response_model=dict, status_code=201)
 async def bulk_import_files(
     files: List[UploadFile] = File(...),
@@ -645,6 +779,7 @@ async def bulk_import_files(
     source_host: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    sync: bool = Query(False, description="Run synchronously (blocks until complete)"),
     user: User = Depends(require_editor),
     db: AsyncSession = Depends(get_db),
 ):
@@ -656,12 +791,10 @@ async def bulk_import_files(
     - source_type: Type of data source (same for all files)
     - tags: Optional comma-separated tags (applied to all files)
     - notes: Optional notes (applied to all files)
+    - sync: If true, process synchronously (default: false, returns task_id)
 
-    Returns summary of import results.
+    Returns summary of import results (sync) or task_id (async).
     """
-    import time
-    start_time = time.perf_counter()
-
     logger.info(f"BULK IMPORT: {len(files)} files, source_type={source_type}")
 
     # Parse tags
@@ -669,30 +802,19 @@ async def bulk_import_files(
     if tags:
         parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-    results = {
-        "total_files": len(files),
-        "successful": 0,
-        "failed": 0,
-        "imports": [],
-        "errors": [],
-    }
+    # Read all files and create import records up front
+    import_ids = []
+    file_data = []
 
-    for i, file in enumerate(files):
-        file_start = time.perf_counter()
-        logger.info(f"[{i+1}/{len(files)}] Processing: {file.filename}")
-
+    for file in files:
         try:
-            # Read file content
             content = await file.read()
-            # Save to disk for audit trail
             _save_upload_to_disk(file.filename, content)
             try:
                 raw_data = content.decode("utf-8")
             except UnicodeDecodeError:
-                # Try latin-1 as fallback
                 raw_data = content.decode("latin-1")
 
-            # Create import record
             import_record = RawImport(
                 source_type=source_type,
                 import_type="file",
@@ -704,54 +826,28 @@ async def bulk_import_files(
                 parse_status="pending",
                 created_at=datetime.utcnow(),
             )
-
             db.add(import_record)
             await db.flush()
-
-            # Parse the data and create records
-            if source_host:
-                await _upsert_host_from_value(db, source_host, "import_source")
-            await _process_import(db, import_record, source_type, raw_data)
-
-            file_duration = (time.perf_counter() - file_start) * 1000
-            logger.info(
-                f"[{i+1}/{len(files)}] {file.filename}: "
-                f"status={import_record.parse_status}, "
-                f"records={import_record.parsed_count}, "
-                f"duration={file_duration:.1f}ms"
-            )
-
-            results["imports"].append({
-                "id": import_record.id,
-                "filename": file.filename,
-                "status": import_record.parse_status,
-                "parsed_count": import_record.parsed_count,
-                "error": import_record.error_message,
-            })
-
-            if import_record.parse_status in ("success", "partial"):
-                results["successful"] += 1
-            else:
-                results["failed"] += 1
-
+            import_ids.append(import_record.id)
+            file_data.append({"filename": file.filename, "raw_data": raw_data})
         except Exception as e:
-            logger.error(f"[{i+1}/{len(files)}] {file.filename}: Error - {e}")
-            results["errors"].append({
-                "filename": file.filename,
-                "error": str(e),
-            })
-            results["failed"] += 1
+            logger.error(f"Failed to read file {file.filename}: {e}")
+            # Still try other files
 
     await db.commit()
 
-    total_duration = (time.perf_counter() - start_time) * 1000
-    results["duration_ms"] = round(total_duration, 1)
+    if sync:
+        return await _run_bulk_import_background(import_ids, source_type, file_data, source_host)
 
-    logger.info(
-        f"BULK IMPORT COMPLETE: "
-        f"{results['successful']}/{results['total_files']} successful, "
-        f"duration={total_duration:.1f}ms"
+    task_id = task_queue.submit(
+        "import",
+        lambda _ids=import_ids, _st=source_type, _fd=file_data, _sh=source_host: _run_bulk_import_background(_ids, _st, _fd, _sh),
     )
 
-    audit.log_import(source_type=source_type, filename=f"bulk:{len(files)} files", status="success" if results["failed"] == 0 else "partial", record_count=results["successful"])
-    return results
+    return {
+        "task_id": task_id,
+        "import_ids": import_ids,
+        "total_files": len(import_ids),
+        "status": "pending",
+        "message": "Bulk import queued for background processing. Poll /api/tasks/{task_id} for status.",
+    }

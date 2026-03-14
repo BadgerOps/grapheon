@@ -190,6 +190,39 @@ export async function autoAssignVlans() {
 }
 
 // ============================================
+// Task status endpoints (background jobs)
+// ============================================
+
+export async function getTaskStatus(taskId) {
+  return apiCall('GET', `/tasks/${taskId}`)
+}
+
+export async function listTasks(params = {}) {
+  return apiCall('GET', '/tasks', null, params)
+}
+
+/**
+ * Poll a background task until it completes (success or failure).
+ * Returns the final task status object.
+ *
+ * @param {string} taskId - The task ID to poll
+ * @param {function} onProgress - Optional callback called on each poll with task status
+ * @param {number} intervalMs - Polling interval in milliseconds (default 1000)
+ * @param {number} maxAttempts - Maximum poll attempts before giving up (default 300 = 5 min)
+ */
+export async function pollTask(taskId, onProgress = null, intervalMs = 1000, maxAttempts = 300) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await getTaskStatus(taskId)
+    if (onProgress) onProgress(status)
+    if (status.status === 'success' || status.status === 'failed') {
+      return status
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+  throw new Error('Task polling timed out')
+}
+
+// ============================================
 // Correlation endpoints
 // ============================================
 

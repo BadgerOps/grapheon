@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import (
@@ -5,11 +6,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
 )
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.orm import declarative_base
 from typing import AsyncGenerator
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 db_path = settings.DATABASE_URL.replace("sqlite:///", "")
@@ -23,6 +26,26 @@ engine = create_async_engine(
     echo=False,
     future=True,
 )
+
+
+# ── SQLite performance pragmas ────────────────────────────────────────
+# Applied on every new connection so they survive connection recycling.
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    # WAL mode: allows concurrent readers while a writer is active
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # NORMAL sync is safe with WAL and avoids fsync on every commit
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    # 64 MB page cache (negative value = KiB)
+    cursor.execute("PRAGMA cache_size=-65536")
+    # 5 s busy timeout — retry on SQLITE_BUSY instead of failing instantly
+    cursor.execute("PRAGMA busy_timeout=5000")
+    # Store temp tables in memory
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.close()
+    logger.debug("SQLite pragmas applied (WAL, sync=NORMAL, cache=64MB, busy=5s)")
 
 # Create async session factory
 AsyncSessionLocal = async_sessionmaker(

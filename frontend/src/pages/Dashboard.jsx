@@ -18,6 +18,50 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Correlation state
+  const [correlationRunning, setCorrelationRunning] = useState(false)
+  const [correlationStatus, setCorrelationStatus] = useState(null) // { status, message }
+  const [correlationResult, setCorrelationResult] = useState(null)
+  const [correlationError, setCorrelationError] = useState('')
+
+  const handleRunCorrelation = async () => {
+    try {
+      setCorrelationRunning(true)
+      setCorrelationError('')
+      setCorrelationResult(null)
+      setCorrelationStatus({ status: 'pending', message: 'Starting correlation...' })
+
+      const result = await api.runCorrelation()
+
+      if (result.task_id) {
+        // Async mode — poll for completion
+        const finalStatus = await api.pollTask(result.task_id, (s) => {
+          setCorrelationStatus({
+            status: s.status,
+            message: s.progress || `Status: ${s.status}`,
+          })
+        })
+
+        if (finalStatus.status === 'success') {
+          setCorrelationResult(finalStatus.result)
+          setCorrelationStatus(null)
+        } else {
+          setCorrelationError(finalStatus.error || 'Correlation failed')
+          setCorrelationStatus(null)
+        }
+      } else if (result.data) {
+        // Sync mode — already complete
+        setCorrelationResult(result.data)
+        setCorrelationStatus(null)
+      }
+    } catch (err) {
+      setCorrelationError(err.message)
+      setCorrelationStatus(null)
+    } finally {
+      setCorrelationRunning(false)
+    }
+  }
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -302,6 +346,74 @@ export default function Dashboard() {
           ) : (
             <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
               {healthStatus === 'unreachable' ? 'Cannot reach API' : 'Checking...'}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Correlation Section */}
+      <div className="card mb-8">
+        <div className="card-header flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Host Correlation
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+              Merge duplicate hosts, detect device identities, and find data conflicts
+            </p>
+          </div>
+          <button
+            onClick={handleRunCorrelation}
+            disabled={correlationRunning}
+            className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {correlationRunning ? 'Running...' : 'Run Correlation'}
+          </button>
+        </div>
+        <div className="card-body">
+          {correlationStatus && (
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-3 mb-4">
+              <svg className="animate-spin h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-blue-800 dark:text-blue-200">{correlationStatus.message}</span>
+            </div>
+          )}
+
+          {correlationError && (
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg mb-4">
+              <p className="text-red-700 dark:text-red-300">{correlationError}</p>
+            </div>
+          )}
+
+          {correlationResult && (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p className="font-medium text-green-800 dark:text-green-200 mb-3">Correlation complete</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Hosts Merged</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{correlationResult.hosts_merged ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Device Identities</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{correlationResult.device_identities_created ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Conflicts Found</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{correlationResult.conflicts_detected ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Hosts Updated</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{correlationResult.hosts_updated ?? 0}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!correlationStatus && !correlationError && !correlationResult && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Run correlation after importing new data to merge duplicate hosts and detect conflicts.
             </p>
           )}
         </div>

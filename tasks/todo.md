@@ -12,21 +12,22 @@
 - [x] Set `cache_size=-64000` (64MB page cache)
 - [x] Set `busy_timeout=5000` (5s retry instead of immediate SQLITE_BUSY)
 
-### Part 2 — Background Task Queue
-- [ ] Create `services/task_queue.py` — in-process asyncio task queue with status tracking
-- [ ] Add task status model/schema for tracking background jobs
-- [ ] Add `/api/tasks/{id}` status endpoint for polling
-- [ ] Move import processing to background tasks (return task ID immediately)
-- [ ] Move correlation to background tasks
-- [ ] Maintain backward-compatible sync mode via `?async=false` query param
+### Part 2 — Background Task Queue ✅
+- [x] Create `services/task_queue.py` — in-process asyncio task queue with status tracking
+- [x] Add task status model/schema for tracking background jobs (TaskInfo dataclass)
+- [x] Add `/api/tasks/{id}` status endpoint for polling (routers/tasks.py)
+- [x] Move import processing to background tasks (return task ID immediately)
+- [x] Move correlation to background tasks
+- [x] Maintain backward-compatible sync mode via `?sync=true` query param
 
-### Part 3 — Frontend Task Polling
-- [ ] Update import page to poll task status
-- [ ] Update correlation trigger to poll task status
-- [ ] Show progress/status indicators
+### Part 3 — Frontend Task Polling ✅
+- [x] Update import page to poll task status (pollTask + spinner + progress)
+- [x] Add correlation trigger to Dashboard with task polling
+- [x] Show progress/status indicators (spinner, result summary, error display)
 
 ### Part 4 — Verify
-- [ ] Run existing tests
+- [x] Frontend builds successfully
+- [x] Backend task_queue imports cleanly
 - [ ] Manual verification of import + correlation flow
 
 ---

@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import sqlite3
+import tempfile
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
@@ -416,6 +417,125 @@ def _enforce_retention(backup_dir: str) -> list[str]:
                 logger.warning("Failed to prune %s: %s", f["filename"], e)
 
     return pruned
+
+
+def _get_table_counts(db_path: str) -> dict[str, int]:
+    """Open a SQLite database and return {table_name: row_count} for every table."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        tables = [row[0] for row in cursor.fetchall()]
+        counts = {}
+        for table in sorted(tables):
+            try:
+                row = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()
+                counts[table] = row[0] if row else 0
+            except sqlite3.Error:
+                counts[table] = -1  # table exists but can't be read
+        return counts
+    finally:
+        conn.close()
+
+
+@router.post("/backup/verify/{filename}")
+async def verify_backup(filename: str, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """
+    Non-destructive backup verification.
+
+    Copies the backup to a temporary file, runs an integrity check, then
+    compares table row counts against the live database. The temp file is
+    always cleaned up afterwards.
+    """
+    logger.info("Verifying backup: %s", filename)
+
+    # Resolve paths
+    db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite+aiosqlite:///", "")
+    if not db_path.startswith("/"):
+        db_path = os.path.join(os.getcwd(), db_path)
+
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    backup_path = os.path.join(backup_dir, filename)
+
+    # Security: prevent path traversal
+    if not os.path.abspath(backup_path).startswith(os.path.abspath(backup_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+
+    # Work on a temp copy so we never touch the original backup
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="verify_")
+    os.close(tmp_fd)
+
+    try:
+        shutil.copy2(backup_path, tmp_path)
+
+        # ── Integrity check ─────────────────────────────────────────
+        conn = sqlite3.connect(tmp_path)
+        try:
+            result = conn.execute("PRAGMA integrity_check").fetchone()
+            integrity = result[0] if result else "unknown"
+        finally:
+            conn.close()
+
+        if integrity != "ok":
+            logger.error("Verify: integrity check FAILED for %s: %s", filename, integrity)
+            return {
+                "filename": filename,
+                "valid": False,
+                "integrity": integrity,
+                "message": "Backup file is corrupt.",
+            }
+
+        # ── Table row-count comparison ──────────────────────────────
+        backup_counts = _get_table_counts(tmp_path)
+        live_counts = _get_table_counts(db_path)
+
+        all_tables = sorted(set(backup_counts) | set(live_counts))
+        comparison = []
+        for table in all_tables:
+            live = live_counts.get(table)
+            backup = backup_counts.get(table)
+            entry = {"table": table, "live": live, "backup": backup}
+            if live is None:
+                entry["status"] = "missing_in_live"
+            elif backup is None:
+                entry["status"] = "missing_in_backup"
+            elif live == backup:
+                entry["status"] = "match"
+            else:
+                entry["status"] = "drift"
+            comparison.append(entry)
+
+        tables_match = all(e["status"] == "match" for e in comparison)
+
+        logger.info(
+            "Verify: %s integrity=ok tables_match=%s",
+            filename, tables_match,
+        )
+
+        return {
+            "filename": filename,
+            "valid": True,
+            "integrity": "ok",
+            "tables_match": tables_match,
+            "table_comparison": comparison,
+            "message": (
+                "Backup is valid and matches live database."
+                if tables_match
+                else "Backup is valid but row counts differ from live database (expected if data changed since backup)."
+            ),
+        }
+
+    except Exception as e:
+        logger.error("Verify failed for %s: %s", filename, e)
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+    finally:
+        # Always clean up
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 @router.get("/backup/download/{filename}")

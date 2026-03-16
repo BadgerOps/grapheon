@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     LOCAL_ADMIN_EMAIL: Optional[str] = None
     LOCAL_ADMIN_PASSWORD: Optional[str] = None
 
+    # ── Backup Retention ────────────────────────────────────────────────
+    BACKUP_MAX_COUNT: int = 10          # Keep at most N backups (0 = unlimited)
+    BACKUP_MAX_AGE_DAYS: int = 30       # Delete backups older than N days (0 = unlimited)
+
     class Config:
         env_file = ".env"
         case_sensitive = True

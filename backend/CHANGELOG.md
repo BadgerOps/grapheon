@@ -4,6 +4,18 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.9.3 - 2026-03-16
+### Added
+- **WAL checkpoint before backup**: `POST /api/maintenance/backup` now runs `PRAGMA wal_checkpoint(TRUNCATE)` to flush all pending WAL writes into the main database file before copying, ensuring backups are fully self-contained and consistent
+- **Backup integrity check**: after copying, the backup file is opened with sqlite3 and `PRAGMA integrity_check` is run — if the check fails, the corrupt backup is deleted and a 500 error is returned
+- **Backup retention policy**: configurable auto-pruning runs after every successful backup, controlled by two new settings:
+  - `BACKUP_MAX_COUNT` (default 10): keeps at most N backups, deleting the oldest when exceeded
+  - `BACKUP_MAX_AGE_DAYS` (default 30): deletes backups older than N days
+  - Set either to 0 to disable that limit
+- **Non-destructive backup verification**: new `POST /api/maintenance/backup/verify/{filename}` endpoint copies a backup to a temp file, runs integrity check, compares table row counts against the live database, and reports per-table status (match/drift/missing) — temp file is always cleaned up
+- Backup creation response now includes `integrity` and `pruned_backups` fields
+- Backup list response now includes `retention_policy` with current `max_count` and `max_age_days` settings
+
 ## 0.9.2 - 2026-02-11
 ### Fixed
 - **Update check picks highest semver, not most recently created**: `_extract_latest_versions()` now compares all GitHub release tags by semantic version instead of taking the first match — re-published older tags no longer shadow newer releases

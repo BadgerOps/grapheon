@@ -18,6 +18,7 @@ from auth.jwt_service import create_access_token
 from database import Base, get_db
 from main import app
 from models.user import User
+from services.task_queue import task_queue
 
 
 @pytest_asyncio.fixture
@@ -63,6 +64,7 @@ async def async_client():
 
     # Cleanup
     app.dependency_overrides.clear()
+    await task_queue.shutdown()
     await engine.dispose()
 
 

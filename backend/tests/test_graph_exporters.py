@@ -16,6 +16,7 @@ from database import Base, get_db
 from main import app
 from export_converters.graphml_exporter import cytoscape_to_graphml
 from export_converters.drawio_exporter import cytoscape_to_drawio
+from services.task_queue import task_queue
 
 
 # ── Test data ────────────────────────────────────────────────────────
@@ -407,6 +408,7 @@ async def async_client():
         yield client
 
     app.dependency_overrides.clear()
+    await task_queue.shutdown()
     await engine.dispose()
 
 

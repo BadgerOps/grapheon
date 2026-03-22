@@ -1,6 +1,6 @@
 # Deployment
 
-Graphēon deploys as two Docker containers: a **backend** (FastAPI + SQLite) and a **frontend** (React SPA served by nginx). The frontend container proxies `/api/` requests to the backend.
+Graphēon deploys centrally as two Docker containers: a **backend** (FastAPI + SQLite) and a **frontend** (React SPA served by nginx). The frontend container proxies `/api/` requests to the backend.
 
 ```mermaid
 graph LR
@@ -23,8 +23,41 @@ Images are published to GHCR on every merge to `master` when a new version is de
 |-------|------|------|
 | `ghcr.io/badgerops/grapheon-backend` | 8000 | python:3.12-slim |
 | `ghcr.io/badgerops/grapheon-frontend` | 8080 | nginx:1.27-alpine |
+| `ghcr.io/badgerops/grapheon-agent` | — | python:3.12-slim |
 
 Tags follow `latest` and `vX.Y.Z` (e.g., `v0.8.3`).
+
+The passive agent image is optional and is deployed per observed host, not as part of the central backend/frontend pair.
+
+## Passive Agent Container
+
+The passive agent is also published as `ghcr.io/badgerops/grapheon-agent`. Because it collects host-local observations, a containerized run should usually share the host network and PID namespaces and persist `/var/lib/grapheon-agent`.
+
+Example direct run:
+
+```bash
+docker run --rm \
+  --network host \
+  --pid host \
+  -v "$PWD/agent-state:/var/lib/grapheon-agent" \
+  --env-file ./grapheon-agent.env \
+  ghcr.io/badgerops/grapheon-agent:latest \
+  --register-only
+```
+
+Example immediate check-in after approval:
+
+```bash
+docker run --rm \
+  --network host \
+  --pid host \
+  -v "$PWD/agent-state:/var/lib/grapheon-agent" \
+  --env-file ./grapheon-agent.env \
+  ghcr.io/badgerops/grapheon-agent:latest \
+  --force
+```
+
+For host-level install via systemd or the release tarball instead of a container, see `docs/agent_quickstart.md`.
 
 ## Quick Start with Docker
 

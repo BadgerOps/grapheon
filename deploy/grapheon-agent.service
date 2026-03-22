@@ -1,0 +1,28 @@
+[Unit]
+Description=Graphēon Passive Agent Collector
+Documentation=https://github.com/BadgerOps/grapheon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/grapheon-agent.env
+ExecStart=/usr/bin/env python3 /opt/grapheon/agent/grapheon_agent.py
+WorkingDirectory=/var/lib/grapheon-agent
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/grapheon-agent
+RuntimeMaxSec=10min
+
+[Install]
+WantedBy=multi-user.target

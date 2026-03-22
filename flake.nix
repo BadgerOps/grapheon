@@ -36,6 +36,10 @@
             pkgs.curl
             pkgs.git
             pkgs.gh
+            pkgs.iproute2
+            pkgs.nettools
+            pkgs.stdenv.cc.cc.lib
+            pkgs.util-linux
 
             # Optional: useful for network tools testing
             pkgs.nmap
@@ -54,6 +58,7 @@
               python -m venv .venv
             fi
             source .venv/bin/activate
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]}:''${LD_LIBRARY_PATH:-}"
 
             # Install Python dependencies if requirements files exist
             if [ -f "backend/requirements.txt" ]; then

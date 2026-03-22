@@ -109,6 +109,7 @@ The API will be available at `http://localhost:8000`
 - `PATCH /api/agents/{id}` - Update passive agent metadata or policy
 - `POST /api/agents/{id}/approve` - Approve a pending passive agent
 - `POST /api/agents/{id}/reject` - Reject a pending passive agent
+- `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue an agent API key
 - `GET /api/agents/{id}/checkins` - List passive agent check-in history
 - `GET /api/agents/policies` - List passive collection policies
 - `POST /api/agents/policies` - Create passive collection policy

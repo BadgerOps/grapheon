@@ -101,6 +101,7 @@ The release workflow builds and publishes:
 - `ghcr.io/badgerops/grapheon-frontend:latest` and `:vX.Y.Z`
 - `ghcr.io/badgerops/grapheon-agent:latest` and `:vX.Y.Z`
 - `grapheon-agent-vX.Y.Z.tar.gz` as a GitHub release artifact on the matching `agent-vX.Y.Z` release
+- `grapheon-agent-vX.Y.Z.tar.gz.sha256` checksum file for artifact verification
 
 See `docs/release-process.md` and `docs/example_deployment.md` for the full workflow.
 

@@ -40,6 +40,7 @@ For the passive agent, the workflow also:
 
 - creates an `agent-vX.Y.Z` GitHub release
 - uploads `grapheon-agent-vX.Y.Z.tar.gz` containing the runtime, install helper, systemd units, and quickstart docs
+- uploads `grapheon-agent-vX.Y.Z.tar.gz.sha256` for checksum verification
 
 ## Notes
 

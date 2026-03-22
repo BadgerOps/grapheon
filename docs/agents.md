@@ -131,6 +131,7 @@ Current behavior:
 - re-registers once approved to receive the per-agent API key
 - supports direct manual execution with CLI flags in addition to the shipped `systemd` units
 - ships as both a GHCR container image and a GitHub release tarball for distribution
+- installs host releases under a versioned `releases/` directory with a stable `current` symlink for rollback
 - uses cached backend policy for:
   - `checkin_interval_seconds`
   - `jitter_seconds`

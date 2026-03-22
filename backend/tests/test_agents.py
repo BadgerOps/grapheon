@@ -297,3 +297,138 @@ class TestAgentEnrollmentAndCheckIn:
         assert agent.last_seen_at is not None
         assert agent.api_key_hash is not None
         assert agent.last_ip_addresses == ["10.0.0.1", "10.0.0.10", "10.0.0.5"]
+
+    @pytest.mark.asyncio
+    async def test_rotate_agent_api_key_invalidates_previous_key(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_rotate_admin")
+
+        policy_response = await async_client.post(
+            "/api/agents/policies",
+            json={
+                "name": "agent-rotate-policy",
+                "description": "Policy for API key rotation tests",
+                "checkin_interval_seconds": 1800,
+                "jitter_seconds": 60,
+                "command_timeout_seconds": 15,
+                "enabled_commands": {
+                    "ip_neigh": True,
+                    "ss_tunap": True,
+                    "ip_addr": True,
+                    "ip_route": True,
+                },
+                "max_report_bytes": 262144,
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert policy_response.status_code == 201
+        policy_id = policy_response.json()["id"]
+
+        enrollment_response = await async_client.post(
+            "/api/agents/enrollment-keys",
+            json={
+                "name": "agent-rotate-enrollment",
+                "description": "Auto-approved key for rotation tests",
+                "default_policy_id": policy_id,
+                "auto_approve": True,
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert enrollment_response.status_code == 201
+        enrollment_key = enrollment_response.json()["enrollment_key"]
+
+        register_response = await async_client.post(
+            "/api/agents/register",
+            json={
+                "enrollment_key": enrollment_key,
+                "agent_uuid": "agent-rotate-001",
+                "display_name": "Rotate me",
+                "hostname": "rotate-host-01",
+                "site_name": "Lab",
+                "agent_version": "0.1.0",
+                "platform": "linux",
+                "platform_release": "6.12",
+                "addresses": [
+                    {
+                        "ip_address": "10.40.0.5",
+                        "interface": "eth0",
+                        "prefix_length": 24,
+                        "mac_address": "AA:BB:CC:DD:40:05",
+                    }
+                ],
+            },
+        )
+        assert register_response.status_code == 200
+        register_data = register_response.json()
+        agent_id = register_data["agent"]["id"]
+        original_api_key = register_data["api_key"]
+        assert original_api_key
+
+        rotation_response = await async_client.post(
+            f"/api/agents/{agent_id}/rotate-api-key",
+            json={"reason": "lost local key file"},
+            headers=admin_headers,
+        )
+        assert rotation_response.status_code == 200
+        rotation_data = rotation_response.json()
+        rotated_api_key = rotation_data["api_key"]
+        assert rotated_api_key
+        assert rotated_api_key != original_api_key
+        assert rotation_data["agent"]["api_key_prefix"] != register_data["agent"]["api_key_prefix"]
+
+        payload = {
+            "agent_uuid": "agent-rotate-001",
+            "observed_at": "2026-03-22T19:00:00Z",
+            "sequence_number": 1,
+            "full_snapshot": False,
+            "hostname": "rotate-host-01",
+            "agent_version": "0.1.0",
+            "platform": "linux",
+            "platform_release": "6.12",
+            "addresses": [
+                {
+                    "ip_address": "10.40.0.5",
+                    "interface": "eth0",
+                    "prefix_length": 24,
+                    "mac_address": "AA:BB:CC:DD:40:05",
+                }
+            ],
+            "neighbors": [],
+            "connections": [],
+            "routes": [],
+        }
+
+        old_key_response = await async_client.post(
+            "/api/agents/check-in",
+            content=gzip.compress(json.dumps(payload).encode("utf-8")),
+            headers={
+                settings.AGENT_API_KEY_HEADER: original_api_key,
+                "Content-Encoding": "gzip",
+                "Content-Type": "application/json",
+            },
+        )
+        assert old_key_response.status_code == 401
+
+        new_key_response = await async_client.post(
+            "/api/agents/check-in",
+            content=gzip.compress(json.dumps(payload).encode("utf-8")),
+            headers={
+                settings.AGENT_API_KEY_HEADER: rotated_api_key,
+                "Content-Encoding": "gzip",
+                "Content-Type": "application/json",
+            },
+        )
+        assert new_key_response.status_code == 200
+        assert new_key_response.json()["status"] == "accepted"
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one()
+        assert agent.api_key_hash is not None
+        assert agent.api_key_prefix == rotation_data["agent"]["api_key_prefix"]

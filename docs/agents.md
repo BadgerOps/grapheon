@@ -1,8 +1,8 @@
 # Passive Agents
 
-Graphēon now has the backend foundation for a low-impact passive agent fleet. The MVP stays intentionally conservative: outbound-only check-in, no active scanning, slow cadence, and reuse of Graphēon's existing host, ARP, connection, and import models.
+Graphēon now has the backend foundation and the first host-side runtime for a low-impact passive agent fleet. The MVP stays intentionally conservative: outbound-only check-in, no active scanning, slow cadence, and reuse of Graphēon's existing host, ARP, connection, and import models.
 
-For a concrete API walkthrough, see `docs/agent_quickstart.md`.
+For a concrete runtime walkthrough, see `docs/agent_quickstart.md`. For host-side implementation notes, see `agent/README.md`.
 
 ## MVP Shape
 
@@ -28,6 +28,7 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `PATCH /api/agents/{id}` - Update agent registry metadata or policy assignment.
 - `POST /api/agents/{id}/approve` - Approve a pending agent.
 - `POST /api/agents/{id}/reject` - Reject a pending agent.
+- `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue a per-agent API key once.
 - `GET /api/agents/{id}/checkins` - List check-in history for one agent.
 - `GET /api/agents/policies` - List passive collection policies.
 - `POST /api/agents/policies` - Create a passive collection policy.
@@ -95,7 +96,7 @@ This keeps the agent side easy to reason about and avoids unexpected CPU or netw
 
 ## Report Model
 
-The ingest endpoint currently expects a normalized JSON payload. That keeps server-side ingest useful before Graphēon ships a packaged collector that converts raw command output into a stable schema.
+The ingest endpoint expects a normalized JSON payload. The current host-side runtime converts local command output into that schema and sends gzip-compressed reports.
 
 The payload includes:
 
@@ -119,12 +120,36 @@ The ingest path upserts:
 
 No automatic correlation run is triggered on every check-in in the MVP. That keeps steady-state ingest cheap. Operators can still run the existing correlation workflow separately.
 
+## Runtime Notes
+
+The shipped runtime lives in `agent/grapheon_agent.py` and is designed to be run from `deploy/grapheon-agent.service` and `deploy/grapheon-agent.timer`.
+
+Current behavior:
+
+- stores `agent_uuid`, API key, and cached state locally
+- registers with an enrollment key until approved
+- re-registers once approved to receive the per-agent API key
+- supports direct manual execution with CLI flags in addition to the shipped `systemd` units
+- ships as both a GHCR container image and a GitHub release tarball for distribution
+- uses cached backend policy for:
+  - `checkin_interval_seconds`
+  - `jitter_seconds`
+  - `command_timeout_seconds`
+  - `enabled_commands`
+- computes deltas as set differences against the last successful local snapshot
+- still sends a heartbeat check-in even when there are no new entries, using empty delta arrays
+
+Current limitation:
+
+- removals are not represented in the delta payload because the backend MVP only ingests additive/update observations
+
 ## Authentication Notes
 
 - Enrollment keys are admin-created bootstrap secrets.
 - Enrollment keys are stored hashed server-side.
 - Per-agent API keys are distinct from enrollment keys.
 - Per-agent API keys are stored hashed server-side.
+- Admins can rotate a per-agent API key and receive the new raw secret once.
 - `agent_uuid` is the durable agent identity.
 - API keys authenticate the caller but do not define identity.
 
@@ -135,8 +160,6 @@ The backend verifies:
 
 ## What This Slice Does Not Yet Do
 
-- Package or ship the actual host-side collector/service
 - Parse raw `ip neigh` or `ss` output on the server
-- Rotate per-agent API keys through the agent protocol
 - Surface fleet views in the frontend
 - Issue client certificates or require mTLS for agents

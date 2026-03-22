@@ -1082,6 +1082,21 @@ class AgentApprovalRequest(BaseModel):
     display_name: Optional[str] = Field(None, max_length=255)
 
 
+class AgentApiKeyRotateRequest(BaseModel):
+    """Admin metadata for rotating an agent API key."""
+
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class AgentApiKeyRotateResponse(BaseModel):
+    """One-time response returned when an agent API key is rotated."""
+
+    api_key: str
+    server_time: datetime
+    message: Optional[str] = None
+    agent: AgentResponse
+
+
 class AgentRejectRequest(BaseModel):
     """Admin rejection metadata for a pending agent."""
 

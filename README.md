@@ -57,7 +57,7 @@ See `docs/README.md` for the full documentation index, `docs/deployment.md` for 
 
 ## Passive Agents
 
-The backend now includes the first passive agent slice: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, and an outbound-only check-in API that accepts compressed normalized reports and writes them into the existing host, ARP, connection, and import models. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
+Graphēon now includes the first passive agent slice end to end: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, an outbound-only check-in API, and a lightweight host-side runtime with `systemd` service/timer units. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
 
 ## Deployment
 
@@ -87,17 +87,20 @@ docker run -d --name grapheon-frontend \
 
 Access the UI at `http://localhost:8080`. See `docs/deployment.md` for the full guide including docker compose examples.
 
-## Container Releases
+## Component Releases
 
-Graphēon publishes separate backend and frontend images to GHCR on pushes to `master` when a new version is detected:
+Graphēon publishes separate backend, frontend, and passive-agent releases on pushes to `master` when a new version is detected:
 
 - Backend tags use `backend-vX.Y.Z`
 - Frontend tags use `frontend-vX.Y.Z`
+- Agent tags use `agent-vX.Y.Z`
 
-The release workflow builds:
+The release workflow builds and publishes:
 
 - `ghcr.io/badgerops/grapheon-backend:latest` and `:vX.Y.Z`
 - `ghcr.io/badgerops/grapheon-frontend:latest` and `:vX.Y.Z`
+- `ghcr.io/badgerops/grapheon-agent:latest` and `:vX.Y.Z`
+- `grapheon-agent-vX.Y.Z.tar.gz` as a GitHub release artifact on the matching `agent-vX.Y.Z` release
 
 See `docs/release-process.md` and `docs/example_deployment.md` for the full workflow.
 

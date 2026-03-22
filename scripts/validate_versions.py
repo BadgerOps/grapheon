@@ -42,10 +42,24 @@ def check_frontend() -> list[str]:
     return errors
 
 
+def check_agent() -> list[str]:
+    errors: list[str] = []
+    version_file = ROOT / "agent" / "VERSION"
+    changelog = ROOT / "agent" / "CHANGELOG.md"
+    version = version_file.read_text(encoding="utf-8").strip()
+    changelog_version_value = changelog_version(changelog)
+    if version != changelog_version_value:
+        errors.append(
+            f"Agent version mismatch: VERSION={version} CHANGELOG={changelog_version_value}"
+        )
+    return errors
+
+
 def main() -> int:
     errors = []
     errors.extend(check_backend())
     errors.extend(check_frontend())
+    errors.extend(check_agent())
 
     if errors:
         for error in errors:

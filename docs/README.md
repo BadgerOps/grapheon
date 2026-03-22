@@ -8,6 +8,7 @@ This folder documents how Graphēon works end-to-end. The codebase standardizes 
 - `docs/auth_provider.md` - Authentication providers, OIDC setup, rollout modes, and RBAC.
 - `docs/agents.md` - Passive agent registry, enrollment flow, and API-key-backed ingest model.
 - `docs/agent_quickstart.md` - Step-by-step passive agent bootstrap, approval, and check-in guide.
+- `agent/README.md` - Host-side passive agent runtime implementation notes.
 - `docs/imports.md` - Import pipeline, parsers, and supported data sources.
 - `docs/tagging-correlation.md` - Tagging rules and correlation behavior.
 - `docs/testing.md` - Test suite, pytest configuration, CI pipeline, and running tests.

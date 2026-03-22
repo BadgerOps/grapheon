@@ -4,6 +4,12 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.0 - 2026-03-22
+### Added
+- **Passive agent backend APIs**: agent registry, enrollment keys, approval workflow, low-impact collection policies, agent check-in audit history, and normalized ingest endpoints for passive host observations
+- **Passive agent report ingest**: `POST /api/agents/check-in` now accepts gzip-compressed normalized agent reports and writes observations into the existing host, ARP, connection, and raw import models
+- **Agent API-key recovery**: new `POST /api/agents/{id}/rotate-api-key` endpoint lets admins rotate and reissue a per-agent API key without re-enrolling the host
+
 ## 0.9.3 - 2026-03-16
 ### Added
 - **WAL checkpoint before backup**: `POST /api/maintenance/backup` now runs `PRAGMA wal_checkpoint(TRUNCATE)` to flush all pending WAL writes into the main database file before copying, ensuring backups are fully self-contained and consistent

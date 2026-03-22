@@ -29,6 +29,8 @@ from models import (
 )
 from schemas import (
     AgentApprovalRequest,
+    AgentApiKeyRotateRequest,
+    AgentApiKeyRotateResponse,
     AgentCheckInRecordResponse,
     AgentCheckInRequest,
     AgentCheckInResponse,
@@ -76,6 +78,14 @@ def _hash_secret(raw_secret: str) -> str:
 def _generate_secret(prefix: str) -> tuple[str, str]:
     token = f"{prefix}_{secrets.token_urlsafe(32)}"
     return token, token[:20]
+
+
+def _issue_agent_api_key(agent: Agent, issued_at: datetime) -> str:
+    raw_api_key, api_key_prefix = _generate_secret(AGENT_API_KEY_PREFIX)
+    agent.api_key_hash = _hash_secret(raw_api_key)
+    agent.api_key_prefix = api_key_prefix
+    agent.api_key_issued_at = issued_at
+    return raw_api_key
 
 
 def _decode_request_body(body: bytes, content_encoding: Optional[str]) -> bytes:
@@ -1020,11 +1030,7 @@ async def register_agent(
     await db.flush()
 
     if agent.enrollment_state == "active" and not agent.api_key_hash:
-        raw_api_key, api_key_prefix = _generate_secret(AGENT_API_KEY_PREFIX)
-        agent.api_key_hash = _hash_secret(raw_api_key)
-        agent.api_key_prefix = api_key_prefix
-        agent.api_key_issued_at = now
-        issued_api_key = raw_api_key
+        issued_api_key = _issue_agent_api_key(agent, now)
 
     try:
         await db.commit()
@@ -1179,6 +1185,68 @@ async def reject_agent(
         details={"agent_uuid": agent.agent_uuid},
     )
     return _agent_response(agent)
+
+
+@router.post("/{agent_id}/rotate-api-key", response_model=AgentApiKeyRotateResponse)
+async def rotate_agent_api_key(
+    agent_id: int,
+    rotation: AgentApiKeyRotateRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await _get_agent_or_404(db, agent_id)
+
+    if not agent.is_active:
+        raise HTTPException(status_code=409, detail="Inactive agents cannot receive API keys")
+    if agent.enrollment_state != "active":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only active agents can rotate API keys ({agent.enrollment_state})",
+        )
+
+    previous_prefix = agent.api_key_prefix
+    rotated_api_key = _issue_agent_api_key(agent, _utcnow())
+
+    await db.commit()
+    await db.refresh(agent)
+    policy_map = await _load_policy_map(
+        db,
+        [agent.policy_id] if agent.policy_id else [],
+    )
+    enrollment_key_map = await _load_enrollment_key_map(
+        db,
+        [agent.enrollment_key_id] if agent.enrollment_key_id else [],
+    )
+    default_policy_map = await _load_policy_map(
+        db,
+        [
+            enrollment_key.default_policy_id
+            for enrollment_key in enrollment_key_map.values()
+            if enrollment_key.default_policy_id
+        ],
+    )
+    policy_map.update(default_policy_map)
+    await _attach_key_and_policy(agent, policy_map, enrollment_key_map)
+
+    audit.log(
+        action="ROTATE_API_KEY",
+        actor="user",
+        resource="Agent",
+        resource_id=str(agent.id),
+        status="success",
+        details={
+            "agent_uuid": agent.agent_uuid,
+            "previous_api_key_prefix": previous_prefix,
+            "reason": rotation.reason,
+        },
+    )
+
+    return AgentApiKeyRotateResponse(
+        api_key=rotated_api_key,
+        server_time=_utcnow(),
+        message="Agent API key rotated; update the deployed host with the new key",
+        agent=_agent_response(agent),
+    )
 
 
 @router.get("/{agent_id}/checkins", response_model=PaginatedResponse)

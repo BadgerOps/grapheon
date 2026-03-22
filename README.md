@@ -45,7 +45,7 @@ export LOCAL_ADMIN_PASSWORD=changeme
 export JWT_SECRET=$(openssl rand -hex 32)
 ```
 
-The admin user is created automatically on first startup. Auth is enabled by default but not enforced (`ENFORCE_AUTH=False`), so existing deployments continue to work without interruption.
+The admin user is created automatically on first startup. Auth is enabled by default but not fully enforced (`ENFORCE_AUTH=False`): read-only endpoints remain accessible without login, but write/admin actions require authentication.
 
 Set `ENFORCE_AUTH=True` when ready to require login for all users.
 

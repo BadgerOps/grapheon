@@ -176,12 +176,18 @@ def require_role(*allowed_roles: str):
 
         # When auth is enabled but not enforced, be permissive
         if not settings.ENFORCE_AUTH and not credentials:
-            return User(
-                id=0,
-                username="anonymous",
-                email="anon@localhost",
-                role="admin",
-                is_active=True,
+            if "viewer" in allowed_roles:
+                return User(
+                    id=0,
+                    username="anonymous-viewer",
+                    email="anon-viewer@localhost",
+                    role="viewer",
+                    is_active=True,
+                )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required for write access",
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         # Full auth check

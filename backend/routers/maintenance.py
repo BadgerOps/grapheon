@@ -344,7 +344,11 @@ async def create_backup(user: User = Depends(require_admin), db: AsyncSession = 
     # Get backup file size
     backup_size = os.path.getsize(backup_path)
 
-    audit.log_backup_restore(operation="backup", filename=backup_filename)
+    audit.log_backup_restore(
+        operation="backup",
+        filename=backup_filename,
+        status="success",
+    )
 
     # ── Retention policy ────────────────────────────────────────────
     pruned = _enforce_retention(backup_dir)
@@ -643,7 +647,11 @@ async def restore_backup(filename: str, user: User = Depends(require_admin)):
         logger.error(f"Restore failed: {e}")
         raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
 
-    audit.log_backup_restore(operation="restore", filename=filename)
+    audit.log_backup_restore(
+        operation="restore",
+        filename=filename,
+        status="success",
+    )
 
     return {
         "success": True,
@@ -732,7 +740,11 @@ async def upload_backup(file: UploadFile = File(...), user: User = Depends(requi
 
     file_size = os.path.getsize(dest_path)
 
-    audit.log_backup_restore(operation="upload", filename=safe_filename)
+    audit.log_backup_restore(
+        operation="upload",
+        filename=safe_filename,
+        status="success",
+    )
 
     return {
         "success": True,

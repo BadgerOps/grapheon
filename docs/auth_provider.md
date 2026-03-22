@@ -95,7 +95,7 @@ The system provides:
 
 - **Flexible deployment modes:**
   - **Public mode** (optional): All endpoints are public; one synthetic admin user
-  - **Transition mode** (AUTH_ENABLED=true, ENFORCE_AUTH=false): Unauthenticated requests get anonymous admin access
+  - **Transition mode** (AUTH_ENABLED=true, ENFORCE_AUTH=false): Unauthenticated requests remain read-only, authenticated users use their real roles
   - **Production mode** (AUTH_ENABLED=true, ENFORCE_AUTH=true): All endpoints require valid JWT
 
 - **JWT-based stateless authentication:**
@@ -173,7 +173,7 @@ Behavior:
 - A synthetic admin user is automatically created for API access
 - Ideal for testing auth code paths without requiring external setup
 
-### Phase 2: Auth Enabled, Unauthenticated = Anonymous Admin (Staging)
+### Phase 2: Auth Enabled, Unauthenticated = Read-Only (Staging)
 
 Enable auth but allow unauthenticated requests:
 
@@ -187,10 +187,10 @@ LOCAL_ADMIN_PASSWORD="StagingPassword123!"
 
 Behavior:
 - Auth system is active (JWT validation runs)
-- Unauthenticated requests are given anonymous admin access (maximum permissiveness)
+- Unauthenticated requests retain read-only access
 - Authenticated users use their real roles
-- Allows users to log in at their own pace
-- Gives teams time to configure OIDC providers
+- Write/admin routes require authentication immediately
+- Allows users to log in at their own pace while preventing anonymous changes
 
 **Recommended duration:** 2–4 weeks
 

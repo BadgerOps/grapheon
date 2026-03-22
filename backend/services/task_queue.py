@@ -35,6 +35,7 @@ class TaskStatus(str, Enum):
 class TaskInfo:
     id: str
     task_type: str  # "import", "correlation", "cleanup"
+    owner_user_id: Optional[int] = None
     status: TaskStatus = TaskStatus.PENDING
     progress: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
@@ -109,6 +110,7 @@ class TaskQueue:
         self,
         task_type: str,
         coro_factory: Callable[[], Coroutine],
+        owner_user_id: Optional[int] = None,
     ) -> str:
         """
         Enqueue a task and return its ID immediately.
@@ -118,22 +120,42 @@ class TaskQueue:
         creating the coroutine before it can be awaited.
         """
         task_id = str(uuid.uuid4())
-        self._tasks[task_id] = TaskInfo(id=task_id, task_type=task_type)
+        self._tasks[task_id] = TaskInfo(
+            id=task_id,
+            task_type=task_type,
+            owner_user_id=owner_user_id,
+        )
         self._ensure_worker(task_type)
         self._queues[task_type].put_nowait((task_id, coro_factory))
         logger.info(f"Task {task_id} ({task_type}) enqueued")
         return task_id
 
-    def get_task(self, task_id: str) -> Optional[TaskInfo]:
-        return self._tasks.get(task_id)
+    def get_task(
+        self,
+        task_id: str,
+        owner_user_id: Optional[int] = None,
+        include_all: bool = False,
+    ) -> Optional[TaskInfo]:
+        task = self._tasks.get(task_id)
+        if task is None:
+            return None
+        if include_all or owner_user_id is None:
+            return task
+        if task.owner_user_id == owner_user_id:
+            return task
+        return None
 
     def list_tasks(
         self,
         task_type: Optional[str] = None,
         status: Optional[TaskStatus] = None,
         limit: int = 50,
+        owner_user_id: Optional[int] = None,
+        include_all: bool = False,
     ) -> list[TaskInfo]:
         tasks = list(self._tasks.values())
+        if not include_all and owner_user_id is not None:
+            tasks = [t for t in tasks if t.owner_user_id == owner_user_id]
         if task_type:
             tasks = [t for t in tasks if t.task_type == task_type]
         if status:

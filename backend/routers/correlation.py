@@ -101,6 +101,7 @@ async def run_correlation(
         task_id = task_queue.submit(
             "correlation",
             _run_correlation_background,
+            owner_user_id=user.id,
         )
 
         return {

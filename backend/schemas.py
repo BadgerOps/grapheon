@@ -537,7 +537,7 @@ class RawImportFields(BaseModel):
     import_type: str
     filename: Optional[str] = Field(None, max_length=500)
     source_host: Optional[str] = None
-    raw_data: str
+    raw_data: Optional[str] = None
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
 

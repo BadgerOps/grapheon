@@ -7,7 +7,8 @@ NOTE/TODO: Future enhancements planned:
   should start with <?xml or <!-- Nmap)
 - Enforce organization-specific file type policies
 
-Currently this module logs validation warnings but does NOT reject files.
+Currently this module returns validation warnings and errors. Callers decide
+whether to reject uploads based on ``errors``.
 """
 
 import logging
@@ -49,7 +50,7 @@ class FileValidationResult:
 def check_file_size(content_length: int) -> Optional[str]:
     """Check if file size is within allowed limits.
 
-    Returns warning message if oversized, None if OK.
+    Returns an error message if oversized, None if OK.
     """
     if content_length > MAX_FILE_SIZE_BYTES:
         return (
@@ -113,10 +114,10 @@ def validate_upload(
     result = FileValidationResult()
 
     # Size check
-    size_warning = check_file_size(len(content))
-    if size_warning:
-        result.warnings.append(size_warning)
-        logger.warning(f"File validation: {size_warning}")
+    size_error = check_file_size(len(content))
+    if size_error:
+        result.errors.append(size_error)
+        logger.warning(f"File validation: {size_error}")
 
     # Extension check
     ext_warning = check_file_extension(filename)

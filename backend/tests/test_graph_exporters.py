@@ -16,6 +16,7 @@ from database import Base, get_db
 from main import app
 from export_converters.graphml_exporter import cytoscape_to_graphml
 from export_converters.drawio_exporter import cytoscape_to_drawio
+from services.task_queue import task_queue
 
 
 # ── Test data ────────────────────────────────────────────────────────
@@ -407,6 +408,7 @@ async def async_client():
         yield client
 
     app.dependency_overrides.clear()
+    await task_queue.shutdown()
     await engine.dispose()
 
 
@@ -414,8 +416,9 @@ class TestGraphExportEndpoints:
     """Integration tests for the /api/export/network/* endpoints."""
 
     @pytest.mark.asyncio
-    async def test_graphml_endpoint_returns_xml(self, async_client):
-        response = await async_client.get("/api/export/network/graphml")
+    async def test_graphml_endpoint_returns_xml(self, async_client, auth_headers):
+        headers = await auth_headers("editor", "graphml_endpoint")
+        response = await async_client.get("/api/export/network/graphml", headers=headers)
         assert response.status_code == 200
         assert "application/xml" in response.headers["content-type"]
         assert response.headers["content-disposition"].endswith(".graphml")
@@ -424,8 +427,9 @@ class TestGraphExportEndpoints:
         assert root.tag.endswith("graphml")
 
     @pytest.mark.asyncio
-    async def test_drawio_endpoint_returns_xml(self, async_client):
-        response = await async_client.get("/api/export/network/drawio")
+    async def test_drawio_endpoint_returns_xml(self, async_client, auth_headers):
+        headers = await auth_headers("editor", "drawio_endpoint")
+        response = await async_client.get("/api/export/network/drawio", headers=headers)
         assert response.status_code == 200
         assert "application/xml" in response.headers["content-type"]
         assert response.headers["content-disposition"].endswith(".drawio")
@@ -433,25 +437,30 @@ class TestGraphExportEndpoints:
         assert root.tag == "mxfile"
 
     @pytest.mark.asyncio
-    async def test_graphml_with_subnet_filter(self, async_client):
+    async def test_graphml_with_subnet_filter(self, async_client, auth_headers):
+        headers = await auth_headers("editor", "graphml_subnet_filter")
         response = await async_client.get(
             "/api/export/network/graphml",
             params={"subnet_filter": "192.168.1.0/24"},
+            headers=headers,
         )
         assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_drawio_with_show_internet_hide(self, async_client):
+    async def test_drawio_with_show_internet_hide(self, async_client, auth_headers):
+        headers = await auth_headers("editor", "drawio_show_internet")
         response = await async_client.get(
             "/api/export/network/drawio",
             params={"show_internet": "hide"},
+            headers=headers,
         )
         assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_graphml_empty_database(self, async_client):
+    async def test_graphml_empty_database(self, async_client, auth_headers):
         """Empty database should still return valid GraphML."""
-        response = await async_client.get("/api/export/network/graphml")
+        headers = await auth_headers("editor", "graphml_empty_db")
+        response = await async_client.get("/api/export/network/graphml", headers=headers)
         assert response.status_code == 200
         root = ET.fromstring(response.text)
         ns = "http://graphml.graphdrawing.org/xmlns"
@@ -459,9 +468,10 @@ class TestGraphExportEndpoints:
         assert len(nodes) == 0
 
     @pytest.mark.asyncio
-    async def test_drawio_empty_database(self, async_client):
+    async def test_drawio_empty_database(self, async_client, auth_headers):
         """Empty database should still return valid draw.io XML."""
-        response = await async_client.get("/api/export/network/drawio")
+        headers = await auth_headers("editor", "drawio_empty_db")
+        response = await async_client.get("/api/export/network/drawio", headers=headers)
         assert response.status_code == 200
         root = ET.fromstring(response.text)
         mx_root = root.find(".//root")

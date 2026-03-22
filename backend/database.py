@@ -122,15 +122,55 @@ def _run_migrations(sync_conn) -> None:
     _make_column_nullable(sync_conn, "connections", "remote_port")
     _make_column_nullable(sync_conn, "raw_imports", "raw_data")
 
+    _ensure_columns(
+        sync_conn,
+        "agents",
+        [
+            ("enrollment_key_id", "enrollment_key_id INTEGER"),
+            ("approval_required", "approval_required BOOLEAN DEFAULT 1"),
+            ("api_key_hash", "api_key_hash VARCHAR(64)"),
+            ("api_key_prefix", "api_key_prefix VARCHAR(32)"),
+            ("approved_at", "approved_at DATETIME"),
+            ("rejected_at", "rejected_at DATETIME"),
+            ("api_key_issued_at", "api_key_issued_at DATETIME"),
+            ("last_registration_at", "last_registration_at DATETIME"),
+            ("last_mac_addresses", "last_mac_addresses JSON"),
+            ("last_registration_summary", "last_registration_summary JSON"),
+        ],
+    )
+    _ensure_columns(
+        sync_conn,
+        "agent_checkins",
+        [
+            ("auth_method", "auth_method VARCHAR(50)"),
+            ("api_key_prefix", "api_key_prefix VARCHAR(32)"),
+        ],
+    )
+    _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_id", "agents", "enrollment_key_id")
+    _create_index_if_missing(sync_conn, "idx_agent_api_key_hash", "agents", "api_key_hash")
+    _create_index_if_missing(sync_conn, "idx_agent_api_key_prefix", "agents", "api_key_prefix")
+    _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_is_active", "agent_enrollment_keys", "is_active")
+    _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_default_policy_id", "agent_enrollment_keys", "default_policy_id")
+    _create_index_if_missing(sync_conn, "idx_agent_checkin_api_key_prefix", "agent_checkins", "api_key_prefix")
+
 
 def _ensure_columns(sync_conn, table: str, columns: list[tuple[str, str]]) -> None:
-    existing = [
-        row[1]
-        for row in sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    ]
+    rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    if not rows:
+        return
+    existing = [row[1] for row in rows]
     for column_name, ddl in columns:
         if column_name not in existing:
             sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+
+
+def _create_index_if_missing(sync_conn, index_name: str, table: str, column: str) -> None:
+    rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    if not rows:
+        return
+    sync_conn.execute(
+        text(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table} ("{column}")')
+    )
 
 
 def _make_column_nullable(sync_conn, table: str, column: str) -> None:

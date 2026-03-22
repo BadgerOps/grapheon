@@ -22,6 +22,7 @@ from routers import (
     vlans_router,
     updates_router,
     device_identities_router,
+    agents_router,
     tasks_router,
 )
 from utils.logging_utils import setup_logging, get_logger
@@ -237,6 +238,7 @@ app.include_router(maintenance_router)
 app.include_router(vlans_router)
 app.include_router(updates_router)
 app.include_router(device_identities_router)
+app.include_router(agents_router)
 app.include_router(tasks_router)
 
 

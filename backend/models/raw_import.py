@@ -18,7 +18,8 @@ class RawImport(Base):
     source_host = Column(String(255), nullable=True)
 
     # Raw data
-    raw_data = Column(Text, nullable=False)
+    raw_data = Column(Text, nullable=True)
+    stored_file_path = Column(String(1024), nullable=True)
 
     # Parse results
     parse_status = Column(String(50), default="pending")  # pending/success/failed/partial

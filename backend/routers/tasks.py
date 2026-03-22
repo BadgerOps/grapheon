@@ -27,7 +27,11 @@ async def get_task_status(
 
     Returns task state, progress, result (if complete), or error (if failed).
     """
-    task = task_queue.get_task(task_id)
+    task = task_queue.get_task(
+        task_id,
+        owner_user_id=user.id,
+        include_all=user.role == "admin",
+    )
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task.to_dict()
@@ -52,7 +56,13 @@ async def list_tasks(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
-    tasks = task_queue.list_tasks(task_type=task_type, status=status_filter, limit=limit)
+    tasks = task_queue.list_tasks(
+        task_type=task_type,
+        status=status_filter,
+        limit=limit,
+        owner_user_id=user.id,
+        include_all=user.role == "admin",
+    )
     return {
         "total": len(tasks),
         "items": [t.to_dict() for t in tasks],

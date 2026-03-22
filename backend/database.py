@@ -105,6 +105,7 @@ def _run_migrations(sync_conn) -> None:
         "raw_imports",
         [
             ("source_host", "source_host VARCHAR(255)"),
+            ("stored_file_path", "stored_file_path VARCHAR(1024)"),
         ],
     )
 
@@ -119,6 +120,7 @@ def _run_migrations(sync_conn) -> None:
 
     # Migrate connections table: make remote_port nullable (for LISTEN state)
     _make_column_nullable(sync_conn, "connections", "remote_port")
+    _make_column_nullable(sync_conn, "raw_imports", "raw_data")
 
 
 def _ensure_columns(sync_conn, table: str, columns: list[tuple[str, str]]) -> None:

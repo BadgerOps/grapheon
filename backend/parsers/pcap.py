@@ -11,7 +11,9 @@ Requires: scapy (pip install scapy)
 """
 
 import importlib.util
+import io
 import logging
+import os
 from datetime import datetime
 from typing import Optional, Dict, Set, Tuple
 from collections import defaultdict
@@ -97,14 +99,12 @@ class PcapParser(BaseParser):
 
         return None
 
-    def parse(self, data: str, format_hint: Optional[str] = None) -> ParseResult:
+    def parse(self, data: str | bytes, format_hint: Optional[str] = None) -> ParseResult:
         """
         Parse PCAP data and extract connection flows.
 
-        Note: This method expects a file path, not raw data, due to binary nature of PCAP.
-
         Args:
-            data: Path to PCAP file
+            data: Path to PCAP file, tcpdump text, or raw PCAP bytes
             format_hint: Optional format hint
 
         Returns:
@@ -131,9 +131,14 @@ class PcapParser(BaseParser):
         try:
             from scapy.all import rdpcap, IP, IPv6, TCP, UDP, ICMP
 
-            # Read packets
+            # Read packets from path or in-memory bytes.
             logger.info("Loading PCAP file with scapy...")
-            packets = rdpcap(data)
+            if isinstance(data, (bytes, bytearray)):
+                packets = rdpcap(io.BytesIO(data))
+            elif isinstance(data, str) and os.path.exists(data):
+                packets = rdpcap(data)
+            else:
+                return self._parse_tcpdump_text(str(data), result)
             logger.info(f"Loaded {len(packets)} packets")
 
             # Track flows

@@ -61,7 +61,7 @@ Routers are registered in `backend/main.py`:
 
 ## Authentication
 
-API endpoints use role-based dependencies with JWT Bearer tokens. By default (`AUTH_ENABLED=True`, `ENFORCE_AUTH=False`), unauthenticated requests are still permitted; set `ENFORCE_AUTH=True` to require JWTs for all protected routes. The system supports:
+API endpoints use role-based dependencies with JWT Bearer tokens. By default (`AUTH_ENABLED=True`, `ENFORCE_AUTH=False`), unauthenticated requests still have read-only access, while write/admin routes require authentication; set `ENFORCE_AUTH=True` to require JWTs for all protected routes. The system supports:
 
 - **Multi-provider OIDC** — Okta, Google, GitHub, GitLab, Authentik, or any compliant IdP
 - **Local admin fallback** — bootstrap/break-glass credentials via environment variables

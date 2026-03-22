@@ -15,6 +15,7 @@ from auth.dependencies import require_any_authenticated, require_editor
 from schemas import RawImportResponse, PaginatedResponse
 from parsers import get_parser, PARSERS
 from config import settings
+from services.file_validator import MAX_FILE_SIZE_BYTES, validate_upload
 from services.task_queue import task_queue
 from utils.tagging import (
     build_host_tags,
@@ -54,16 +55,8 @@ def _save_upload_to_disk(filename: Optional[str], content: bytes) -> Optional[st
 
     Returns the saved file path, or None if save was skipped.
     """
-    from services.file_validator import validate_upload
-
-    validation = validate_upload(filename, content)
-    if validation.warnings:
-        logger.info(f"Upload validation warnings for {filename}: {validation.warnings}")
-
     upload_dir = Path(settings.UPLOAD_DIR)
-    if not upload_dir.exists():
-        logger.warning(f"Upload directory does not exist: {upload_dir}, skipping disk save")
-        return None
+    upload_dir.mkdir(parents=True, exist_ok=True)
 
     # UUID prefix avoids filename collisions
     safe_filename = f"{uuid.uuid4().hex[:8]}_{filename or 'upload.dat'}"
@@ -71,6 +64,25 @@ def _save_upload_to_disk(filename: Optional[str], content: bytes) -> Optional[st
     disk_path.write_bytes(content)
     logger.info(f"Saved upload to disk: {disk_path}")
     return str(disk_path)
+
+
+def _validate_uploaded_content(filename: Optional[str], content: bytes) -> None:
+    validation = validate_upload(filename, content)
+    if validation.warnings:
+        logger.info(f"Upload validation warnings for {filename}: {validation.warnings}")
+    if validation.errors:
+        detail = "; ".join(validation.errors)
+        status_code = 413 if len(content) > MAX_FILE_SIZE_BYTES else 400
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
+def _decode_upload_content(source_type: str, content: bytes) -> Optional[str]:
+    if source_type == "pcap":
+        return None
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content.decode("latin-1")
 
 
 async def _upsert_host_from_value(
@@ -150,7 +162,7 @@ async def _process_import(
     db: AsyncSession,
     import_record: RawImport,
     source_type: str,
-    raw_data: str,
+    parse_input: str | bytes,
 ) -> None:
     """Parse raw data and create database records."""
 
@@ -163,7 +175,7 @@ async def _process_import(
     try:
         logger.debug(f"Getting parser for source_type={source_type}")
         parser = get_parser(source_type)
-        result = parser.parse(raw_data)
+        result = parser.parse(parse_input)
         logger.debug(f"Parse result: success={result.success}, hosts={len(result.hosts)}, errors={result.errors}")
 
         if not result.success:
@@ -420,7 +432,12 @@ async def _process_import(
         import_record.error_message = str(e)
 
 
-async def _run_import_background(import_id: int, source_type: str, raw_data: str, source_host: Optional[str], filename: Optional[str]) -> dict:
+async def _run_import_background(
+    import_id: int,
+    source_type: str,
+    source_host: Optional[str],
+    filename: Optional[str],
+) -> dict:
     """
     Execute import processing in a background task with its own DB session.
 
@@ -434,7 +451,10 @@ async def _run_import_background(import_id: int, source_type: str, raw_data: str
 
         if source_host:
             await _upsert_host_from_value(db, source_host, "import_source")
-        await _process_import(db, import_record, source_type, raw_data)
+        parse_input = import_record.stored_file_path if source_type == "pcap" else import_record.raw_data
+        if parse_input is None:
+            raise ValueError(f"Import record {import_id} has no input payload")
+        await _process_import(db, import_record, source_type, parse_input)
 
         await db.commit()
         await db.refresh(import_record)
@@ -506,7 +526,7 @@ async def import_raw_data(
 
     if sync:
         # Synchronous mode: process inline and return full result
-        await _run_import_background(import_id, source_type, raw_data, source_host, filename)
+        await _run_import_background(import_id, source_type, source_host, filename)
         async with AsyncSessionLocal() as db2:
             result = await db2.execute(select(RawImport).where(RawImport.id == import_id))
             refreshed = result.scalar_one()
@@ -515,7 +535,8 @@ async def import_raw_data(
     # Async mode: enqueue and return task ID immediately
     task_id = task_queue.submit(
         "import",
-        lambda _id=import_id, _st=source_type, _rd=raw_data, _sh=source_host, _fn=filename: _run_import_background(_id, _st, _rd, _sh, _fn),
+        lambda _id=import_id, _st=source_type, _sh=source_host, _fn=filename: _run_import_background(_id, _st, _sh, _fn),
+        owner_user_id=user.id,
     )
 
     return {
@@ -550,10 +571,12 @@ async def import_file(
     # Read file content
     try:
         content = await file.read()
-        # Save to disk for audit trail
-        _save_upload_to_disk(file.filename, content)
-        raw_data = content.decode("utf-8")
+        _validate_uploaded_content(file.filename, content)
+        stored_file_path = _save_upload_to_disk(file.filename, content)
+        raw_data = _decode_upload_content(source_type, content)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(
             status_code=400, detail=f"Failed to read file: {str(e)}"
         )
@@ -570,6 +593,7 @@ async def import_file(
         filename=file.filename,
         source_host=source_host,
         raw_data=raw_data,
+        stored_file_path=stored_file_path,
         tags=parsed_tags,
         notes=notes or (f"Source host: {source_host}" if source_host else None),
         parse_status="pending",
@@ -583,7 +607,7 @@ async def import_file(
     await db.commit()
 
     if sync:
-        await _run_import_background(import_id, source_type, raw_data, source_host, file_filename)
+        await _run_import_background(import_id, source_type, source_host, file_filename)
         async with AsyncSessionLocal() as db2:
             result = await db2.execute(select(RawImport).where(RawImport.id == import_id))
             refreshed = result.scalar_one()
@@ -591,7 +615,8 @@ async def import_file(
 
     task_id = task_queue.submit(
         "import",
-        lambda _id=import_id, _st=source_type, _rd=raw_data, _sh=source_host, _fn=file_filename: _run_import_background(_id, _st, _rd, _sh, _fn),
+        lambda _id=import_id, _st=source_type, _sh=source_host, _fn=file_filename: _run_import_background(_id, _st, _sh, _fn),
+        owner_user_id=user.id,
     )
 
     return {
@@ -698,7 +723,12 @@ async def reparse_import(import_id: int, user: User = Depends(require_editor), d
     return RawImportResponse.model_validate(import_record)
 
 
-async def _run_bulk_import_background(import_ids: list[int], source_type: str, file_data: list[dict], source_host: Optional[str]) -> dict:
+async def _run_bulk_import_background(
+    import_ids: list[int],
+    source_type: str,
+    filenames: list[str],
+    source_host: Optional[str],
+) -> dict:
     """
     Execute bulk import processing in a background task with its own DB session.
     """
@@ -713,7 +743,7 @@ async def _run_bulk_import_background(import_ids: list[int], source_type: str, f
         "errors": [],
     }
 
-    for i, (import_id, fdata) in enumerate(zip(import_ids, file_data)):
+    for i, (import_id, filename) in enumerate(zip(import_ids, filenames)):
         file_start = time.perf_counter()
         try:
             async with AsyncSessionLocal() as db:
@@ -724,13 +754,16 @@ async def _run_bulk_import_background(import_ids: list[int], source_type: str, f
 
                 if source_host:
                     await _upsert_host_from_value(db, source_host, "import_source")
-                await _process_import(db, import_record, source_type, fdata["raw_data"])
+                parse_input = import_record.stored_file_path if source_type == "pcap" else import_record.raw_data
+                if parse_input is None:
+                    raise ValueError(f"Import record {import_id} has no input payload")
+                await _process_import(db, import_record, source_type, parse_input)
                 await db.commit()
                 await db.refresh(import_record)
 
                 file_duration = (time.perf_counter() - file_start) * 1000
                 logger.info(
-                    f"[{i+1}/{len(import_ids)}] {fdata['filename']}: "
+                    f"[{i+1}/{len(import_ids)}] {filename}: "
                     f"status={import_record.parse_status}, "
                     f"records={import_record.parsed_count}, "
                     f"duration={file_duration:.1f}ms"
@@ -738,7 +771,7 @@ async def _run_bulk_import_background(import_ids: list[int], source_type: str, f
 
                 results["imports"].append({
                     "id": import_record.id,
-                    "filename": fdata["filename"],
+                    "filename": filename,
                     "status": import_record.parse_status,
                     "parsed_count": import_record.parsed_count,
                     "error": import_record.error_message,
@@ -750,8 +783,8 @@ async def _run_bulk_import_background(import_ids: list[int], source_type: str, f
                     results["failed"] += 1
 
         except Exception as e:
-            logger.error(f"[{i+1}/{len(import_ids)}] {fdata['filename']}: Error - {e}")
-            results["errors"].append({"filename": fdata["filename"], "error": str(e)})
+            logger.error(f"[{i+1}/{len(import_ids)}] {filename}: Error - {e}")
+            results["errors"].append({"filename": filename, "error": str(e)})
             results["failed"] += 1
 
     total_duration = (time.perf_counter() - start_time) * 1000
@@ -804,16 +837,14 @@ async def bulk_import_files(
 
     # Read all files and create import records up front
     import_ids = []
-    file_data = []
+    filenames = []
 
     for file in files:
         try:
             content = await file.read()
-            _save_upload_to_disk(file.filename, content)
-            try:
-                raw_data = content.decode("utf-8")
-            except UnicodeDecodeError:
-                raw_data = content.decode("latin-1")
+            _validate_uploaded_content(file.filename, content)
+            stored_file_path = _save_upload_to_disk(file.filename, content)
+            raw_data = _decode_upload_content(source_type, content)
 
             import_record = RawImport(
                 source_type=source_type,
@@ -821,6 +852,7 @@ async def bulk_import_files(
                 filename=file.filename,
                 source_host=source_host,
                 raw_data=raw_data,
+                stored_file_path=stored_file_path,
                 tags=parsed_tags,
                 notes=notes or (f"Source host: {source_host}" if source_host else None),
                 parse_status="pending",
@@ -829,7 +861,7 @@ async def bulk_import_files(
             db.add(import_record)
             await db.flush()
             import_ids.append(import_record.id)
-            file_data.append({"filename": file.filename, "raw_data": raw_data})
+            filenames.append(file.filename or f"import-{import_record.id}")
         except Exception as e:
             logger.error(f"Failed to read file {file.filename}: {e}")
             # Still try other files
@@ -837,11 +869,12 @@ async def bulk_import_files(
     await db.commit()
 
     if sync:
-        return await _run_bulk_import_background(import_ids, source_type, file_data, source_host)
+        return await _run_bulk_import_background(import_ids, source_type, filenames, source_host)
 
     task_id = task_queue.submit(
         "import",
-        lambda _ids=import_ids, _st=source_type, _fd=file_data, _sh=source_host: _run_bulk_import_background(_ids, _st, _fd, _sh),
+        lambda _ids=import_ids, _st=source_type, _files=filenames, _sh=source_host: _run_bulk_import_background(_ids, _st, _files, _sh),
+        owner_user_id=user.id,
     )
 
     return {

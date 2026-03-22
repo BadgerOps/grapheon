@@ -43,14 +43,15 @@ class TestHostsCRUD:
     """Host CRUD endpoint tests."""
 
     @pytest.mark.asyncio
-    async def test_create_host_valid(self, async_client: AsyncClient):
+    async def test_create_host_valid(self, async_client: AsyncClient, auth_headers):
         """POST /api/hosts with valid JSON returns 201."""
+        headers = await auth_headers("editor", "create_host_valid")
         payload = {
             "ip_address": "192.168.1.100",
             "hostname": "server01",
             "device_type": "server",
         }
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 201
         data = response.json()
         assert data["ip_address"] == "192.168.1.100"
@@ -59,10 +60,11 @@ class TestHostsCRUD:
         assert "id" in data
 
     @pytest.mark.asyncio
-    async def test_create_host_invalid_ip(self, async_client: AsyncClient):
+    async def test_create_host_invalid_ip(self, async_client: AsyncClient, auth_headers):
         """POST /api/hosts with invalid IP returns 422 with errors."""
+        headers = await auth_headers("editor", "invalid_ip")
         payload = {"ip_address": "not-an-ip"}
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 422
         data = response.json()
         assert "errors" in data
@@ -74,47 +76,51 @@ class TestHostsCRUD:
         assert "ip_address" in field_names
 
     @pytest.mark.asyncio
-    async def test_create_host_invalid_mac(self, async_client: AsyncClient):
+    async def test_create_host_invalid_mac(self, async_client: AsyncClient, auth_headers):
         """POST /api/hosts with invalid MAC returns 422."""
+        headers = await auth_headers("editor", "invalid_mac")
         payload = {
             "ip_address": "10.0.0.1",
             "mac_address": "invalid",
         }
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 422
         data = response.json()
         assert "errors" in data
 
     @pytest.mark.asyncio
-    async def test_create_host_invalid_device_type(self, async_client: AsyncClient):
+    async def test_create_host_invalid_device_type(self, async_client: AsyncClient, auth_headers):
         """POST /api/hosts with invalid device_type returns 422."""
+        headers = await auth_headers("editor", "invalid_device_type")
         payload = {
             "ip_address": "10.0.0.1",
             "device_type": "laptop",  # Not in VALID_DEVICE_TYPES
         }
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_create_host_invalid_criticality(self, async_client: AsyncClient):
+    async def test_create_host_invalid_criticality(self, async_client: AsyncClient, auth_headers):
         """POST /api/hosts with invalid criticality returns 422."""
+        headers = await auth_headers("editor", "invalid_criticality")
         payload = {
             "ip_address": "10.0.0.1",
             "criticality": "urgent",  # Not in VALID_CRITICALITIES
         }
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_list_hosts(self, async_client: AsyncClient):
+    async def test_list_hosts(self, async_client: AsyncClient, auth_headers):
         """GET /api/hosts returns 200 with items list."""
+        headers = await auth_headers("editor", "list_hosts")
         # Create a host first
         payload = {
             "ip_address": "10.1.1.10",
             "hostname": "testhost",
             "device_type": "workstation",
         }
-        create_response = await async_client.post("/api/hosts", json=payload)
+        create_response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert create_response.status_code == 201
 
         # Now list hosts
@@ -127,14 +133,15 @@ class TestHostsCRUD:
         assert data["items"][0]["ip_address"] == "10.1.1.10"
 
     @pytest.mark.asyncio
-    async def test_get_host_by_id(self, async_client: AsyncClient):
+    async def test_get_host_by_id(self, async_client: AsyncClient, auth_headers):
         """GET /api/hosts/{id} returns 200 with host data."""
+        headers = await auth_headers("editor", "get_host_by_id")
         # Create a host first
         payload = {
             "ip_address": "10.2.2.20",
             "hostname": "gethost",
         }
-        create_response = await async_client.post("/api/hosts", json=payload)
+        create_response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert create_response.status_code == 201
         host_id = create_response.json()["id"]
 
@@ -157,22 +164,26 @@ class TestValidationErrorFormat:
     """Validation error response format tests."""
 
     @pytest.mark.asyncio
-    async def test_422_has_detail_field(self, async_client: AsyncClient):
+    async def test_422_has_detail_field(self, async_client: AsyncClient, auth_headers):
         """422 response has 'detail' key."""
+        headers = await auth_headers("editor", "detail_field")
         response = await async_client.post(
             "/api/hosts",
             json={"ip_address": "invalid-ip"},
+            headers=headers,
         )
         assert response.status_code == 422
         data = response.json()
         assert "detail" in data
 
     @pytest.mark.asyncio
-    async def test_422_has_errors_array(self, async_client: AsyncClient):
+    async def test_422_has_errors_array(self, async_client: AsyncClient, auth_headers):
         """422 response has 'errors' array."""
+        headers = await auth_headers("editor", "errors_array")
         response = await async_client.post(
             "/api/hosts",
             json={"ip_address": "invalid-ip"},
+            headers=headers,
         )
         assert response.status_code == 422
         data = response.json()
@@ -181,11 +192,13 @@ class TestValidationErrorFormat:
         assert len(errors) > 0
 
     @pytest.mark.asyncio
-    async def test_422_error_has_field_and_message(self, async_client: AsyncClient):
+    async def test_422_error_has_field_and_message(self, async_client: AsyncClient, auth_headers):
         """Each error in array has 'field' and 'message' keys."""
+        headers = await auth_headers("editor", "field_message")
         response = await async_client.post(
             "/api/hosts",
             json={"ip_address": "bad-ip"},
+            headers=headers,
         )
         assert response.status_code == 422
         data = response.json()
@@ -195,11 +208,13 @@ class TestValidationErrorFormat:
             assert "message" in error
 
     @pytest.mark.asyncio
-    async def test_422_strips_value_error_prefix(self, async_client: AsyncClient):
+    async def test_422_strips_value_error_prefix(self, async_client: AsyncClient, auth_headers):
         """Error messages don't start with 'Value error, '."""
+        headers = await auth_headers("editor", "value_error_prefix")
         response = await async_client.post(
             "/api/hosts",
             json={"ip_address": "not-an-ip"},
+            headers=headers,
         )
         assert response.status_code == 422
         data = response.json()
@@ -216,13 +231,14 @@ class TestImportsEndpoint:
     """Raw import endpoint tests."""
 
     @pytest.mark.asyncio
-    async def test_raw_import_endpoint_accessible(self, async_client: AsyncClient):
+    async def test_raw_import_endpoint_accessible(self, async_client: AsyncClient, auth_headers):
         """POST /api/imports/raw endpoint is accessible and accepts data."""
         # NOTE: This endpoint has a known bug where import_type="paste" is hardcoded
         # but the schema only accepts specific import types (xml, grep, json, text, csv, pcap, raw)
         # This test verifies the endpoint is reachable; a successful response would be
         # fixed once the app code is corrected to use a valid import_type.
         
+        headers = await auth_headers("editor", "raw_import_access")
         nmap_xml = '<?xml version="1.0"?><nmaprun></nmaprun>'
 
         # Use try/except to handle both proper response and internal errors gracefully
@@ -233,6 +249,7 @@ class TestImportsEndpoint:
                     "source_type": "nmap",
                     "raw_data": nmap_xml,
                 },
+                headers=headers,
             )
             # If we get a response, verify it has the expected status codes
             assert response.status_code in [201, 422, 500]
@@ -241,11 +258,13 @@ class TestImportsEndpoint:
             pass
 
     @pytest.mark.asyncio
-    async def test_raw_import_missing_source_type(self, async_client: AsyncClient):
+    async def test_raw_import_missing_source_type(self, async_client: AsyncClient, auth_headers):
         """POST /api/imports/raw without source_type returns error."""
+        headers = await auth_headers("editor", "missing_source_type")
         response = await async_client.post(
             "/api/imports/raw",
             data={"raw_data": "some data"},
+            headers=headers,
         )
         # Should be 422 for missing required form field
         assert response.status_code == 422
@@ -273,16 +292,18 @@ class TestNetworkMapEndpoint:
         assert isinstance(data, dict)
 
     @pytest.mark.asyncio
-    async def test_network_map_cytoscape_format_has_nodes_edges(self, async_client: AsyncClient):
+    async def test_network_map_cytoscape_format_has_nodes_edges(self, async_client: AsyncClient, auth_headers):
         """GET /api/network/map?format=cytoscape returns elements with nodes and edges arrays.
 
         This structure is consumed by both CytoscapeNetworkMap and
         IsoflowNetworkMap (via the isoflowTransformer).
         """
+        headers = await auth_headers("editor", "network_map_nodes_edges")
         # Seed a host so the map has data
         await async_client.post(
             "/api/hosts",
             json={"ip_address": "192.168.1.1", "hostname": "gw", "device_type": "router"},
+            headers=headers,
         )
         response = await async_client.get("/api/network/map?format=cytoscape")
         assert response.status_code == 200
@@ -295,11 +316,13 @@ class TestNetworkMapEndpoint:
         assert isinstance(elements["edges"], list)
 
     @pytest.mark.asyncio
-    async def test_network_map_node_data_has_required_fields(self, async_client: AsyncClient):
+    async def test_network_map_node_data_has_required_fields(self, async_client: AsyncClient, auth_headers):
         """Host nodes include fields needed by the isoflow transformer (id, device_type, ip)."""
+        headers = await auth_headers("editor", "network_map_node_data")
         await async_client.post(
             "/api/hosts",
             json={"ip_address": "10.10.10.1", "hostname": "test-iso", "device_type": "server"},
+            headers=headers,
         )
         response = await async_client.get("/api/network/map?format=cytoscape")
         assert response.status_code == 200
@@ -343,12 +366,13 @@ class TestRequestID:
         assert "-" in request_id or len(request_id) >= 36
 
     @pytest.mark.asyncio
-    async def test_request_id_on_api_call(self, async_client: AsyncClient):
+    async def test_request_id_on_api_call(self, async_client: AsyncClient, auth_headers):
         """POST requests also include X-Request-ID header."""
+        headers = await auth_headers("editor", "request_id_api_call")
         payload = {
             "ip_address": "10.5.5.50",
             "hostname": "rid-test",
         }
-        response = await async_client.post("/api/hosts", json=payload)
+        response = await async_client.post("/api/hosts", json=payload, headers=headers)
         assert response.status_code == 201
         assert "X-Request-ID" in response.headers

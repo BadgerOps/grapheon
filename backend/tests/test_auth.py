@@ -719,15 +719,32 @@ class TestFeatureFlags:
 
     @pytest.mark.asyncio
     async def test_enforce_auth_false_allows_anonymous(self, async_client: AsyncClient):
-        """When AUTH_ENABLED=True but ENFORCE_AUTH=False, unauthenticated requests still work."""
+        """When AUTH_ENABLED=True but ENFORCE_AUTH=False, read-only endpoints still work."""
         original_enabled = settings.AUTH_ENABLED
         original_enforce = settings.ENFORCE_AUTH
         try:
             settings.AUTH_ENABLED = True
             settings.ENFORCE_AUTH = False
-            # Should work without token (anonymous admin mode)
+            # Read endpoint should still work without a token.
             response = await async_client.get("/api/hosts")
             assert response.status_code == 200
+        finally:
+            settings.AUTH_ENABLED = original_enabled
+            settings.ENFORCE_AUTH = original_enforce
+
+    @pytest.mark.asyncio
+    async def test_enforce_auth_false_blocks_anonymous_writes(self, async_client: AsyncClient):
+        """When AUTH_ENABLED=True but ENFORCE_AUTH=False, write endpoints still require auth."""
+        original_enabled = settings.AUTH_ENABLED
+        original_enforce = settings.ENFORCE_AUTH
+        try:
+            settings.AUTH_ENABLED = True
+            settings.ENFORCE_AUTH = False
+            response = await async_client.post(
+                "/api/hosts",
+                json={"ip_address": "10.9.9.9", "hostname": "blocked-write"},
+            )
+            assert response.status_code == 401
         finally:
             settings.AUTH_ENABLED = original_enabled
             settings.ENFORCE_AUTH = original_enforce

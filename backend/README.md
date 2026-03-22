@@ -102,6 +102,23 @@ The API will be available at `http://localhost:8000`
 ### Maintenance
 - `POST /api/maintenance/cleanup` - Cleanup tasks and data maintenance
 
+### Passive Agents
+- `GET /api/agents` - List enrolled passive agents
+- `POST /api/agents` - Create an enrolled passive agent
+- `GET /api/agents/{id}` - Get passive agent details
+- `PATCH /api/agents/{id}` - Update passive agent metadata or policy
+- `POST /api/agents/{id}/approve` - Approve a pending passive agent
+- `POST /api/agents/{id}/reject` - Reject a pending passive agent
+- `GET /api/agents/{id}/checkins` - List passive agent check-in history
+- `GET /api/agents/policies` - List passive collection policies
+- `POST /api/agents/policies` - Create passive collection policy
+- `PATCH /api/agents/policies/{id}` - Update passive collection policy
+- `GET /api/agents/enrollment-keys` - List agent enrollment keys
+- `POST /api/agents/enrollment-keys` - Create agent enrollment key
+- `PATCH /api/agents/enrollment-keys/{id}` - Update agent enrollment key
+- `POST /api/agents/register` - Register or re-poll an agent using an enrollment key
+- `POST /api/agents/check-in` - Ingest passive agent report using the agent API key
+
 ## Database Models
 
 ### Host

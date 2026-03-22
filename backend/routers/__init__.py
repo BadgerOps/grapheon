@@ -11,6 +11,7 @@ from .vlans import router as vlans_router
 from .updates import router as updates_router
 from .device_identities import router as device_identities_router
 from .auth import router as auth_router
+from .agents import router as agents_router
 from .tasks import router as tasks_router
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "updates_router",
     "device_identities_router",
     "auth_router",
+    "agents_router",
     "tasks_router",
 ]

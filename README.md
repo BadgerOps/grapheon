@@ -53,7 +53,11 @@ See `docs/auth_provider.md` for the full setup guide including OIDC provider con
 
 ## Docs
 
-See `docs/README.md` for the full documentation index, `docs/deployment.md` for the deployment guide, and `docs/auth_provider.md` for authentication setup.
+See `docs/README.md` for the full documentation index, `docs/deployment.md` for the deployment guide, `docs/auth_provider.md` for authentication setup, `docs/agents.md` for the passive agent backend and enrollment/API-key model, and `docs/agent_quickstart.md` for a step-by-step bootstrap and check-in walkthrough.
+
+## Passive Agents
+
+The backend now includes the first passive agent slice: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, and an outbound-only check-in API that accepts compressed normalized reports and writes them into the existing host, ARP, connection, and import models. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
 
 ## Deployment
 

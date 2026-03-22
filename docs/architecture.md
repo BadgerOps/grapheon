@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Graphēon is a FastAPI backend with a React frontend, deployed as two Docker containers. It ingests multiple network data formats, normalizes them into a common schema, tags entities, and correlates them into a graph-like model. The repo standardizes on Python 3.12.
+Graphēon is a FastAPI backend with a React frontend, deployed as two Docker containers. It ingests multiple network data formats, normalizes them into a common schema, tags entities, and correlates them into a graph-like model. The repo standardizes on Python 3.12. It also now includes the backend foundations for outbound-only passive agents that report local observations back to the API.
 
 ## System Overview
 
@@ -14,6 +14,7 @@ graph TB
     subgraph "Backend Container (uvicorn:8000)"
         API[FastAPI Application]
         PARSERS[Parser Registry<br/>nmap / netstat / arp<br/>ping / traceroute / pcap]
+        AGENTS[Passive Agent APIs<br/>registry / policy / check-in]
         CORRELATION[Correlation Engine]
         AUTH[Auth System<br/>JWT + OIDC]
         DB[(SQLite<br/>network.db)]
@@ -23,6 +24,7 @@ graph TB
     NGINX -->|/api/*| API
     NGINX -->|static assets| UI
     API --> PARSERS
+    API --> AGENTS
     API --> CORRELATION
     API --> AUTH
     API --> DB
@@ -94,6 +96,15 @@ flowchart TD
 3. The import pipeline upserts hosts and related records, and assigns tags (IP, MAC, port, service, subnet).
 4. Correlation merges related hosts using IP matching, MAC-based device identity, and tag similarity while guarding against conflicting MACs.
 5. The frontend queries `/api/*` endpoints to render dashboards, tables, and the network graph.
+
+Passive agents follow a parallel path:
+
+1. A lightweight one-shot collector runs locally on a managed host and gathers passive observations from local commands such as `ip neigh`, `ss -tunap`, `ip addr`, and `ip route`.
+2. The agent registers outbound with `POST /api/agents/register` using an admin-created enrollment key plus a locally persisted random `agent_uuid`.
+3. An admin can review the pending record in the UI and approve it.
+4. Once approved, the agent receives a per-agent API key and uses it for `POST /api/agents/check-in`.
+5. The backend stores the report in `agent_checkins` and `raw_imports`, and upserts `hosts`, `arp_entries`, and `connections`.
+6. Existing correlation and graph APIs can then operate on the newly ingested passive data.
 
 ## Request Lifecycle
 

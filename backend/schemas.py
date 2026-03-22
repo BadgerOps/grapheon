@@ -15,7 +15,7 @@ nmap returns device_type="wireless_ap", netstat returns state="LISTEN").
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from ipaddress import ip_address as parse_ip
 import re
 
@@ -61,12 +61,31 @@ VALID_CONNECTION_STATES = frozenset({
 })
 
 VALID_SOURCE_TYPES = frozenset({
-    "nmap", "arp", "netstat", "ping", "traceroute", "pcap", "manual",
+    "nmap", "arp", "netstat", "ping", "traceroute", "pcap", "manual", "agent",
 })
 
 VALID_IMPORT_TYPES = frozenset({
     "xml", "grep", "json", "text", "csv", "pcap", "raw",
-    "file", "paste",  # set by the import endpoints themselves
+    "file", "paste", "agent",  # set by the import endpoints themselves
+})
+
+VALID_AGENT_COMMANDS = frozenset({
+    "ip_neigh",
+    "ss_tunap",
+    "ip_addr",
+    "ip_route",
+})
+
+VALID_AGENT_ENROLLMENT_STATES = frozenset({
+    "pending",
+    "active",
+    "rejected",
+    "revoked",
+})
+
+VALID_AGENT_CHECKIN_STATUSES = frozenset({
+    "accepted",
+    "rejected",
 })
 
 # ── Reusable validators ──────────────────────────────────────────────
@@ -725,6 +744,400 @@ class LinkHostsRequest(BaseModel):
     """Schema for linking hosts to a device identity."""
 
     host_ids: List[int]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# AGENT SCHEMAS
+# ═══════════════════════════════════════════════════════════════════════
+
+DEFAULT_AGENT_COMMAND_SET = {
+    "ip_neigh": True,
+    "ss_tunap": True,
+    "ip_addr": True,
+    "ip_route": True,
+}
+
+
+class AgentPolicyFields(BaseModel):
+    """Low-impact passive collection policy distributed to agents."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=4000)
+    checkin_interval_seconds: int = Field(3600, ge=60, le=86400)
+    jitter_seconds: int = Field(300, ge=0, le=3600)
+    command_timeout_seconds: int = Field(15, ge=1, le=300)
+    enabled_commands: Dict[str, bool] = Field(
+        default_factory=lambda: DEFAULT_AGENT_COMMAND_SET.copy()
+    )
+    max_report_bytes: int = Field(262144, ge=16384, le=10 * 1024 * 1024)
+    is_active: bool = True
+
+
+class _AgentPolicyValidators:
+    @field_validator("enabled_commands")
+    @classmethod
+    def validate_enabled_commands(cls, value: Dict[str, bool]) -> Dict[str, bool]:
+        unexpected = sorted(set(value.keys()) - VALID_AGENT_COMMANDS)
+        if unexpected:
+            raise ValueError(
+                f"Invalid agent commands: {', '.join(unexpected)}. "
+                f"Allowed values: {', '.join(sorted(VALID_AGENT_COMMANDS))}"
+            )
+        return value
+
+
+class AgentPolicyCreate(AgentPolicyFields, _AgentPolicyValidators):
+    """Schema for creating an agent policy."""
+
+
+class AgentPolicyUpdate(BaseModel, _AgentPolicyValidators):
+    """Schema for updating an agent policy."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=4000)
+    checkin_interval_seconds: Optional[int] = Field(None, ge=60, le=86400)
+    jitter_seconds: Optional[int] = Field(None, ge=0, le=3600)
+    command_timeout_seconds: Optional[int] = Field(None, ge=1, le=300)
+    enabled_commands: Optional[Dict[str, bool]] = None
+    max_report_bytes: Optional[int] = Field(None, ge=16384, le=10 * 1024 * 1024)
+    is_active: Optional[bool] = None
+
+
+class AgentPolicyResponse(AgentPolicyFields):
+    """Schema for agent policy responses."""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    agent_count: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentEnrollmentKeyFields(BaseModel):
+    """Admin-managed bootstrap key for enrolling one or more agents."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=4000)
+    default_policy_id: Optional[int] = None
+    auto_approve: bool = False
+    is_active: bool = True
+    expires_at: Optional[datetime] = None
+    max_registrations: Optional[int] = Field(None, ge=1, le=100000)
+
+
+class AgentEnrollmentKeyCreate(AgentEnrollmentKeyFields):
+    """Schema for creating an enrollment key."""
+
+
+class AgentEnrollmentKeyUpdate(BaseModel):
+    """Schema for updating an enrollment key."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=4000)
+    default_policy_id: Optional[int] = None
+    auto_approve: Optional[bool] = None
+    is_active: Optional[bool] = None
+    expires_at: Optional[datetime] = None
+    max_registrations: Optional[int] = Field(None, ge=1, le=100000)
+
+
+class AgentEnrollmentKeyResponse(AgentEnrollmentKeyFields):
+    """Schema for enrollment key responses."""
+
+    id: int
+    key_prefix: str
+    registration_count: int
+    created_at: datetime
+    updated_at: datetime
+    last_used_at: Optional[datetime] = None
+    default_policy: Optional[AgentPolicyResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentEnrollmentKeyCreateResponse(BaseModel):
+    """Schema returned when a new enrollment key is created."""
+
+    enrollment_key: str
+    key: AgentEnrollmentKeyResponse
+
+
+class AgentFields(BaseModel):
+    """Registry metadata for a passive agent."""
+
+    agent_uuid: str = Field(..., min_length=1, max_length=128)
+    display_name: Optional[str] = Field(None, max_length=255)
+    hostname: Optional[str] = Field(None, max_length=255)
+    site_name: Optional[str] = Field(None, max_length=255)
+    enrollment_key_id: Optional[int] = None
+    policy_id: Optional[int] = None
+    enrollment_state: str = Field("pending", max_length=20)
+    approval_required: bool = True
+    agent_version: Optional[str] = Field(None, max_length=100)
+    platform: Optional[str] = Field(None, max_length=255)
+    platform_release: Optional[str] = Field(None, max_length=255)
+    is_active: bool = True
+
+
+class _AgentValidators:
+    @field_validator("enrollment_state")
+    @classmethod
+    def validate_enrollment_state(cls, value: str) -> str:
+        lower = value.lower()
+        if lower not in VALID_AGENT_ENROLLMENT_STATES:
+            raise ValueError(
+                f"Invalid enrollment state '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_AGENT_ENROLLMENT_STATES))}"
+            )
+        return lower
+
+
+class AgentCreate(AgentFields, _AgentValidators):
+    """Schema for creating an enrolled agent."""
+
+
+class AgentUpdate(BaseModel, _AgentValidators):
+    """Schema for updating an enrolled agent."""
+
+    display_name: Optional[str] = Field(None, max_length=255)
+    hostname: Optional[str] = Field(None, max_length=255)
+    site_name: Optional[str] = Field(None, max_length=255)
+    enrollment_key_id: Optional[int] = None
+    policy_id: Optional[int] = None
+    enrollment_state: Optional[str] = Field(None, max_length=20)
+    approval_required: Optional[bool] = None
+    agent_version: Optional[str] = Field(None, max_length=100)
+    platform: Optional[str] = Field(None, max_length=255)
+    platform_release: Optional[str] = Field(None, max_length=255)
+    is_active: Optional[bool] = None
+
+
+class AgentResponse(AgentFields):
+    """Schema for agent registry responses."""
+
+    id: int
+    api_key_prefix: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    api_key_issued_at: Optional[datetime] = None
+    last_registration_at: Optional[datetime] = None
+    last_ip_addresses: Optional[List[str]] = None
+    last_mac_addresses: Optional[List[str]] = None
+    last_registration_summary: Optional[Dict[str, Any]] = None
+    last_checkin_summary: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+    last_seen_at: Optional[datetime] = None
+    policy: Optional[AgentPolicyResponse] = None
+    enrollment_key: Optional[AgentEnrollmentKeyResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentNeighborObservation(BaseModel):
+    """Single passive neighbor table observation."""
+
+    ip_address: str
+    mac_address: Optional[str] = None
+    interface: Optional[str] = Field(None, max_length=255)
+    state: Optional[str] = Field(None, max_length=50)
+    hostname: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("ip_address")
+    @classmethod
+    def validate_ip(cls, value: str) -> str:
+        return _validate_ip(value, "neighbor IP address")
+
+    @field_validator("mac_address")
+    @classmethod
+    def validate_mac(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_mac(value)
+
+
+class AgentConnectionObservation(BaseModel):
+    """Single passive connection observation."""
+
+    local_ip: str
+    local_port: int = Field(..., ge=0, le=65535)
+    remote_ip: str
+    remote_port: Optional[int] = Field(None, ge=0, le=65535)
+    protocol: str
+    state: Optional[str] = None
+    pid: Optional[int] = None
+    process_name: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("local_ip")
+    @classmethod
+    def validate_local_ip(cls, value: str) -> str:
+        return _validate_ip(value, "local IP address", allow_unspecified=True)
+
+    @field_validator("remote_ip")
+    @classmethod
+    def validate_remote_ip(cls, value: str) -> str:
+        return _validate_ip(value, "remote IP address", allow_unspecified=True)
+
+    @field_validator("protocol")
+    @classmethod
+    def validate_protocol(cls, value: str) -> str:
+        lower = value.lower()
+        if lower not in VALID_PROTOCOLS:
+            raise ValueError(
+                f"Invalid protocol '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_PROTOCOLS))}"
+            )
+        return lower
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        lower = value.lower()
+        if lower not in VALID_CONNECTION_STATES:
+            raise ValueError(
+                f"Invalid connection state '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_CONNECTION_STATES))}"
+            )
+        return lower
+
+
+class AgentAddressObservation(BaseModel):
+    """Local interface address observation."""
+
+    ip_address: str
+    interface: Optional[str] = Field(None, max_length=255)
+    prefix_length: Optional[int] = Field(None, ge=0, le=128)
+    mac_address: Optional[str] = None
+
+    @field_validator("ip_address")
+    @classmethod
+    def validate_ip(cls, value: str) -> str:
+        return _validate_ip(value, "interface IP address")
+
+    @field_validator("mac_address")
+    @classmethod
+    def validate_mac(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_mac(value)
+
+
+class AgentRouteObservation(BaseModel):
+    """Local route table observation."""
+
+    destination: str = Field(..., min_length=1, max_length=255)
+    gateway: Optional[str] = None
+    interface: Optional[str] = Field(None, max_length=255)
+    source_ip: Optional[str] = None
+
+    @field_validator("gateway")
+    @classmethod
+    def validate_gateway(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_ip(value, "route gateway")
+
+    @field_validator("source_ip")
+    @classmethod
+    def validate_source_ip(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_ip(value, "route source IP")
+
+
+class AgentRegistrationRequest(BaseModel):
+    """Bootstrap request sent by an unenrolled or pending agent."""
+
+    enrollment_key: str = Field(..., min_length=1, max_length=512)
+    agent_uuid: str = Field(..., min_length=1, max_length=128)
+    display_name: Optional[str] = Field(None, max_length=255)
+    hostname: Optional[str] = Field(None, max_length=255)
+    site_name: Optional[str] = Field(None, max_length=255)
+    agent_version: Optional[str] = Field(None, max_length=100)
+    platform: Optional[str] = Field(None, max_length=255)
+    platform_release: Optional[str] = Field(None, max_length=255)
+    metadata: Optional[Dict[str, Any]] = None
+    addresses: List[AgentAddressObservation] = Field(default_factory=list)
+
+
+class AgentRegistrationResponse(BaseModel):
+    """Response returned during enrollment and approval polling."""
+
+    status: str
+    approval_required: bool
+    message: Optional[str] = None
+    api_key: Optional[str] = None
+    server_time: datetime
+    agent: AgentResponse
+    policy: Optional[AgentPolicyResponse] = None
+
+
+class AgentApprovalRequest(BaseModel):
+    """Admin approval or policy assignment for a pending agent."""
+
+    policy_id: Optional[int] = None
+    display_name: Optional[str] = Field(None, max_length=255)
+
+
+class AgentRejectRequest(BaseModel):
+    """Admin rejection metadata for a pending agent."""
+
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class AgentCheckInRequest(BaseModel):
+    """Normalized passive report uploaded by a deployed agent."""
+
+    agent_uuid: str = Field(..., min_length=1, max_length=128)
+    observed_at: datetime
+    sequence_number: Optional[int] = Field(None, ge=0)
+    full_snapshot: bool = False
+    hostname: Optional[str] = Field(None, max_length=255)
+    fqdn: Optional[str] = Field(None, max_length=255)
+    agent_version: Optional[str] = Field(None, max_length=100)
+    platform: Optional[str] = Field(None, max_length=255)
+    platform_release: Optional[str] = Field(None, max_length=255)
+    metadata: Optional[Dict[str, Any]] = None
+    neighbors: List[AgentNeighborObservation] = Field(default_factory=list)
+    connections: List[AgentConnectionObservation] = Field(default_factory=list)
+    addresses: List[AgentAddressObservation] = Field(default_factory=list)
+    routes: List[AgentRouteObservation] = Field(default_factory=list)
+
+
+class AgentCheckInRecordResponse(BaseModel):
+    """Serialized audit record for an agent check-in."""
+
+    id: int
+    agent_id: int
+    raw_import_id: Optional[int] = None
+    observed_at: datetime
+    received_at: datetime
+    sequence_number: Optional[int] = None
+    full_snapshot: bool
+    content_encoding: Optional[str] = None
+    source_ip: Optional[str] = None
+    auth_method: Optional[str] = None
+    api_key_prefix: Optional[str] = None
+    summary: Optional[Dict[str, Any]] = None
+    status: str
+    error_message: Optional[str] = None
+    records_created: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentCheckInResponse(BaseModel):
+    """Response returned to an agent after a successful check-in."""
+
+    status: str
+    server_time: datetime
+    agent: AgentResponse
+    policy: Optional[AgentPolicyResponse] = None
+    checkin: AgentCheckInRecordResponse
+    summary: Dict[str, Any]
 
 
 # ═══════════════════════════════════════════════════════════════════════

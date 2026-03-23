@@ -348,6 +348,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.agent_version }}
         run: |
           bash scripts/build-agent-artifact.sh "$VERSION" "dist/grapheon-agent-v$VERSION.tar.gz"
+          sha256sum "dist/grapheon-agent-v$VERSION.tar.gz" > "dist/grapheon-agent-v$VERSION.tar.gz.sha256"
 
       - name: Upload agent artifact to release
         env:
@@ -355,6 +356,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.agent_version }}
         run: |
           gh release upload "agent-v$VERSION" "dist/grapheon-agent-v$VERSION.tar.gz#grapheon-agent-v$VERSION.tar.gz" --clobber
+          gh release upload "agent-v$VERSION" "dist/grapheon-agent-v$VERSION.tar.gz.sha256#grapheon-agent-v$VERSION.tar.gz.sha256" --clobber
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

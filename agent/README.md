@@ -34,6 +34,7 @@ The runtime can be invoked directly with flags from either a repo checkout or an
 Distribution options:
 
 - GitHub release artifact: `grapheon-agent-vX.Y.Z.tar.gz`
+- Artifact checksum: `grapheon-agent-vX.Y.Z.tar.gz.sha256`
 - GHCR image: `ghcr.io/badgerops/grapheon-agent:latest` and `:vX.Y.Z`
 
 Examples:
@@ -77,6 +78,13 @@ Useful flags:
 - `--force` bypasses cached cadence gating for an immediate run
 - `--state-dir` keeps manual runs isolated from the default `/var/lib/grapheon-agent`
 - `--log-level DEBUG` makes parsing, registration, and check-in troubleshooting easier
+
+Versioned install helpers:
+
+- `scripts/install-passive-agent.sh`
+- `scripts/upgrade-passive-agent.sh`
+- `scripts/rollback-passive-agent.sh <version>`
+- `scripts/uninstall-passive-agent.sh [--purge-state]`
 
 `--help` output:
 

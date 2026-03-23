@@ -40,6 +40,7 @@ Behavior:
 The passive agent is also published as:
 
 - GitHub release artifact: `grapheon-agent-vX.Y.Z.tar.gz`
+- Artifact checksum: `grapheon-agent-vX.Y.Z.tar.gz.sha256`
 - GHCR image: `ghcr.io/badgerops/grapheon-agent:latest` and `:vX.Y.Z`
 
 ## Prerequisites
@@ -206,6 +207,7 @@ You can install from either:
 From the release artifact:
 
 ```bash
+sha256sum -c grapheon-agent-vX.Y.Z.tar.gz.sha256
 tar -xzf grapheon-agent-vX.Y.Z.tar.gz
 cd grapheon-agent-vX.Y.Z
 sudo bash scripts/install-passive-agent.sh
@@ -236,6 +238,12 @@ docker run --rm \
   ghcr.io/badgerops/grapheon-agent:latest \
   --register-only
 ```
+
+Installed layout:
+
+- `/opt/grapheon/agent/releases/<version>/` contains versioned runtime files
+- `/opt/grapheon/agent/current` points to the active release
+- `/var/lib/grapheon-agent` holds persistent runtime state
 
 ## 6. Configure The Agent Environment
 
@@ -384,6 +392,9 @@ If the cached policy interval has not elapsed yet, the runtime exits quickly.
 - Prefer `auto_approve=false` for real deployments.
 - The current delta mode only sends additive/update observations; removals are not represented yet.
 - No active scanning is performed in the MVP.
+- Upgrade by extracting a newer release artifact and running `sudo bash scripts/upgrade-passive-agent.sh`.
+- Roll back by repointing the `current` symlink with `sudo bash scripts/rollback-passive-agent.sh <version>`.
+- Uninstall with `sudo bash scripts/uninstall-passive-agent.sh`; add `--purge-state` to remove `/var/lib/grapheon-agent`.
 
 ## Troubleshooting
 

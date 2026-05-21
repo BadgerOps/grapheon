@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Graphēon"
     APP_VERSION: str = _load_version()
     DEBUG: bool = False
+    ALLOW_INSECURE_DEFAULT_SECRET: bool = False
 
     # ── Authentication & Authorization ─────────────────────────────────
     # JWT
@@ -62,6 +63,20 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+    def validate_startup_security(self) -> None:
+        """Fail closed when production-like auth uses the packaged JWT secret."""
+        if (
+            self.AUTH_ENABLED
+            and self.JWT_SECRET == "change-me-in-production"
+            and not self.DEMO_MODE
+            and not self.DEBUG
+            and not self.ALLOW_INSECURE_DEFAULT_SECRET
+        ):
+            raise RuntimeError(
+                "JWT_SECRET must be set before startup. "
+                "For local-only development, set ALLOW_INSECURE_DEFAULT_SECRET=true."
+            )
 
 
 settings = Settings()

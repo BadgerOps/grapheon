@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("GRAPHĒON STARTING UP")
     logger.info(f"App: {settings.APP_NAME} v{settings.APP_VERSION}")
+    settings.validate_startup_security()
 
     start = time.perf_counter()
     await init_db()

@@ -16,14 +16,18 @@ export function useHealthStatus() {
   const [health, setHealth] = useState(null)
   const [lastChecked, setLastChecked] = useState(null)
   const intervalRef = useRef(null)
+  const requestRef = useRef(0)
 
   const doCheck = useCallback(async () => {
+    const requestId = ++requestRef.current
     try {
       const data = await healthCheck()
+      if (requestId !== requestRef.current) return
       setStatus(data.status)
       setHealth(data)
       setLastChecked(new Date())
     } catch {
+      if (requestId !== requestRef.current) return
       setStatus('unreachable')
       setHealth(null)
     }
@@ -40,6 +44,7 @@ export function useHealthStatus() {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
+      requestRef.current += 1
     }
   }, [doCheck])
 

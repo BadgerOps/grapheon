@@ -4,6 +4,13 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.4 - 2026-05-21
+### Fixed
+- **Stale async state guards**: auth initialization, full-text search, autocomplete suggestions, and health polling now ignore stale responses so older requests cannot overwrite newer UI state.
+- **Fail-closed frontend roles**: role checks now deny unknown or misspelled required roles instead of treating them as the lowest permission level.
+- **Restricted browser theme handling**: theme initialization now tolerates unavailable `localStorage` or `matchMedia` instead of crashing the app.
+- **Dependency security updates**: refreshed frontend dependency locks for PostCSS and uuid advisories, and added targeted overrides for isoflow's vulnerable transitive `zod` and `quill` dependencies.
+
 ## 0.10.3 - 2026-02-11
 ### Fixed
 - **Cytoscape "invalid endpoints" edge warnings**: tuned fcose layout parameters to prevent node overlap inside compound parents — increased `nodeSeparation` (100), `nodeRepulsion` (15000), `nestingFactor` (0.5), reduced `gravityCompound` (0.8), and widened `idealEdgeLength` (120)

@@ -22,20 +22,40 @@ import StatusModal from './components/StatusModal'
 import { version as frontendVersion } from '../package.json'
 import * as api from './api/client'
 
-// Theme detection and management with localStorage persistence
-function useTheme() {
-  const [themePreference, setThemePreference] = useState(() => {
-    const stored = window.localStorage.getItem('theme')
+function readStoredTheme() {
+  try {
+    const stored = window.localStorage?.getItem('theme')
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
       return stored
     }
-    return 'system'
-  })
-  const [systemTheme, setSystemTheme] = useState(() =>
-    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  )
+  } catch {
+    // Storage can be disabled in sandboxed or privacy-restricted contexts.
+  }
+  return 'system'
+}
+
+function detectSystemTheme() {
+  if (typeof window.matchMedia !== 'function') {
+    return 'light'
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function storeThemePreference(themePreference) {
+  try {
+    window.localStorage?.setItem('theme', themePreference)
+  } catch {
+    // Ignore storage failures; the active in-memory theme still applies.
+  }
+}
+
+// Theme detection and management with localStorage persistence
+function useTheme() {
+  const [themePreference, setThemePreference] = useState(readStoredTheme)
+  const [systemTheme, setSystemTheme] = useState(detectSystemTheme)
 
   useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handleChange = (event) => {
       setSystemTheme(event.matches ? 'dark' : 'light')
@@ -51,7 +71,7 @@ function useTheme() {
   }, [theme])
 
   useEffect(() => {
-    window.localStorage.setItem('theme', themePreference)
+    storeThemePreference(themePreference)
   }, [themePreference])
 
   const toggleTheme = () => {

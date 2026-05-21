@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import * as api from '../api/client'
 
@@ -12,11 +12,15 @@ export default function Search() {
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [selectedTypes, setSelectedTypes] = useState(['hosts', 'ports', 'connections', 'arp', 'imports'])
+  const searchRequestRef = useRef(0)
+  const suggestionsRequestRef = useRef(0)
 
   // Debounced search
   const performSearch = useCallback(async (searchQuery) => {
+    const requestId = ++searchRequestRef.current
     if (!searchQuery || searchQuery.length < 2) {
       setResults(null)
+      setLoading(false)
       return
     }
 
@@ -25,16 +29,19 @@ export default function Search() {
       setError('')
       const types = selectedTypes.join(',')
       const data = await api.search(searchQuery, types)
+      if (requestId !== searchRequestRef.current) return
       setResults(data)
     } catch (err) {
+      if (requestId !== searchRequestRef.current) return
       setError(err.message)
     } finally {
-      setLoading(false)
+      if (requestId === searchRequestRef.current) setLoading(false)
     }
   }, [selectedTypes])
 
   // Fetch suggestions for autocomplete
   const fetchSuggestions = useCallback(async (searchQuery) => {
+    const requestId = ++suggestionsRequestRef.current
     if (!searchQuery || searchQuery.length < 2) {
       setSuggestions([])
       return
@@ -42,8 +49,10 @@ export default function Search() {
 
     try {
       const data = await api.getSearchSuggestions(searchQuery)
+      if (requestId !== suggestionsRequestRef.current) return
       setSuggestions(data.suggestions || [])
     } catch (err) {
+      if (requestId !== suggestionsRequestRef.current) return
       // Silently fail for suggestions
       setSuggestions([])
     }

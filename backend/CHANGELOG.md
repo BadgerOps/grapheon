@@ -4,6 +4,11 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.10.4 - 2026-05-21
+### Fixed
+- **JWT startup hardening**: backend startup now fails closed when authentication is enabled with the packaged `JWT_SECRET=change-me-in-production` outside demo/debug/explicit local-dev override mode. Set a real `JWT_SECRET` for deployments, or set `ALLOW_INSECURE_DEFAULT_SECRET=true` only for local development.
+- **Dependency security updates**: bumped FastAPI to `0.120.4`, which resolves the FastAPI form parsing ReDoS advisory and pulls Starlette to a patched release line for multipart and file range handling advisories.
+
 ## 0.10.0 - 2026-03-22
 ### Added
 - **Passive agent backend APIs**: agent registry, enrollment keys, approval workflow, low-impact collection policies, agent check-in audit history, and normalized ingest endpoints for passive host observations

@@ -4,6 +4,16 @@ All notable changes to the Graphēon backend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
+
+## 0.11.0 - 2026-06-11
+### Added
+- **Passive agent lifecycle controls**: admins can now explicitly revoke agents, which invalidates stored API credentials, and reactivate revoked or inactive agents back to pending approval.
+- **Passive agent negative coverage**: added tests for enrollment-key limits, invalid and missing check-in credentials, UUID mismatch, report size limits, invalid encodings, and lifecycle transitions.
+
+### Changed
+- **Agent management hardening**: passive agent registry, policy, and check-in history read endpoints now require admin access, and generic agent updates no longer accept lifecycle state mutations.
+
 ## 0.10.4 - 2026-05-21
 ### Fixed
 - **JWT startup hardening**: backend startup now fails closed when authentication is enabled with the packaged `JWT_SECRET=change-me-in-production` outside demo/debug/explicit local-dev override mode. Set a real `JWT_SECRET` for deployments, or set `ALLOW_INSECURE_DEFAULT_SECRET=true` only for local development.

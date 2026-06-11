@@ -897,20 +897,19 @@ class AgentCreate(AgentFields, _AgentValidators):
     """Schema for creating an enrolled agent."""
 
 
-class AgentUpdate(BaseModel, _AgentValidators):
+class AgentUpdate(BaseModel):
     """Schema for updating an enrolled agent."""
+
+    model_config = ConfigDict(extra="forbid")
 
     display_name: Optional[str] = Field(None, max_length=255)
     hostname: Optional[str] = Field(None, max_length=255)
     site_name: Optional[str] = Field(None, max_length=255)
     enrollment_key_id: Optional[int] = None
     policy_id: Optional[int] = None
-    enrollment_state: Optional[str] = Field(None, max_length=20)
-    approval_required: Optional[bool] = None
     agent_version: Optional[str] = Field(None, max_length=100)
     platform: Optional[str] = Field(None, max_length=255)
     platform_release: Optional[str] = Field(None, max_length=255)
-    is_active: Optional[bool] = None
 
 
 class AgentResponse(AgentFields):
@@ -1099,6 +1098,18 @@ class AgentApiKeyRotateResponse(BaseModel):
 
 class AgentRejectRequest(BaseModel):
     """Admin rejection metadata for a pending agent."""
+
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class AgentRevokeRequest(BaseModel):
+    """Admin revocation metadata for an enrolled agent."""
+
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class AgentReactivateRequest(BaseModel):
+    """Admin reactivation metadata for a revoked or inactive agent."""
 
     reason: Optional[str] = Field(None, max_length=1000)
 

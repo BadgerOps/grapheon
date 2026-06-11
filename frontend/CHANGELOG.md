@@ -4,6 +4,12 @@ All notable changes to the Graphēon frontend will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
+
+## 0.11.0 - 2026-06-11
+### Added
+- **Passive agent lifecycle actions**: the admin Agents page now exposes explicit revoke and reactivate actions, and shows record active/inactive status as read-only lifecycle state.
+
 ## 0.10.4 - 2026-05-21
 ### Fixed
 - **Stale async state guards**: auth initialization, full-text search, autocomplete suggestions, and health polling now ignore stale responses so older requests cannot overwrite newer UI state.

@@ -46,6 +46,7 @@ graph TD
             ARP_P[ARP /arp]
             SEARCH[Search /search]
             CHANGELOG[Changelog /changelog]
+            AGENTS[Agents /agents]
             CONFIG[Config /config]
             AUTHADMIN[AuthAdmin /auth-admin]
             LOGIN[Login /login]
@@ -81,7 +82,7 @@ graph TD
 | `/login` | Public |
 | `/`, `/hosts`, `/map`, `/connections`, `/arp`, `/search`, `/changelog` | Any authenticated user |
 | `/import` | `editor` or `admin` |
-| `/config`, `/auth-admin` | `admin` |
+| `/agents`, `/config`, `/auth-admin` | `admin` |
 
 ## Isometric View (TESTING)
 

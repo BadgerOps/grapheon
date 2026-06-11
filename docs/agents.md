@@ -20,7 +20,7 @@ Use two separate values:
 
 Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are operational metadata and can change or be duplicated. `agent_uuid` should be stable independent of NIC replacement, VM cloning cleanup, or interface layout.
 
-## Current Backend Endpoints
+## Current API Endpoints
 
 - `GET /api/agents` - List enrolled agents and last-seen state.
 - `POST /api/agents` - Create an agent record manually as an admin.
@@ -28,6 +28,8 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `PATCH /api/agents/{id}` - Update agent registry metadata or policy assignment.
 - `POST /api/agents/{id}/approve` - Approve a pending agent.
 - `POST /api/agents/{id}/reject` - Reject a pending agent.
+- `POST /api/agents/{id}/revoke` - Revoke an agent and invalidate its API key.
+- `POST /api/agents/{id}/reactivate` - Move a revoked or inactive agent back to pending approval.
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue a per-agent API key once.
 - `GET /api/agents/{id}/checkins` - List check-in history for one agent.
 - `GET /api/agents/policies` - List passive collection policies.
@@ -39,7 +41,17 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `POST /api/agents/register` - Bootstrap or re-poll agent registration with an enrollment key.
 - `POST /api/agents/check-in` - Agent report ingest endpoint using the per-agent API key.
 
-Read endpoints use the existing viewer/editor/admin auth model. Enrollment-key and check-in endpoints are for machine-to-machine traffic.
+Agent management read and write endpoints require admin access because they expose hostnames, IP addresses, MAC addresses, policy assignments, and operational check-in history. Enrollment-key and check-in endpoints are for machine-to-machine traffic.
+
+## Frontend Operations View
+
+Admins can now manage passive agents directly in the SPA at `/agents`. The page provides:
+
+- fleet status with approval state and last-seen health
+- per-agent detail and recent check-in history
+- policy profile creation and updates
+- enrollment-key creation and updates
+- approval, rejection, revocation, reactivation, policy reassignment, and API-key rotation actions
 
 ## Enrollment Flow
 
@@ -151,6 +163,8 @@ Current limitation:
 - Per-agent API keys are distinct from enrollment keys.
 - Per-agent API keys are stored hashed server-side.
 - Admins can rotate a per-agent API key and receive the new raw secret once.
+- Admins can revoke an agent, which clears the stored API-key hash and prevents old-key check-ins.
+- Revoked or inactive agents must be reactivated back to pending approval before they can receive a new key through the normal registration polling flow.
 - `agent_uuid` is the durable agent identity.
 - API keys authenticate the caller but do not define identity.
 
@@ -162,5 +176,4 @@ The backend verifies:
 ## What This Slice Does Not Yet Do
 
 - Parse raw `ip neigh` or `ss` output on the server
-- Surface fleet views in the frontend
 - Issue client certificates or require mTLS for agents

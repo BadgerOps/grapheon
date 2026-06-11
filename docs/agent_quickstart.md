@@ -434,3 +434,27 @@ printf '%s\n' "$NEW_AGENT_API_KEY" | sudo tee /var/lib/grapheon-agent/api_key >/
 sudo chmod 600 /var/lib/grapheon-agent/api_key
 sudo systemctl start grapheon-agent.service
 ```
+
+Revoke a deployed agent when the host is decommissioned or the local API key may be compromised:
+
+```bash
+curl -sS \
+  -X POST "$GRAPH_URL/api/agents/$AGENT_ID/revoke" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "decommissioned host"
+  }' | jq
+```
+
+Revocation clears the server-side API-key hash, so the old `/var/lib/grapheon-agent/api_key` can no longer check in. To return the same agent record to service, reactivate it, approve it again, then start the service so the agent can poll registration and receive a new one-time API key:
+
+```bash
+curl -sS \
+  -X POST "$GRAPH_URL/api/agents/$AGENT_ID/reactivate" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "returning to service"
+  }' | jq
+```

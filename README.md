@@ -57,7 +57,7 @@ See `docs/README.md` for the full documentation index, `docs/deployment.md` for 
 
 ## Passive Agents
 
-Graphēon now includes the first passive agent slice end to end: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, an outbound-only check-in API, and a lightweight host-side runtime with `systemd` service/timer units. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
+Graphēon now includes the first passive agent slice end to end: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, an outbound-only check-in API, an admin fleet management view at `/agents`, and a lightweight host-side runtime with `systemd` service/timer units. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
 
 ## Deployment
 

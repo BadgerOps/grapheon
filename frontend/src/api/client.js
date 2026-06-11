@@ -476,6 +476,70 @@ export async function getBackendInfo() {
 }
 
 // ============================================
+// Passive agent endpoints
+// ============================================
+
+export async function getAgents(params = {}) {
+  return apiCall('GET', '/agents', null, params)
+}
+
+export async function getAgent(id) {
+  return apiCall('GET', `/agents/${id}`)
+}
+
+export async function updateAgent(id, data) {
+  return apiCall('PATCH', `/agents/${id}`, data)
+}
+
+export async function approveAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/approve`, data)
+}
+
+export async function rejectAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/reject`, data)
+}
+
+export async function revokeAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/revoke`, data)
+}
+
+export async function reactivateAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/reactivate`, data)
+}
+
+export async function rotateAgentApiKey(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/rotate-api-key`, data)
+}
+
+export async function getAgentCheckins(id, params = {}) {
+  return apiCall('GET', `/agents/${id}/checkins`, null, params)
+}
+
+export async function getAgentPolicies(params = {}) {
+  return apiCall('GET', '/agents/policies', null, params)
+}
+
+export async function createAgentPolicy(data) {
+  return apiCall('POST', '/agents/policies', data)
+}
+
+export async function updateAgentPolicy(id, data) {
+  return apiCall('PATCH', `/agents/policies/${id}`, data)
+}
+
+export async function getAgentEnrollmentKeys(params = {}) {
+  return apiCall('GET', '/agents/enrollment-keys', null, params)
+}
+
+export async function createAgentEnrollmentKey(data) {
+  return apiCall('POST', '/agents/enrollment-keys', data)
+}
+
+export async function updateAgentEnrollmentKey(id, data) {
+  return apiCall('PATCH', `/agents/enrollment-keys/${id}`, data)
+}
+
+// ============================================
 // Update check endpoints
 // ============================================
 

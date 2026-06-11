@@ -1,6 +1,7 @@
 """
 IP address and subnet validation utilities.
 """
+from typing import Optional
 from ipaddress import ip_address, ip_network
 
 from network.constants import PRIVATE_NETWORKS
@@ -30,3 +31,26 @@ def get_subnet(ip: str, prefix: int = 24) -> str:
         return "ipv6::/128"
     except Exception:
         return "unknown/0"
+
+
+def get_observed_subnet(
+    ip: str,
+    prefix: Optional[int] = None,
+    observed_networks=None,
+) -> str:
+    """Resolve a host subnet from observed agent networks, falling back to prefix."""
+    try:
+        addr = ip_address(ip)
+    except Exception:
+        return "unknown/0"
+
+    if observed_networks:
+        matching_networks = [
+            network for network in observed_networks if addr.version == network.version and addr in network
+        ]
+        if matching_networks:
+            return str(max(matching_networks, key=lambda network: network.prefixlen))
+
+    if prefix is not None:
+        return get_subnet(ip, prefix)
+    return f"unresolved-ipv{addr.version}"

@@ -20,7 +20,7 @@ from network.styles import (
     get_vlan_color,
     get_subnet_color,
 )
-from network.validators import is_private_ip, get_subnet
+from network.validators import is_private_ip, get_observed_subnet
 
 
 def build_all_nodes(
@@ -29,12 +29,13 @@ def build_all_nodes(
     port_counts: dict,
     device_id_to_hosts: dict,
     device_identities: dict,
-    subnet_prefix: int = 24,
+    subnet_prefix: int = None,
     subnet_filter: str = None,
     segment_filter: str = None,
     show_internet: str = "cloud",
     ip_to_segment: dict = None,
     subnet_to_vlan: dict = None,
+    observed_networks: list = None,
 ) -> tuple:
     """
     Build all Cytoscape node elements for the network map.
@@ -48,7 +49,7 @@ def build_all_nodes(
         port_counts: Dict mapping host.id → open port count
         device_id_to_hosts: Dict mapping device_id → [hosts...]
         device_identities: Dict mapping device_id → DeviceIdentity
-        subnet_prefix: Prefix for subnet CIDR calculation (default 24)
+        subnet_prefix: Optional fallback prefix for subnet CIDR calculation
         subnet_filter: Optional filter for subnet CIDR
         segment_filter: Optional filter for segment/interface name
         show_internet: How to handle public IPs ("cloud", "hide", "show")
@@ -71,6 +72,8 @@ def build_all_nodes(
         ip_to_segment = {}
     if subnet_to_vlan is None:
         subnet_to_vlan = {}
+    if observed_networks is None:
+        observed_networks = []
 
     nodes = []
     ip_to_host_id = {}
@@ -96,7 +99,7 @@ def build_all_nodes(
 
     # Process each host
     for host in hosts:
-        subnet_cidr = get_subnet(host.ip_address, subnet_prefix)
+        subnet_cidr = get_observed_subnet(host.ip_address, subnet_prefix, observed_networks)
         segment = ip_to_segment.get(host.ip_address, None)
 
         # Apply filters
@@ -208,6 +211,7 @@ def build_all_nodes(
             device_identities,
             port_counts,
             subnet_prefix,
+            observed_networks,
         )
 
     return (
@@ -357,6 +361,7 @@ def _add_shared_gateway_node(
     device_identities: dict,
     port_counts: dict,
     subnet_prefix: int,
+    observed_networks: list,
 ) -> None:
     """
     Add a shared gateway node for a device with multiple router hosts.
@@ -380,7 +385,7 @@ def _add_shared_gateway_node(
     di = device_identities.get(device_id)
     gw_ips = sorted(h.ip_address for h in gateway_hosts)
     gw_subnets = sorted(set(
-        get_subnet(h.ip_address, subnet_prefix) for h in gateway_hosts
+        get_observed_subnet(h.ip_address, subnet_prefix, observed_networks) for h in gateway_hosts
     ))
 
     # Build display label
@@ -510,12 +515,17 @@ def _build_subnet_compound(
             "host_count": 0,
             "vlan_node_id": vlan_node_id,
         }
+        label = subnet_cidr
+        if subnet_cidr.startswith("unresolved-ipv"):
+            ip_version = subnet_cidr.removeprefix("unresolved-ipv")
+            label = f"Unresolved IPv{ip_version} network"
         subnet_data = {
             "id": subnet_node_id,
-            "label": subnet_cidr,
+            "label": label,
             "type": "subnet",
             "subnet_cidr": subnet_cidr,
             "color": get_subnet_color(subnet_cidr),
+            "is_inferred": subnet_cidr.startswith("unresolved-ipv"),
         }
         # Nest subnet inside VLAN if it has one
         if vlan_node_id:

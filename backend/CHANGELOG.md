@@ -11,6 +11,7 @@ Versioning policy: do not use `Unreleased` changelog sections. Every behavior ch
 - **Entity evidence trail**: added a generic `entity_evidence` table for field and relationship evidence with source, observer, confidence, timestamps, raw import, and agent observation references.
 - **Agent identity evidence ingest**: passive agent check-ins now write host field evidence for observed IP, MAC, hostname, vendor, and route-gateway device-type facts while preserving manual canonical identities.
 - **Host detail evidence API**: `GET /api/hosts/{id}` now returns an `evidence` list alongside host and port data.
+- **Evidence-based map grouping**: `/api/network/map` now uses current passive-agent address prefixes, route destinations, configured VLAN CIDRs, and operator-provided `network_cidrs` hints to group hosts by known network boundaries. Hosts without grouping evidence are marked unresolved instead of being assigned to a hard-coded CIDR.
 
 ## 0.15.0 - 2026-06-11
 ### Added

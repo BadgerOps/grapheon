@@ -15,7 +15,7 @@ from network.constants import (
     MAX_PUBLIC_IP_SAMPLES,
     DEFAULT_GATEWAY_IP_OFFSET,
 )
-from network.validators import is_private_ip, get_subnet
+from network.validators import is_private_ip, get_observed_subnet
 
 
 class GatewayResolver:
@@ -38,13 +38,14 @@ class GatewayResolver:
         shared_gateway_nodes: Dict[str, str],
         shared_gateway_devices: Dict[str, List[Any]],
         ip_to_host_id: Dict[str, str],
+        observed_networks: list | None = None,
     ):
         """
         Initialize the GatewayResolver.
 
         Args:
             nodes: Reference to the nodes list (will be modified to add synthetic gateways)
-            subnet_prefix: Subnet prefix for CIDR calculations (e.g., 24 for /24)
+            subnet_prefix: Optional fallback prefix for CIDR calculations
             shared_gateway_nodes: Mapping of device_id → gateway_node_id for shared gateways
             shared_gateway_devices: Mapping of device_id → list of host objects for shared gateways
             ip_to_host_id: Mapping of IP address → host ID for lookup
@@ -54,6 +55,7 @@ class GatewayResolver:
         self.shared_gateway_nodes = shared_gateway_nodes
         self.shared_gateway_devices = shared_gateway_devices
         self.ip_to_host_id = ip_to_host_id
+        self.observed_networks = observed_networks or []
         self.subnet_gateways: Dict[str, str] = {}
         self.internet_node_added = False
 
@@ -84,7 +86,8 @@ class GatewayResolver:
         for device_id, shared_gw_id in self.shared_gateway_nodes.items():
             gw_hosts = self.shared_gateway_devices.get(device_id, [])
             gw_subnets = [
-                get_subnet(h.ip_address, self.subnet_prefix) for h in gw_hosts
+                get_observed_subnet(h.ip_address, self.subnet_prefix, self.observed_networks)
+                for h in gw_hosts
             ]
             if source_subnet_cidr in gw_subnets:
                 self.subnet_gateways[source_subnet_id] = shared_gw_id
@@ -184,6 +187,7 @@ def build_all_edges(
     subnet_prefix: int,
     shared_gateway_nodes: Dict[str, str],
     shared_gateway_devices: Dict[str, List[Any]],
+    observed_networks: list | None = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """
     Build all edges from connections with intelligent gateway routing.
@@ -200,7 +204,7 @@ def build_all_edges(
         ip_to_host_id: Mapping of IP address → host ID
         show_internet: One of "hide", "show", "cloud" (how to display public IPs)
         route_through_gateway: Whether to route cross-subnet/cross-VLAN through gateways
-        subnet_prefix: Subnet prefix for CIDR calculations (e.g., 24 for /24)
+        subnet_prefix: Optional fallback prefix for CIDR calculations
         shared_gateway_nodes: Mapping of device_id → gateway_node_id for shared gateways
         shared_gateway_devices: Mapping of device_id → list of host objects for shared gateways
 
@@ -217,11 +221,12 @@ def build_all_edges(
     cross_vlan_count = 0
     cross_subnet_count = 0
     internet_conn_count = 0
+    observed_networks = observed_networks or []
 
     # Build IP → (vlan, subnet) lookup for edge classification
     ip_context: Dict[str, Dict[str, Any]] = {}
     for host in hosts:
-        subnet_cidr_ctx = get_subnet(host.ip_address, subnet_prefix)
+        subnet_cidr_ctx = get_observed_subnet(host.ip_address, subnet_prefix, observed_networks)
         ip_context[host.ip_address] = {
             "vlan_id": host.vlan_id,
             "subnet": subnet_cidr_ctx,
@@ -234,6 +239,7 @@ def build_all_edges(
         shared_gateway_nodes=shared_gateway_nodes,
         shared_gateway_devices=shared_gateway_devices,
         ip_to_host_id=ip_to_host_id,
+        observed_networks=observed_networks,
     )
 
     # Track gateway → public IPs for tooltip aggregation

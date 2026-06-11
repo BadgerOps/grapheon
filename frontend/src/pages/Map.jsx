@@ -12,6 +12,7 @@ const AGENT_RELATIONSHIP_OPTIONS = [
   { value: 'connection_remote', label: 'Connections' },
   { value: 'route_gateway', label: 'Routes' },
 ]
+const DEFAULT_AGENT_RELATIONSHIPS = AGENT_RELATIONSHIP_OPTIONS.map(option => option.value)
 
 /**
  * Map Page — Network topology visualization
@@ -51,12 +52,17 @@ export default function Map() {
   const [internetMode, setInternetMode] = useState('cloud') // 'cloud', 'hide', 'show'
   const [routeThroughGateway, setRouteThroughGateway] = useState(false)
   const [observedByAgentId, setObservedByAgentId] = useState('')
-  const [relationshipTypes, setRelationshipTypes] = useState([])
+  const [relationshipTypes, setRelationshipTypes] = useState(DEFAULT_AGENT_RELATIONSHIPS)
   const [minConfidence, setMinConfidence] = useState(0)
-  const [includeCollectorNodes, setIncludeCollectorNodes] = useState(false)
+  const [includeCollectorNodes, setIncludeCollectorNodes] = useState(true)
+  const [cidrHints, setCidrHints] = useState('')
 
   // ── Cytoscape ref ───────────────────────────────────────────────
   const cyRef = useRef(null)
+  const networkCidrHints = useMemo(
+    () => cidrHints.split(/[\s,]+/).map(item => item.trim()).filter(Boolean),
+    [cidrHints],
+  )
 
   // ── Fetch data ──────────────────────────────────────────────────
   const fetchNetworkMap = useCallback(async () => {
@@ -83,6 +89,9 @@ export default function Map() {
       if (includeCollectorNodes) {
         params.include_collector_nodes = true
       }
+      if (networkCidrHints.length > 0) {
+        params.network_cidrs = networkCidrHints
+      }
       params.show_internet = internetMode
       params.route_through_gateway = routeThroughGateway
       const data = await api.getNetworkMap(params)
@@ -101,6 +110,7 @@ export default function Map() {
     relationshipTypes,
     minConfidence,
     includeCollectorNodes,
+    networkCidrHints,
     internetMode,
     routeThroughGateway,
   ])
@@ -233,9 +243,10 @@ export default function Map() {
     setSearchQuery('')
     setSelectedVlan('')
     setObservedByAgentId('')
-    setRelationshipTypes([])
+    setRelationshipTypes(DEFAULT_AGENT_RELATIONSHIPS)
     setMinConfidence(0)
-    setIncludeCollectorNodes(false)
+    setIncludeCollectorNodes(true)
+    setCidrHints('')
     if (cyRef.current) {
       clearAllFilters(cyRef.current)
     }
@@ -254,9 +265,10 @@ export default function Map() {
 
   const hasAgentTopologyFilters = (
     observedByAgentId
-    || relationshipTypes.length > 0
+    || relationshipTypes.length !== DEFAULT_AGENT_RELATIONSHIPS.length
     || minConfidence > 0
-    || includeCollectorNodes
+    || !includeCollectorNodes
+    || networkCidrHints.length > 0
   )
   const hasActiveFilters = selectedDeviceTypes.length > 0 || searchQuery || selectedVlan || hasAgentTopologyFilters
 
@@ -504,6 +516,16 @@ export default function Map() {
                 </label>
               </div>
             </div>
+          </div>
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Network Grouping Hints</h3>
+            <input
+              type="text"
+              value={cidrHints}
+              onChange={(e) => setCidrHints(e.target.value)}
+              placeholder="192.168.224.0/23, 10.10.10.0/24"
+              className="input w-full"
+            />
           </div>
         </div>
       )}

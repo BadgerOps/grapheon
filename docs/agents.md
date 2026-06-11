@@ -159,6 +159,8 @@ The network map can derive optional agent topology layers from current observati
 
 `GET /api/network/map` supports `observed_by_agent_id`, repeated `relationship_types`, `min_confidence`, and `include_collector_nodes` for these layers.
 
+The map also uses current agent address prefixes, route destinations, configured VLAN CIDRs, and operator-provided `network_cidrs` hints as network boundaries. For example, a collector interface observed as `192.168.224.172/23` groups both `192.168.224.x` and `192.168.225.x` hosts under `192.168.224.0/23`. If no observed or configured CIDR covers a host, the map marks it as unresolved instead of assigning a hard-coded subnet.
+
 ## Runtime Notes
 
 The shipped runtime lives in `agent/grapheon_agent.py` and is designed to be run from `deploy/grapheon-agent.service` and `deploy/grapheon-agent.timer`.

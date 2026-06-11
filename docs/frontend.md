@@ -121,7 +121,9 @@ The Network Map filter panel includes agent topology controls when passive-agent
 - confidence threshold input
 - collector node toggle
 
-These controls pass through to `/api/network/map` and add typed Cytoscape edges from current agent observations. Default map behavior is unchanged until an agent topology filter or layer is selected.
+These controls pass through to `/api/network/map` and add typed Cytoscape edges from current agent observations. The default Network Map request includes collector, ARP, connection, and route relationship layers with collector nodes visible; operators can narrow the graph by observer, relationship type, or minimum confidence.
+
+The Network Map filter panel also accepts CIDR hints for network grouping. Hints are useful when imported or manually created hosts do not have agent-observed interface prefixes or route destinations yet. The backend treats these as operator-supplied grouping evidence for the map request.
 
 ## Host Evidence Panel
 

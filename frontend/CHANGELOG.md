@@ -9,6 +9,8 @@ Versioning policy: do not use `Unreleased` changelog sections. Every behavior ch
 ## 0.15.0 - 2026-06-11
 ### Added
 - **Host evidence panel**: Host Detail now shows evidence records with field value, confidence, source, observing agent, current state, and last-seen timestamp.
+- **Default agent topology map layer**: Network Map now loads collector, ARP, connection, and route relationship layers by default while keeping observer, relationship, collector-node, and confidence controls filterable.
+- **Map CIDR hints**: Network Map filters now accept operator-entered CIDR hints for cases where observed agent data cannot determine the actual network boundary.
 
 ## 0.14.0 - 2026-06-11
 ### Added

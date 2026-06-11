@@ -350,6 +350,47 @@ class TestNetworkMapEndpoint:
         assert "total_hosts" in stats
         assert "total_edges" in stats
 
+    @pytest.mark.asyncio
+    async def test_network_map_uses_cidr_hints_without_hardcoded_fallback(self, async_client: AsyncClient, auth_headers):
+        """Hosts without observed network evidence stay unresolved until a CIDR hint is provided."""
+        headers = await auth_headers("editor", "network_map_cidr_hints")
+        for ip_address in ("192.168.224.10", "192.168.225.10"):
+            response = await async_client.post(
+                "/api/hosts",
+                json={"ip_address": ip_address, "device_type": "server"},
+                headers=headers,
+            )
+            assert response.status_code == 201
+
+        unresolved_response = await async_client.get(
+            "/api/network/map",
+            params={"format": "cytoscape"},
+        )
+        assert unresolved_response.status_code == 200
+        unresolved_subnets = {
+            node["data"]["label"]
+            for node in unresolved_response.json()["elements"]["nodes"]
+            if node["data"].get("type") == "subnet"
+        }
+        assert "Unresolved IPv4 network" in unresolved_subnets
+        assert "192.168.224.0/24" not in unresolved_subnets
+        assert "192.168.225.0/24" not in unresolved_subnets
+
+        hinted_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("format", "cytoscape"),
+                ("network_cidrs", "192.168.224.0/23"),
+            ],
+        )
+        assert hinted_response.status_code == 200
+        hinted_subnets = {
+            node["data"]["label"]
+            for node in hinted_response.json()["elements"]["nodes"]
+            if node["data"].get("type") == "subnet"
+        }
+        assert "192.168.224.0/23" in hinted_subnets
+
 
 class TestRequestID:
     """Request ID header tests."""

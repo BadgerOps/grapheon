@@ -88,6 +88,11 @@ async def preview_cleanup(
     connection_max_age_days: int = Query(7, ge=1, description="Days to keep connections"),
     arp_max_age_days: int = Query(7, ge=1, description="Days to keep ARP entries"),
     import_max_age_days: int = Query(30, ge=1, description="Days to keep import raw data"),
+    agent_checkin_report_max_age_days: int = Query(
+        30,
+        ge=1,
+        description="Days to keep passive agent check-in report bodies",
+    ),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -102,6 +107,7 @@ async def preview_cleanup(
         connection_max_age_days=connection_max_age_days,
         arp_max_age_days=arp_max_age_days,
         import_max_age_days=import_max_age_days,
+        agent_checkin_report_max_age_days=agent_checkin_report_max_age_days,
     )
 
     result = await run_cleanup(db, policy=policy, dry_run=True)
@@ -114,6 +120,7 @@ async def preview_cleanup(
             "connection_max_age_days": policy.connection_max_age_days,
             "arp_max_age_days": policy.arp_max_age_days,
             "import_max_age_days": policy.import_max_age_days,
+            "agent_checkin_report_max_age_days": policy.agent_checkin_report_max_age_days,
         },
         "would_affect": {
             "hosts_marked_stale": result.hosts_marked_stale,
@@ -121,6 +128,7 @@ async def preview_cleanup(
             "connections_deleted": result.connections_deleted,
             "arp_entries_deleted": result.arp_entries_deleted,
             "imports_cleaned": result.imports_cleaned,
+            "agent_checkin_reports_cleaned": result.agent_checkin_reports_cleaned,
             "conflicts_deleted": result.conflicts_deleted,
             "orphaned_ports_deleted": result.orphaned_ports_deleted,
         },
@@ -135,6 +143,7 @@ async def run_cleanup_now(
     connection_max_age_days: int = Query(7, ge=1),
     arp_max_age_days: int = Query(7, ge=1),
     import_max_age_days: int = Query(30, ge=1),
+    agent_checkin_report_max_age_days: int = Query(30, ge=1),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -151,6 +160,7 @@ async def run_cleanup_now(
         connection_max_age_days=connection_max_age_days,
         arp_max_age_days=arp_max_age_days,
         import_max_age_days=import_max_age_days,
+        agent_checkin_report_max_age_days=agent_checkin_report_max_age_days,
     )
 
     result = await run_cleanup(db, policy=policy, dry_run=False)
@@ -158,12 +168,21 @@ async def run_cleanup_now(
     return {
         "success": True,
         "dry_run": False,
+        "policy": {
+            "host_stale_days": policy.host_stale_days,
+            "host_archive_days": policy.host_archive_days,
+            "connection_max_age_days": policy.connection_max_age_days,
+            "arp_max_age_days": policy.arp_max_age_days,
+            "import_max_age_days": policy.import_max_age_days,
+            "agent_checkin_report_max_age_days": policy.agent_checkin_report_max_age_days,
+        },
         "cleaned": {
             "hosts_marked_stale": result.hosts_marked_stale,
             "hosts_deactivated": result.hosts_deactivated,
             "connections_deleted": result.connections_deleted,
             "arp_entries_deleted": result.arp_entries_deleted,
             "imports_cleaned": result.imports_cleaned,
+            "agent_checkin_reports_cleaned": result.agent_checkin_reports_cleaned,
             "conflicts_deleted": result.conflicts_deleted,
             "orphaned_ports_deleted": result.orphaned_ports_deleted,
         },

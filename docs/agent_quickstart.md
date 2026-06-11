@@ -391,6 +391,7 @@ If the cached policy interval has not elapsed yet, the runtime exits quickly.
 - Treat `/var/lib/grapheon-agent/api_key` as a secret.
 - Prefer `auto_approve=false` for real deployments.
 - Check-ins send full snapshots. The backend tracks missing observations as stale/removed for that agent without deleting shared topology rows from other sources.
+- Full check-in report bodies are retained temporarily for audit/debugging and pruned by maintenance cleanup after the configured `agent_checkin_report_max_age_days` window. Check-in metadata, summaries, raw import links, and observation state remain.
 - No active scanning is performed in the MVP.
 - Upgrade by extracting a newer release artifact and running `sudo bash scripts/upgrade-passive-agent.sh`.
 - Roll back by repointing the `current` symlink with `sudo bash scripts/rollback-passive-agent.sh <version>`.

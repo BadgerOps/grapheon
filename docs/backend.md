@@ -87,6 +87,14 @@ Key environment variables:
 - Tables are created on startup in `backend/database.py`.
 - Lightweight migrations add new columns at startup via `_run_migrations`.
 
+## Maintenance Cleanup
+
+- `POST /api/maintenance/cleanup/preview` performs a dry run and reports affected rows without mutating data.
+- `POST /api/maintenance/cleanup/run` applies the same cleanup policy and returns the policy values used.
+- `import_max_age_days` clears old `raw_imports.raw_data` while preserving import metadata by default.
+- `agent_checkin_report_max_age_days` clears old passive agent `agent_checkins.report` bodies while preserving check-in metadata, summaries, raw import links, and agent-scoped observation state.
+- `GET /api/maintenance/stats` includes `agent_checkins.total` and `agent_checkins.with_report_body` in the age distribution.
+
 ## Parsers
 
 Parser implementations live in `backend/parsers/` and normalize source data to parser models. Supported sources include nmap, netstat, arp, ping, traceroute, and pcap.

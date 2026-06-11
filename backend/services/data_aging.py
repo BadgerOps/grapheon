@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_
 
-from models import Host, Port, Connection, ARPEntry, RawImport, Conflict
+from models import Host, Port, Connection, ARPEntry, RawImport, Conflict, AgentCheckIn
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -38,6 +38,9 @@ class CleanupPolicy:
     import_max_age_days: int = 30  # Remove old raw import data
     keep_import_metadata: bool = True  # Keep import records, just clear raw_data
 
+    # Passive agent report cleanup
+    agent_checkin_report_max_age_days: int = 30  # Clear old full report bodies
+
     # Conflict cleanup
     conflict_resolved_max_age_days: int = 30  # Remove old resolved conflicts
 
@@ -50,6 +53,7 @@ class CleanupResult:
     connections_deleted: int = 0
     arp_entries_deleted: int = 0
     imports_cleaned: int = 0
+    agent_checkin_reports_cleaned: int = 0
     conflicts_deleted: int = 0
     orphaned_ports_deleted: int = 0
     duration_ms: float = 0
@@ -103,7 +107,7 @@ async def run_cleanup(
         # Stale is informational - they're still active but not recently seen
         pass
 
-    logger.info(f"[1/7] Stale hosts (>{policy.host_stale_days}d): {result.hosts_marked_stale}")
+    logger.info(f"[1/8] Stale hosts (>{policy.host_stale_days}d): {result.hosts_marked_stale}")
 
     # 2. Deactivate archived hosts
     archive_cutoff = now - timedelta(days=policy.host_archive_days)
@@ -123,7 +127,7 @@ async def run_cleanup(
             .values(is_active=False)
         )
 
-    logger.info(f"[2/7] Hosts to deactivate (>{policy.host_archive_days}d): {result.hosts_deactivated}")
+    logger.info(f"[2/8] Hosts to deactivate (>{policy.host_archive_days}d): {result.hosts_deactivated}")
 
     # 3. Delete old connections
     conn_cutoff = now - timedelta(days=policy.connection_max_age_days)
@@ -138,7 +142,7 @@ async def run_cleanup(
             delete(Connection).where(Connection.last_seen < conn_cutoff)
         )
 
-    logger.info(f"[3/7] Connections to delete (>{policy.connection_max_age_days}d): {result.connections_deleted}")
+    logger.info(f"[3/8] Connections to delete (>{policy.connection_max_age_days}d): {result.connections_deleted}")
 
     # 4. Delete old ARP entries
     arp_cutoff = now - timedelta(days=policy.arp_max_age_days)
@@ -153,7 +157,7 @@ async def run_cleanup(
             delete(ARPEntry).where(ARPEntry.last_seen < arp_cutoff)
         )
 
-    logger.info(f"[4/7] ARP entries to delete (>{policy.arp_max_age_days}d): {result.arp_entries_deleted}")
+    logger.info(f"[4/8] ARP entries to delete (>{policy.arp_max_age_days}d): {result.arp_entries_deleted}")
 
     # 5. Clean old imports
     import_cutoff = now - timedelta(days=policy.import_max_age_days)
@@ -187,9 +191,34 @@ async def run_cleanup(
                 delete(RawImport).where(RawImport.created_at < import_cutoff)
             )
 
-    logger.info(f"[5/7] Imports to clean (>{policy.import_max_age_days}d): {result.imports_cleaned}")
+    logger.info(f"[5/8] Imports to clean (>{policy.import_max_age_days}d): {result.imports_cleaned}")
 
-    # 6. Delete old resolved conflicts
+    # 6. Clear old passive agent check-in report bodies.
+    # Keep check-in metadata, summaries, and raw import links for audit/history.
+    agent_report_cutoff = now - timedelta(days=policy.agent_checkin_report_max_age_days)
+    agent_report_filters = (
+        AgentCheckIn.received_at < agent_report_cutoff,
+        AgentCheckIn.report != {},
+    )
+    agent_report_count = await db.execute(
+        select(func.count(AgentCheckIn.id)).where(*agent_report_filters)
+    )
+    result.agent_checkin_reports_cleaned = agent_report_count.scalar() or 0
+
+    if not dry_run and result.agent_checkin_reports_cleaned > 0:
+        await db.execute(
+            update(AgentCheckIn)
+            .where(*agent_report_filters)
+            .values(report={})
+        )
+
+    logger.info(
+        "[6/8] Agent check-in reports to clean "
+        f"(>{policy.agent_checkin_report_max_age_days}d): "
+        f"{result.agent_checkin_reports_cleaned}"
+    )
+
+    # 7. Delete old resolved conflicts
     conflict_cutoff = now - timedelta(days=policy.conflict_resolved_max_age_days)
     conflict_count_query = select(func.count(Conflict.id)).where(
         and_(
@@ -207,9 +236,9 @@ async def run_cleanup(
             )
         )
 
-    logger.info(f"[6/7] Resolved conflicts to delete (>{policy.conflict_resolved_max_age_days}d): {result.conflicts_deleted}")
+    logger.info(f"[7/8] Resolved conflicts to delete (>{policy.conflict_resolved_max_age_days}d): {result.conflicts_deleted}")
 
-    # 7. Delete orphaned ports (ports without a host)
+    # 8. Delete orphaned ports (ports without a host)
     # This shouldn't happen normally but clean up just in case
     orphan_query = select(func.count(Port.id)).where(
         ~Port.host_id.in_(select(Host.id))
@@ -222,7 +251,7 @@ async def run_cleanup(
             delete(Port).where(~Port.host_id.in_(select(Host.id)))
         )
 
-    logger.info(f"[7/7] Orphaned ports to delete: {result.orphaned_ports_deleted}")
+    logger.info(f"[8/8] Orphaned ports to delete: {result.orphaned_ports_deleted}")
 
     # Commit if not dry run
     if not dry_run:
@@ -298,6 +327,16 @@ async def get_data_age_stats(db: AsyncSession) -> Dict[str, Any]:
     stats["imports"] = {
         "total": import_total.scalar() or 0,
         "with_raw_data": import_with_data.scalar() or 0,
+    }
+
+    agent_checkin_total = await db.execute(select(func.count(AgentCheckIn.id)))
+    agent_checkin_reports_with_body = await db.execute(
+        select(func.count(AgentCheckIn.id)).where(AgentCheckIn.report != {})
+    )
+
+    stats["agent_checkins"] = {
+        "total": agent_checkin_total.scalar() or 0,
+        "with_report_body": agent_checkin_reports_with_body.scalar() or 0,
     }
 
     return stats

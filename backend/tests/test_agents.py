@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from config import settings
 from database import get_db
@@ -1293,3 +1293,98 @@ class TestAgentEnrollmentAndCheckIn:
         assert all(not item["is_current"] for item in removed_addresses)
         assert all(not item["is_current"] for item in removed_routes)
         assert all(not item["is_current"] for item in removed_connections_after_empty)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_prunes_old_agent_checkin_reports_but_keeps_metadata(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_report_cleanup_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "report-cleanup-policy")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "report-cleanup-enrollment",
+            policy_id,
+            auto_approve=True,
+        )
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-report-cleanup",
+        )
+        assert register_response.status_code == 200
+
+        payload = _checkin_payload(
+            "agent-report-cleanup",
+            observed_at="2026-03-22T23:00:00Z",
+        )
+        checkin_response = await _post_checkin(
+            async_client,
+            register_response.json()["api_key"],
+            payload,
+        )
+        assert checkin_response.status_code == 200
+        checkin_id = checkin_response.json()["checkin"]["id"]
+        raw_import_id = checkin_response.json()["checkin"]["raw_import_id"]
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        old_received_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=45)
+        await db.execute(
+            update(AgentCheckIn)
+            .where(AgentCheckIn.id == checkin_id)
+            .values(received_at=old_received_at)
+        )
+        await db.commit()
+
+        preview_response = await async_client.post(
+            "/api/maintenance/cleanup/preview",
+            params={"agent_checkin_report_max_age_days": 30},
+            headers=admin_headers,
+        )
+        assert preview_response.status_code == 200
+        preview_data = preview_response.json()
+        assert preview_data["policy"]["agent_checkin_report_max_age_days"] == 30
+        assert preview_data["would_affect"]["agent_checkin_reports_cleaned"] == 1
+
+        pre_cleanup = await db.get(AgentCheckIn, checkin_id)
+        assert pre_cleanup.report["agent_uuid"] == "agent-report-cleanup"
+
+        cleanup_response = await async_client.post(
+            "/api/maintenance/cleanup/run",
+            params={"agent_checkin_report_max_age_days": 30},
+            headers=admin_headers,
+        )
+        assert cleanup_response.status_code == 200
+        cleanup_data = cleanup_response.json()
+        assert cleanup_data["policy"]["agent_checkin_report_max_age_days"] == 30
+        assert cleanup_data["cleaned"]["agent_checkin_reports_cleaned"] == 1
+
+        await db.refresh(pre_cleanup)
+        assert pre_cleanup.report == {}
+        assert pre_cleanup.summary["address_count"] == 1
+        assert pre_cleanup.raw_import_id == raw_import_id
+        assert pre_cleanup.status == "accepted"
+        assert pre_cleanup.records_created >= 1
+
+        repeat_cleanup_response = await async_client.post(
+            "/api/maintenance/cleanup/preview",
+            params={"agent_checkin_report_max_age_days": 30},
+            headers=admin_headers,
+        )
+        assert repeat_cleanup_response.status_code == 200
+        assert (
+            repeat_cleanup_response.json()["would_affect"][
+                "agent_checkin_reports_cleaned"
+            ]
+            == 0
+        )
+
+        stats_response = await async_client.get("/api/maintenance/stats", headers=admin_headers)
+        assert stats_response.status_code == 200
+        assert stats_response.json()["age_distribution"]["agent_checkins"] == {
+            "total": 1,
+            "with_report_body": 0,
+        }

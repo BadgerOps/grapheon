@@ -155,6 +155,8 @@ Current behavior:
 Backend snapshot handling:
 
 - missing entries in a later full snapshot are marked stale/removed in backend agent-scoped observation state
+- full report bodies in `agent_checkins.report` are retained only for the configured maintenance retention window
+- cleanup preserves check-in metadata, summaries, raw import links, and agent-scoped observation state after pruning old report bodies
 
 ## Authentication Notes
 

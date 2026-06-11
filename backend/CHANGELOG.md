@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.13.0 - 2026-06-11
+### Added
+- **Passive agent report retention cleanup**: maintenance cleanup now prunes old `agent_checkins.report` bodies after a configurable `agent_checkin_report_max_age_days` window while preserving check-in metadata, summaries, raw import links, and agent-scoped observation state.
+- **Cleanup visibility for agent reports**: cleanup preview/run responses now include `agent_checkin_reports_cleaned`, and maintenance stats report passive agent check-ins with retained report bodies.
+
 ## 0.12.0 - 2026-06-11
 ### Added
 - **Agent-scoped full-snapshot observations**: passive check-ins now maintain per-agent observation state with first-seen, last-seen, current, stale, and removed timestamps without deleting shared topology rows.

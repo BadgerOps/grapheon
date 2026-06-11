@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.11.1 - 2026-06-11
+### Fixed
+- **Map view stability**: memoized map element merging and callback props so parent re-renders no longer recreate the Cytoscape view and reset pan/zoom.
+
 ## 0.11.0 - 2026-06-11
 ### Added
 - **Passive agent lifecycle actions**: the admin Agents page now exposes explicit revoke and reactivate actions, and shows record active/inactive status as read-only lifecycle state.

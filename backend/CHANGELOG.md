@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.15.0 - 2026-06-11
+### Added
+- **Agent-aware topology metadata**: passive observations now store observer/vantage role, confidence, relationship type, and stable relationship keys.
+- **Observed-by filtering**: host, ARP, connection, agent observation, and network map APIs can filter agent-derived data by the collector agent and confidence.
+- **Agent topology map relationships**: `/api/network/map` can render collector, ARP neighbor, connection remote, and route gateway edges from current agent observations, including source, observer, timestamp, raw import, confidence, and observation references.
+- **Agent metadata migration coverage**: lightweight SQLite migrations now backfill legacy agent observer metadata and correct legacy agent raw-import origins.
+
 ## 0.14.0 - 2026-06-11
 ### Added
 - **On-demand passive agent collection requests**: admins can request a collection from an active agent, agents poll for pending requests on each timer run, and successful check-ins mark requests fulfilled.

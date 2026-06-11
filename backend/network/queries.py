@@ -6,17 +6,31 @@ from collections import defaultdict
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, String, or_
 
-from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity
+from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity, AgentObservation, Agent
 
 logger = logging.getLogger(__name__)
+
+
+def _json_int_list_contains(column, value: int):
+    serialized = column.cast(String)
+    return or_(
+        serialized.contains(f"[{value}]"),
+        serialized.contains(f"[{value},"),
+        serialized.contains(f", {value},"),
+        serialized.contains(f",{value},"),
+        serialized.contains(f", {value}]"),
+        serialized.contains(f",{value}]"),
+    )
 
 
 async def fetch_hosts(
     db: AsyncSession,
     vlan_filter: Optional[int] = None,
     include_inactive: bool = False,
+    source_origin: Optional[str] = None,
+    observed_by_agent_id: Optional[int] = None,
 ) -> list:
     """Fetch hosts with optional filters."""
     query = select(Host)
@@ -24,6 +38,10 @@ async def fetch_hosts(
         query = query.where(Host.is_active.is_(True))
     if vlan_filter is not None:
         query = query.where(Host.vlan_id == vlan_filter)
+    if source_origin:
+        query = query.where(Host.source_origins.cast(String).contains(f'"{source_origin}"'))
+    if observed_by_agent_id is not None:
+        query = query.where(_json_int_list_contains(Host.observed_by_agent_ids, observed_by_agent_id))
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -44,10 +62,48 @@ async def fetch_arp_segments(db: AsyncSession) -> dict:
     return ip_to_segment
 
 
-async def fetch_connections(db: AsyncSession) -> list:
+async def fetch_connections(
+    db: AsyncSession,
+    source_origin: Optional[str] = None,
+    observed_by_agent_id: Optional[int] = None,
+) -> list:
     """Fetch all connection records."""
-    result = await db.execute(select(Connection))
+    query = select(Connection)
+    if source_origin:
+        query = query.where(Connection.source_origin == source_origin)
+    if observed_by_agent_id is not None:
+        query = query.where(Connection.observer_agent_id == observed_by_agent_id)
+    result = await db.execute(query)
     return result.scalars().all()
+
+
+async def fetch_current_agent_observations(
+    db: AsyncSession,
+    observed_by_agent_id: Optional[int] = None,
+    relationship_types: Optional[list[str]] = None,
+    min_confidence: Optional[int] = None,
+) -> list:
+    """Fetch current agent observations used for topology relationship edges."""
+    query = select(AgentObservation).where(
+        AgentObservation.is_current.is_(True),
+        AgentObservation.relationship_type.is_not(None),
+    )
+    if observed_by_agent_id is not None:
+        query = query.where(AgentObservation.agent_id == observed_by_agent_id)
+    if relationship_types:
+        query = query.where(AgentObservation.relationship_type.in_(relationship_types))
+    if min_confidence is not None:
+        query = query.where(AgentObservation.confidence >= min_confidence)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+async def fetch_agents_by_ids(db: AsyncSession, agent_ids: list[int]) -> dict[int, Agent]:
+    """Fetch agents keyed by ID for collector/vantage map nodes."""
+    if not agent_ids:
+        return {}
+    result = await db.execute(select(Agent).where(Agent.id.in_(sorted(set(agent_ids)))))
+    return {agent.id: agent for agent in result.scalars().all()}
 
 
 async def fetch_port_counts(db: AsyncSession, host_ids: list[int]) -> dict[int, int]:

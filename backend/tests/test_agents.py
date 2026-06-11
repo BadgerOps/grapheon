@@ -438,10 +438,35 @@ class TestAgentEnrollmentAndCheckIn:
             await db.execute(select(Host).where(Host.ip_address == "10.0.0.5"))
         ).scalar_one()
         assert "agent" in host.source_origins
+        assert host.observed_by_agent_ids == [agent_id]
+        remote_host = (
+            await db.execute(select(Host).where(Host.ip_address == "10.0.0.10"))
+        ).scalar_one()
+        assert remote_host.hostname is None
+        assert remote_host.observed_by_agent_ids == [agent_id]
         arp_entry = (await db.execute(select(ARPEntry))).scalar_one()
         assert arp_entry.source_origin == "agent"
+        assert arp_entry.observer_agent_id == agent_id
         connection = (await db.execute(select(Connection))).scalar_one()
         assert connection.source_origin == "agent"
+        assert connection.observer_agent_id == agent_id
+
+        observations = (
+            await db.execute(select(AgentObservation).order_by(AgentObservation.id))
+        ).scalars().all()
+        observations_by_type = {observation.observation_type: observation for observation in observations}
+        assert observations_by_type["address"].observation_role == "agent_self_interface"
+        assert observations_by_type["address"].confidence == 95
+        assert observations_by_type["address"].relationship_type == "collector_interface"
+        assert observations_by_type["neighbor"].observation_role == "arp_neighbor"
+        assert observations_by_type["neighbor"].confidence == 80
+        assert observations_by_type["neighbor"].relationship_type == "arp_neighbor"
+        assert observations_by_type["connection"].observation_role == "connection_local"
+        assert observations_by_type["connection"].confidence == 60
+        assert observations_by_type["connection"].relationship_type == "connection_remote"
+        assert observations_by_type["route"].observation_role == "route_gateway"
+        assert observations_by_type["route"].confidence == 70
+        assert observations_by_type["route"].relationship_type == "route_gateway"
 
         import_filter = await async_client.get(
             "/api/imports",
@@ -457,6 +482,13 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert host_filter.status_code == 200
         assert host_filter.json()["total"] == 3
+        observed_host_filter = await async_client.get(
+            "/api/hosts",
+            params={"observed_by_agent_id": agent_id},
+            headers=admin_headers,
+        )
+        assert observed_host_filter.status_code == 200
+        assert observed_host_filter.json()["total"] == 3
         arp_filter = await async_client.get(
             "/api/arp",
             params={"source_origin": "agent"},
@@ -464,6 +496,13 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert arp_filter.status_code == 200
         assert arp_filter.json()["total"] == 1
+        observed_arp_filter = await async_client.get(
+            "/api/arp",
+            params={"observed_by_agent_id": agent_id},
+            headers=admin_headers,
+        )
+        assert observed_arp_filter.status_code == 200
+        assert observed_arp_filter.json()["total"] == 1
         connection_filter = await async_client.get(
             "/api/connections",
             params={"source_origin": "agent"},
@@ -471,6 +510,98 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert connection_filter.status_code == 200
         assert connection_filter.json()["total"] == 1
+        observed_connection_filter = await async_client.get(
+            "/api/connections",
+            params={"observed_by_agent_id": agent_id},
+            headers=admin_headers,
+        )
+        assert observed_connection_filter.status_code == 200
+        assert observed_connection_filter.json()["total"] == 1
+
+        role_filter = await async_client.get(
+            f"/api/agents/{agent_id}/observations",
+            params={"observation_role": "arp_neighbor", "min_confidence": 70},
+            headers=admin_headers,
+        )
+        assert role_filter.status_code == 200
+        assert role_filter.json()["total"] == 1
+        assert role_filter.json()["items"][0]["relationship_type"] == "arp_neighbor"
+
+        network_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("observed_by_agent_id", str(agent_id)),
+                ("include_collector_nodes", "true"),
+                ("relationship_types", "collector_interface"),
+                ("relationship_types", "arp_neighbor"),
+                ("relationship_types", "connection_remote"),
+                ("relationship_types", "route_gateway"),
+            ],
+            headers=admin_headers,
+        )
+        assert network_response.status_code == 200
+        network_data = network_response.json()
+        assert network_data["stats"]["agent_topology_edges"] == 4
+        relationship_types = {
+            edge["data"].get("relationship_type")
+            for edge in network_data["elements"]["edges"]
+            if edge["data"].get("agent_observation_id")
+        }
+        assert relationship_types == {
+            "collector_interface",
+            "arp_neighbor",
+            "connection_remote",
+            "route_gateway",
+        }
+        agent_edges = [
+            edge["data"]
+            for edge in network_data["elements"]["edges"]
+            if edge["data"].get("agent_observation_id")
+        ]
+        assert all(edge["source_origin"] == "agent" for edge in agent_edges)
+        assert all(edge["observer_agent_id"] == agent_id for edge in agent_edges)
+        assert all(edge["raw_import_id"] for edge in agent_edges)
+        assert all(edge["first_seen_at"] for edge in agent_edges)
+        assert all(edge["last_seen_at"] for edge in agent_edges)
+
+        observer_only_network_response = await async_client.get(
+            "/api/network/map",
+            params={"observed_by_agent_id": agent_id},
+            headers=admin_headers,
+        )
+        assert observer_only_network_response.status_code == 200
+        assert observer_only_network_response.json()["stats"]["agent_topology_edges"] == 0
+
+        arp_only_network_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("observed_by_agent_id", str(agent_id)),
+                ("relationship_types", "arp_neighbor"),
+            ],
+            headers=admin_headers,
+        )
+        assert arp_only_network_response.status_code == 200
+        arp_only_data = arp_only_network_response.json()
+        assert arp_only_data["stats"]["agent_topology_edges"] == 1
+        assert arp_only_data["stats"]["agent_edge_counts"]["arp_neighbor"] == 1
+        arp_only_relationships = {
+            edge["data"].get("relationship_type")
+            for edge in arp_only_data["elements"]["edges"]
+            if edge["data"].get("agent_observation_id")
+        }
+        assert arp_only_relationships == {"arp_neighbor"}
+
+        high_confidence_network_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("observed_by_agent_id", str(agent_id)),
+                ("relationship_types", "connection_remote"),
+                ("min_confidence", "70"),
+            ],
+            headers=admin_headers,
+        )
+        assert high_confidence_network_response.status_code == 200
+        assert high_confidence_network_response.json()["stats"]["agent_topology_edges"] == 0
 
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one()
@@ -549,6 +680,62 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert agent_response.status_code == 200
         assert agent_response.json()["collection_request_fulfilled_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_agent_self_hostname_does_not_overwrite_manual_hostname(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_manual_hostname_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "agent-manual-hostname")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "agent-manual-hostname-key",
+            policy_id,
+            auto_approve=True,
+        )
+
+        manual_host = await async_client.post(
+            "/api/hosts",
+            json={
+                "ip_address": "10.90.0.5",
+                "hostname": "manual-hostname",
+                "source_types": ["manual"],
+                "source_origins": ["manual"],
+            },
+            headers=admin_headers,
+        )
+        assert manual_host.status_code == 201
+
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-manual-hostname-001",
+            ip_address="10.90.0.5",
+            mac_address="AA:BB:CC:90:00:05",
+        )
+        assert register_response.status_code == 200
+        register_data = register_response.json()
+        agent_id = register_data["agent"]["id"]
+        api_key = register_data["api_key"]
+
+        payload = _checkin_payload("agent-manual-hostname-001")
+        payload["hostname"] = "collector-hostname"
+        payload["addresses"][0]["ip_address"] = "10.90.0.5"
+        payload["addresses"][0]["mac_address"] = "AA:BB:CC:90:00:05"
+        checkin_response = await _post_checkin(async_client, api_key, payload)
+        assert checkin_response.status_code == 200
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        host = (
+            await db.execute(select(Host).where(Host.ip_address == "10.90.0.5"))
+        ).scalar_one()
+        assert host.hostname == "manual-hostname"
+        assert sorted(host.source_origins) == ["agent", "manual"]
+        assert host.observed_by_agent_ids == [agent_id]
 
     @pytest.mark.asyncio
     async def test_rotate_agent_api_key_invalidates_previous_key(

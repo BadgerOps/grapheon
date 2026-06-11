@@ -97,3 +97,15 @@ flowchart TD
 ### High-confidence tag prefixes
 
 Only `hostname:` and `fqdn:` tags trigger Phase 3 merges. Ambiguous hostnames (`localhost`, `localhost.localdomain`, `localhost.local`) are excluded from merge consideration.
+
+## Agent Observation Evidence
+
+Passive-agent rows now keep observer metadata separate from source origin:
+
+- `source_origin` records how data entered Graphēon, such as `agent` or `manual`.
+- `observed_by_agent_ids` on hosts and `observer_agent_id` on ARP/connection rows record which agent saw the entity.
+- `agent_observations.observation_role` records the vantage meaning of an observation.
+- `agent_observations.confidence` records how strongly the observation should influence labels and topology.
+- `agent_observations.relationship_type` and `relationship_key` allow the map to render evidence-backed collector, ARP neighbor, connection remote, and route gateway edges.
+
+This prevents agent-origin data from collapsing every observed IP into the collector identity. Agent self-interface evidence is high confidence, while connection-only remote evidence is lower confidence and should not overwrite stronger manual or self-interface identity data.

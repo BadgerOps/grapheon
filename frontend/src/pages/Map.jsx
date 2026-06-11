@@ -6,6 +6,13 @@ import { searchAndFocus, filterByDeviceType, filterByVlan, clearAllFilters } fro
 import { deviceLegend } from '../styles/cytoscape-theme'
 import * as api from '../api/client'
 
+const AGENT_RELATIONSHIP_OPTIONS = [
+  { value: 'collector_interface', label: 'Collector' },
+  { value: 'arp_neighbor', label: 'ARP' },
+  { value: 'connection_remote', label: 'Connections' },
+  { value: 'route_gateway', label: 'Routes' },
+]
+
 /**
  * Map Page — Network topology visualization
  *
@@ -24,6 +31,7 @@ export default function Map() {
   const [stats, setStats] = useState({})
   const [vlans, setVlans] = useState([])
   const [subnets, setSubnets] = useState([])
+  const [agents, setAgents] = useState([])
   const [routeData, setRouteData] = useState({ traces: {}, path_edges: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -42,6 +50,10 @@ export default function Map() {
   const [showFilters, setShowFilters] = useState(false)
   const [internetMode, setInternetMode] = useState('cloud') // 'cloud', 'hide', 'show'
   const [routeThroughGateway, setRouteThroughGateway] = useState(false)
+  const [observedByAgentId, setObservedByAgentId] = useState('')
+  const [relationshipTypes, setRelationshipTypes] = useState([])
+  const [minConfidence, setMinConfidence] = useState(0)
+  const [includeCollectorNodes, setIncludeCollectorNodes] = useState(false)
 
   // ── Cytoscape ref ───────────────────────────────────────────────
   const cyRef = useRef(null)
@@ -59,6 +71,18 @@ export default function Map() {
       if (selectedVlan) {
         params.vlan_filter = selectedVlan
       }
+      if (observedByAgentId) {
+        params.observed_by_agent_id = observedByAgentId
+      }
+      if (relationshipTypes.length > 0) {
+        params.relationship_types = relationshipTypes
+      }
+      if (minConfidence > 0) {
+        params.min_confidence = minConfidence
+      }
+      if (includeCollectorNodes) {
+        params.include_collector_nodes = true
+      }
       params.show_internet = internetMode
       params.route_through_gateway = routeThroughGateway
       const data = await api.getNetworkMap(params)
@@ -69,7 +93,17 @@ export default function Map() {
     } finally {
       setLoading(false)
     }
-  }, [groupBy, layoutMode, selectedVlan, internetMode, routeThroughGateway])
+  }, [
+    groupBy,
+    layoutMode,
+    selectedVlan,
+    observedByAgentId,
+    relationshipTypes,
+    minConfidence,
+    includeCollectorNodes,
+    internetMode,
+    routeThroughGateway,
+  ])
 
   const fetchVlans = async () => {
     try {
@@ -91,6 +125,16 @@ export default function Map() {
     }
   }
 
+  const fetchAgents = async () => {
+    try {
+      const response = await api.getAgents({ limit: 1000, enrollment_state: 'active', is_active: true })
+      setAgents(response.items || [])
+    } catch (err) {
+      console.error('Failed to fetch agents:', err)
+      setWarnings(prev => [...prev.filter(w => w.key !== 'agents'), { key: 'agents', msg: 'Could not load agent list' }])
+    }
+  }
+
   const fetchRoutes = async () => {
     try {
       const data = await api.getNetworkRoutes()
@@ -106,6 +150,7 @@ export default function Map() {
     fetchNetworkMap()
     fetchVlans()
     fetchSubnets()
+    fetchAgents()
   }, [fetchNetworkMap])
 
   useEffect(() => {
@@ -175,10 +220,22 @@ export default function Map() {
     }
   }
 
+  const handleRelationshipToggle = (relationshipType) => {
+    setRelationshipTypes(current => (
+      current.includes(relationshipType)
+        ? current.filter(item => item !== relationshipType)
+        : [...current, relationshipType]
+    ))
+  }
+
   const handleClearFilters = () => {
     setSelectedDeviceTypes([])
     setSearchQuery('')
     setSelectedVlan('')
+    setObservedByAgentId('')
+    setRelationshipTypes([])
+    setMinConfidence(0)
+    setIncludeCollectorNodes(false)
     if (cyRef.current) {
       clearAllFilters(cyRef.current)
     }
@@ -195,7 +252,13 @@ export default function Map() {
     if (showRoutes) fetchRoutes()
   }
 
-  const hasActiveFilters = selectedDeviceTypes.length > 0 || searchQuery || selectedVlan
+  const hasAgentTopologyFilters = (
+    observedByAgentId
+    || relationshipTypes.length > 0
+    || minConfidence > 0
+    || includeCollectorNodes
+  )
+  const hasActiveFilters = selectedDeviceTypes.length > 0 || searchQuery || selectedVlan || hasAgentTopologyFilters
 
   return (
     <div className="p-6 h-[calc(100vh-8rem)] flex flex-col">
@@ -387,6 +450,61 @@ export default function Map() {
               </button>
             ))}
           </div>
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Agent Topology</h3>
+            <div className="grid gap-3 lg:grid-cols-[minmax(180px,240px)_1fr_minmax(180px,260px)] lg:items-center">
+              <select
+                value={observedByAgentId}
+                onChange={(e) => setObservedByAgentId(e.target.value)}
+                className="select"
+              >
+                <option value="">All observers</option>
+                {agents.map(agent => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.display_name || agent.hostname || agent.agent_uuid}
+                  </option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-2">
+                {AGENT_RELATIONSHIP_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => handleRelationshipToggle(value)}
+                    className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                      relationshipTypes.includes(value)
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeCollectorNodes}
+                    onChange={(e) => setIncludeCollectorNodes(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                  />
+                  Collectors
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <span>Confidence</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={minConfidence}
+                    onChange={(e) => setMinConfidence(Number(e.target.value) || 0)}
+                    className="input w-20"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -449,6 +567,12 @@ export default function Map() {
             <div className="card px-3 py-2 flex-1 min-w-0">
               <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Internet</p>
               <p className="text-lg font-bold text-sky-600 dark:text-sky-400">{stats.internet_connections}</p>
+            </div>
+          )}
+          {stats.agent_topology_edges > 0 && (
+            <div className="card px-3 py-2 flex-1 min-w-0">
+              <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Agent Edges</p>
+              <p className="text-lg font-bold text-teal-600 dark:text-teal-400">{stats.agent_topology_edges}</p>
             </div>
           )}
           <div className="card px-3 py-2 flex-1 min-w-0">

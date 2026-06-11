@@ -396,14 +396,14 @@ sudo systemctl enable --now grapheon-agent.timer
 sudo systemctl list-timers grapheon-agent.timer
 ```
 
-The shipped timer runs every 15 seconds to poll the backend control plane for admin-requested collections. The runtime uses the cached backend policy to decide whether a full collection should happen on that invocation. This allows:
+The shipped timer runs every 15 seconds with `AccuracySec=1s` to poll the backend control plane for admin-requested collections. The runtime uses the cached backend policy to decide whether a full collection should happen on that invocation. This allows:
 
 - simple static `systemd` units
 - server-controlled interval policy
 - server-controlled jitter without blocking `systemctl restart`
 - server-controlled command enable/disable
 
-If the cached policy interval has not elapsed and no on-demand collection is pending, the runtime exits quickly after the lightweight poll.
+If the cached policy interval has not elapsed and no on-demand collection is pending, the runtime exits quickly after the lightweight poll. Starting `grapheon-agent.service` by itself performs one invocation; ongoing polling requires `grapheon-agent.timer` to be enabled and active.
 
 An admin can request collection from the Agents page. Because the runtime is outbound-only, the request is fulfilled the next time the host timer starts the agent and the agent polls Graphēon.
 
@@ -432,6 +432,14 @@ Force an immediate run:
 
 ```bash
 sudo systemctl restart grapheon-agent.service
+```
+
+After upgrading timer or service unit files, reload systemd and restart the timer so the new cadence is active:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart grapheon-agent.timer
+sudo systemctl list-timers grapheon-agent.timer
 ```
 
 Run the collector directly:

@@ -11,6 +11,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ### Changed
 - **Fast control-plane polling**: the shipped systemd timer and default local timer interval now run every 15 seconds so UI-requested agent collections are picked up promptly while backend policy still gates full passive collection frequency.
+- **Precise timer cadence**: the shipped systemd timer now sets `AccuracySec=1s` so the 15-second control-plane poll is not delayed by systemd's default one-minute timer coalescing window.
 
 ## 0.13.1 - 2026-06-11
 ### Fixed

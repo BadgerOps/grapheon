@@ -109,6 +109,7 @@ def test_packaged_agent_timer_polls_control_plane_quickly(tmp_path):
 
     assert "OnBootSec=15s" in timer
     assert "OnUnitActiveSec=15s" in timer
+    assert "AccuracySec=1s" in timer
     assert "GRAPHEON_AGENT_TIMER_INTERVAL_SECONDS=15" in env_example
 
 

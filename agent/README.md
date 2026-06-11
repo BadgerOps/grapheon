@@ -81,7 +81,7 @@ Useful flags:
 - `--user-agent` overrides the default `Grapheon-Agent/<version> python-urllib` HTTP User-Agent sent to Graphēon
 - `--log-level DEBUG` makes parsing, registration, and check-in troubleshooting easier
 
-During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. The shipped timer defaults to a 15-second control-plane poll cadence so admin-requested collections are picked up promptly. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot.
+During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. The shipped timer defaults to a 15-second control-plane poll cadence with `AccuracySec=1s` so admin-requested collections are picked up promptly. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot. Starting `grapheon-agent.service` directly performs one invocation; ongoing polling requires `grapheon-agent.timer` to be enabled and active.
 
 Set `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true` in `/etc/grapheon-agent.env` on workstation, hypervisor, or lab hosts where loopback, link-local IPv6, and local virtualization bridge interfaces such as `vmnet*`, `vboxnet*`, `docker*`, or `virbr*` would otherwise add noisy host-local observations. Normal LAN/private addresses on physical or primary interfaces are still collected.
 

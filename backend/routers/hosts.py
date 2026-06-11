@@ -4,13 +4,14 @@ from sqlalchemy import String, select, func, or_
 from datetime import datetime
 
 from database import get_db
-from models import Host, Port, User
+from models import EntityEvidence, Host, Port, User
 from auth.dependencies import require_any_authenticated, require_editor
 from schemas import (
     HostCreate,
     HostUpdate,
     HostResponse,
     PortResponse,
+    EntityEvidenceResponse,
     PaginatedResponse,
 )
 from utils.audit import audit
@@ -106,13 +107,32 @@ async def get_host(host_id: int, user: User = Depends(require_any_authenticated)
     # Get ports for this host
     ports_result = await db.execute(select(Port).where(Port.host_id == host_id))
     ports = ports_result.scalars().all()
+    evidence_result = await db.execute(
+        select(EntityEvidence)
+        .where(
+            EntityEvidence.entity_type == "host",
+            EntityEvidence.entity_id == host_id,
+        )
+        .order_by(
+            EntityEvidence.is_current.desc(),
+            EntityEvidence.field_name.asc(),
+            EntityEvidence.confidence.desc(),
+            EntityEvidence.last_seen_at.desc(),
+        )
+    )
+    evidence = evidence_result.scalars().all()
 
     host_data = HostResponse.model_validate(host)
     ports_data = [PortResponse.model_validate(port) for port in ports]
+    evidence_data = [
+        EntityEvidenceResponse.model_validate(item).model_dump()
+        for item in evidence
+    ]
 
     return {
         "host": host_data,
         "ports": ports_data,
+        "evidence": evidence_data,
     }
 
 

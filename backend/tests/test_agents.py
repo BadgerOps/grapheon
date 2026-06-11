@@ -16,6 +16,7 @@ from models import (
     AgentEnrollmentKey,
     AgentObservation,
     Connection,
+    EntityEvidence,
     Host,
     RawImport,
 )
@@ -468,6 +469,63 @@ class TestAgentEnrollmentAndCheckIn:
         assert observations_by_type["route"].confidence == 70
         assert observations_by_type["route"].relationship_type == "route_gateway"
 
+        evidence_rows = (
+            await db.execute(
+                select(EntityEvidence).order_by(
+                    EntityEvidence.entity_id,
+                    EntityEvidence.field_name,
+                    EntityEvidence.confidence.desc(),
+                )
+            )
+        ).scalars().all()
+        assert evidence_rows
+        host_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.entity_type == "host" and evidence.entity_id == host.id
+        ]
+        self_hostname_evidence = [
+            evidence
+            for evidence in host_evidence
+            if evidence.field_name == "hostname"
+            and evidence.observed_value == "collector-01"
+            and evidence.confidence == 95
+        ]
+        assert len(self_hostname_evidence) == 1
+        assert self_hostname_evidence[0].source_origin == "agent"
+        assert self_hostname_evidence[0].observer_agent_id == agent_id
+        assert self_hostname_evidence[0].agent_observation_id == observations_by_type["address"].id
+        remote_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.entity_type == "host" and evidence.entity_id == remote_host.id
+        ]
+        assert any(
+            evidence.field_name == "ip_address"
+            and evidence.observed_value == "10.0.0.10"
+            and evidence.confidence == 35
+            for evidence in remote_evidence
+        )
+        gateway_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.field_name == "device_type"
+            and evidence.observed_value == "router"
+        ]
+        assert gateway_evidence
+
+        host_detail_response = await async_client.get(
+            f"/api/hosts/{host.id}",
+            headers=admin_headers,
+        )
+        assert host_detail_response.status_code == 200
+        host_detail_data = host_detail_response.json()
+        assert host_detail_data["evidence"]
+        assert {
+            item["field_name"]
+            for item in host_detail_data["evidence"]
+        } >= {"hostname", "ip_address", "mac_address"}
+
         import_filter = await async_client.get(
             "/api/imports",
             params={"source_origin": "agent"},
@@ -736,6 +794,18 @@ class TestAgentEnrollmentAndCheckIn:
         assert host.hostname == "manual-hostname"
         assert sorted(host.source_origins) == ["agent", "manual"]
         assert host.observed_by_agent_ids == [agent_id]
+        hostname_evidence = (
+            await db.execute(
+                select(EntityEvidence).where(
+                    EntityEvidence.entity_type == "host",
+                    EntityEvidence.entity_id == host.id,
+                    EntityEvidence.field_name == "hostname",
+                    EntityEvidence.observed_value == "collector-hostname",
+                )
+            )
+        ).scalar_one()
+        assert hostname_evidence.confidence == 95
+        assert hostname_evidence.source_origin == "agent"
 
     @pytest.mark.asyncio
     async def test_rotate_agent_api_key_invalidates_previous_key(

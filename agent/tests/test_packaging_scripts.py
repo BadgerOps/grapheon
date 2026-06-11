@@ -86,6 +86,32 @@ def test_install_script_creates_versioned_release_and_current_symlink(tmp_path):
     assert "daemon-reload" in systemctl_log.read_text(encoding="utf-8")
 
 
+def test_packaged_agent_service_does_not_block_on_jitter(tmp_path):
+    repo_copy = _copy_packaging_tree(tmp_path)
+    service = (repo_copy / "deploy/grapheon-agent.service").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Type=simple" in service
+    assert "RuntimeMaxSec=10min" in service
+    assert "Type=oneshot" not in service
+    assert "TimeoutStartSec=10min" not in service
+
+
+def test_packaged_agent_timer_polls_control_plane_quickly(tmp_path):
+    repo_copy = _copy_packaging_tree(tmp_path)
+    timer = (repo_copy / "deploy/grapheon-agent.timer").read_text(
+        encoding="utf-8"
+    )
+    env_example = (repo_copy / "deploy/grapheon-agent.env.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert "OnBootSec=15s" in timer
+    assert "OnUnitActiveSec=15s" in timer
+    assert "GRAPHEON_AGENT_TIMER_INTERVAL_SECONDS=15" in env_example
+
+
 def test_rollback_script_repoints_current_symlink_to_previous_release(tmp_path):
     repo_copy = _copy_packaging_tree(tmp_path)
     fake_systemctl = _fake_systemctl(tmp_path)

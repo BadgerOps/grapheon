@@ -19,7 +19,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from ipaddress import ip_address
+from fnmatch import fnmatch
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib import error, request
@@ -39,12 +40,24 @@ DEFAULT_POLICY = {
 
 DEFAULT_STATE_DIR = "/var/lib/grapheon-agent"
 DEFAULT_CONFIG_PATH = "/etc/grapheon-agent.env"
-DEFAULT_TIMER_INTERVAL_SECONDS = 900
+DEFAULT_TIMER_INTERVAL_SECONDS = 15
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 DEFAULT_API_KEY_HEADER = "X-Agent-Api-Key"
 STATE_FILENAME = "state.json"
 AGENT_UUID_FILENAME = "agent_uuid"
 API_KEY_FILENAME = "api_key"
+DEFAULT_LOCAL_INTERFACE_PATTERNS = (
+    "lo",
+    "vmnet*",
+    "vboxnet*",
+    "docker*",
+    "br-*",
+    "virbr*",
+    "veth*",
+    "podman*",
+    "cni*",
+    "flannel*",
+)
 
 LOG = logging.getLogger("grapheon_agent")
 
@@ -93,6 +106,7 @@ class AgentConfig:
     timer_interval_seconds: int
     api_key_header: str
     user_agent: str
+    ignore_local_net: bool
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -170,6 +184,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="HTTP User-Agent header sent to the Graphēon server",
     )
     parser.add_argument(
+        "--ignore-local-net",
+        action="store_true",
+        default=None,
+        help=(
+            "Drop local-only network data such as loopback, link-local IPs, "
+            "and common local virtualization bridge interfaces"
+        ),
+    )
+    parser.add_argument(
         "--ca-file",
         default=os.environ.get("GRAPHEON_AGENT_CA_FILE"),
         help="Optional CA bundle path for HTTPS validation",
@@ -233,6 +256,11 @@ def build_config(args: argparse.Namespace) -> AgentConfig:
     hostname = args.hostname or os.environ.get("GRAPHEON_AGENT_HOSTNAME")
     ca_file = args.ca_file or os.environ.get("GRAPHEON_AGENT_CA_FILE")
     user_agent = args.user_agent or os.environ.get("GRAPHEON_AGENT_USER_AGENT") or DEFAULT_USER_AGENT
+    ignore_local_net = (
+        args.ignore_local_net
+        if args.ignore_local_net is not None
+        else _env_bool("GRAPHEON_AGENT_IGNORE_LOCAL_NET", False)
+    )
 
     if not server_url:
         raise SystemExit("GRAPHEON_AGENT_SERVER_URL is required")
@@ -251,6 +279,7 @@ def build_config(args: argparse.Namespace) -> AgentConfig:
         timer_interval_seconds=args.timer_interval_seconds,
         api_key_header=args.api_key_header,
         user_agent=user_agent,
+        ignore_local_net=ignore_local_net,
     )
 
 
@@ -373,6 +402,54 @@ def normalize_ip(value: str) -> Optional[str]:
     if parsed.is_unspecified:
         return "0.0.0.0" if parsed.version == 4 else "::"
     return str(parsed)
+
+
+def is_local_noise_interface(interface: Optional[str]) -> bool:
+    if not interface:
+        return False
+    return any(fnmatch(interface, pattern) for pattern in DEFAULT_LOCAL_INTERFACE_PATTERNS)
+
+
+def is_local_noise_ip(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = ip_address(value)
+    except ValueError:
+        try:
+            network = ip_network(value, strict=False)
+        except ValueError:
+            return False
+        return (
+            network.is_loopback
+            or network.is_link_local
+            or network.is_multicast
+            or network.is_reserved
+            or network.is_unspecified
+        )
+    return (
+        parsed.is_loopback
+        or parsed.is_link_local
+        or parsed.is_multicast
+        or parsed.is_reserved
+        or parsed.is_unspecified
+    )
+
+
+def filter_local_net_records(
+    records: list[dict[str, Any]],
+    *,
+    ip_fields: Iterable[str],
+    interface_field: str = "interface",
+) -> list[dict[str, Any]]:
+    filtered = []
+    for record in records:
+        if is_local_noise_interface(record.get(interface_field)):
+            continue
+        if any(is_local_noise_ip(record.get(field)) for field in ip_fields):
+            continue
+        filtered.append(record)
+    return canonicalize_entries(filtered)
 
 
 def split_host_port(endpoint: str) -> tuple[Optional[str], Optional[int]]:
@@ -606,43 +683,52 @@ def run_command(command: list[str], timeout_seconds: int) -> str:
     return completed.stdout
 
 
-def collect_addresses(timeout_seconds: int) -> list[dict[str, Any]]:
+def collect_addresses(timeout_seconds: int, ignore_local_net: bool = False) -> list[dict[str, Any]]:
     command = choose_command(["ip", "-json", "addr", "show"])
     if not command:
         LOG.warning("Skipping address collection: ip command not found")
         return []
     try:
-        return parse_ip_addr_json(run_command(command, timeout_seconds))
+        records = parse_ip_addr_json(run_command(command, timeout_seconds))
     except (subprocess.SubprocessError, OSError) as exc:
         LOG.warning("Address collection failed: %s", exc)
         return []
+    if ignore_local_net:
+        return filter_local_net_records(records, ip_fields=["ip_address"])
+    return records
 
 
-def collect_routes(timeout_seconds: int) -> list[dict[str, Any]]:
+def collect_routes(timeout_seconds: int, ignore_local_net: bool = False) -> list[dict[str, Any]]:
     command = choose_command(["ip", "-json", "route", "show"])
     if not command:
         LOG.warning("Skipping route collection: ip command not found")
         return []
     try:
-        return parse_ip_route_json(run_command(command, timeout_seconds))
+        records = parse_ip_route_json(run_command(command, timeout_seconds))
     except (subprocess.SubprocessError, OSError) as exc:
         LOG.warning("Route collection failed: %s", exc)
         return []
+    if ignore_local_net:
+        return filter_local_net_records(records, ip_fields=["destination", "gateway", "source_ip"])
+    return records
 
 
-def collect_neighbors(timeout_seconds: int) -> list[dict[str, Any]]:
+def collect_neighbors(timeout_seconds: int, ignore_local_net: bool = False) -> list[dict[str, Any]]:
     command = choose_command(["ip", "-json", "neigh", "show"])
     if not command:
         LOG.warning("Skipping neighbor collection: ip command not found")
         return []
     try:
-        return parse_ip_neigh_json(run_command(command, timeout_seconds))
+        records = parse_ip_neigh_json(run_command(command, timeout_seconds))
     except (subprocess.SubprocessError, OSError) as exc:
         LOG.warning("Neighbor collection failed: %s", exc)
         return []
+    if ignore_local_net:
+        return filter_local_net_records(records, ip_fields=["ip_address"])
+    return records
 
 
-def collect_connections(timeout_seconds: int) -> list[dict[str, Any]]:
+def collect_connections(timeout_seconds: int, ignore_local_net: bool = False) -> list[dict[str, Any]]:
     command = choose_command(["ss", "-tunapH"], ["netstat", "-tunap"])
     if not command:
         LOG.warning("Skipping connection collection: ss/netstat command not found")
@@ -653,8 +739,12 @@ def collect_connections(timeout_seconds: int) -> list[dict[str, Any]]:
         LOG.warning("Connection collection failed: %s", exc)
         return []
     if command[0] == "netstat":
-        return parse_netstat_output(output)
-    return parse_ss_output(output)
+        records = parse_netstat_output(output)
+    else:
+        records = parse_ss_output(output)
+    if ignore_local_net:
+        return filter_local_net_records(records, ip_fields=["local_ip", "remote_ip"])
+    return records
 
 
 def build_registration_payload(config: AgentConfig, agent_uuid_value: str) -> dict[str, Any]:
@@ -668,19 +758,22 @@ def build_registration_payload(config: AgentConfig, agent_uuid_value: str) -> di
         "agent_version": AGENT_VERSION,
         "platform": platform.system().lower(),
         "platform_release": platform.release(),
-        "metadata": {"runtime": "python-stdlib", "timer_model": "systemd-oneshot"},
-        "addresses": collect_addresses(timeout_seconds),
+        "metadata": {"runtime": "python-stdlib", "timer_model": "systemd-timer"},
+        "addresses": collect_addresses(timeout_seconds, config.ignore_local_net),
     }
 
 
-def build_current_snapshot(policy: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def build_current_snapshot(
+    policy: dict[str, Any],
+    ignore_local_net: bool = False,
+) -> dict[str, list[dict[str, Any]]]:
     timeout_seconds = int(policy.get("command_timeout_seconds", DEFAULT_POLICY["command_timeout_seconds"]))
     commands = policy.get("enabled_commands") or DEFAULT_POLICY["enabled_commands"]
     snapshot = {
-        "addresses": collect_addresses(timeout_seconds) if commands.get("ip_addr", True) else [],
-        "neighbors": collect_neighbors(timeout_seconds) if commands.get("ip_neigh", True) else [],
-        "connections": collect_connections(timeout_seconds) if commands.get("ss_tunap", True) else [],
-        "routes": collect_routes(timeout_seconds) if commands.get("ip_route", True) else [],
+        "addresses": collect_addresses(timeout_seconds, ignore_local_net) if commands.get("ip_addr", True) else [],
+        "neighbors": collect_neighbors(timeout_seconds, ignore_local_net) if commands.get("ip_neigh", True) else [],
+        "connections": collect_connections(timeout_seconds, ignore_local_net) if commands.get("ss_tunap", True) else [],
+        "routes": collect_routes(timeout_seconds, ignore_local_net) if commands.get("ip_route", True) else [],
     }
     return {key: canonicalize_entries(value) for key, value in snapshot.items()}
 
@@ -748,6 +841,13 @@ def poll_agent_control(config: AgentConfig, api_key: str, agent_uuid_value: str)
     )
 
 
+def is_invalid_agent_api_key_error(exc: RuntimeError) -> bool:
+    return (
+        "HTTP 401 calling api/agents/poll" in str(exc)
+        and "Invalid agent API key" in str(exc)
+    )
+
+
 def merged_policy(state: dict[str, Any], response_policy: Optional[dict[str, Any]]) -> dict[str, Any]:
     policy = json.loads(canonical_json(DEFAULT_POLICY))
     cached = state.get("policy") or {}
@@ -812,7 +912,44 @@ def run_agent(
         return 0
 
     if api_key:
-        poll_response = poll_agent_control(config, api_key, agent_uuid_value)
+        try:
+            poll_response = poll_agent_control(config, api_key, agent_uuid_value)
+        except RuntimeError as exc:
+            if not is_invalid_agent_api_key_error(exc) or not config.enrollment_key:
+                raise
+            LOG.warning(
+                "Stored agent API key was rejected by Graphēon; "
+                "clearing local key and falling back to enrollment registration"
+            )
+            try:
+                api_key_path(config).unlink()
+            except FileNotFoundError:
+                pass
+            api_key = None
+            registration_response = register_agent(config, agent_uuid_value)
+            policy = merged_policy(state, registration_response.get("policy"))
+            state["policy"] = policy
+            state["agent_id"] = registration_response.get("agent", {}).get("id")
+            state["enrollment_state"] = registration_response.get("agent", {}).get("enrollment_state")
+            if registration_response.get("status") != "active":
+                write_json_file(state_file_path(config), state)
+                LOG.info(
+                    "Agent %s is %s after API-key recovery registration; waiting for admin approval",
+                    agent_uuid_value,
+                    registration_response.get("status"),
+                )
+                return 0
+            issued_api_key = registration_response.get("api_key")
+            if not issued_api_key:
+                raise RuntimeError(
+                    "Stored API key was rejected and registration did not return a "
+                    "replacement key. Rotate this agent's API key in Graphēon and "
+                    "write the new key to the local api_key file."
+                ) from exc
+            write_text_file(api_key_path(config), issued_api_key)
+            api_key = issued_api_key
+            LOG.info("Recovered local agent API key through enrollment registration")
+            poll_response = {"policy": registration_response.get("policy")}
         policy = merged_policy(state, poll_response.get("policy"))
         state["policy"] = policy
         collection_request = poll_response.get("collection_request") or {}
@@ -832,7 +969,7 @@ def run_agent(
     sleep_delay = maybe_sleep_for_policy_jitter(policy)
     state["last_jitter_seconds"] = sleep_delay
 
-    current_snapshot = build_current_snapshot(policy)
+    current_snapshot = build_current_snapshot(policy, config.ignore_local_net)
     snapshot_payload, full_snapshot = build_snapshot_payload(
         current_snapshot,
         state.get("last_snapshot") or {},
@@ -916,6 +1053,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         config = build_config(args)
+        LOG.info(
+            "Starting Graphēon passive agent version %s",
+            AGENT_VERSION,
+        )
         return run_agent(
             config,
             force=args.force,

@@ -123,6 +123,10 @@ The Network Map filter panel includes agent topology controls when passive-agent
 
 These controls pass through to `/api/network/map` and add typed Cytoscape edges from current agent observations. Default map behavior is unchanged until an agent topology filter or layer is selected.
 
+## Host Evidence Panel
+
+Host Detail renders the `evidence` list returned by `GET /api/hosts/{id}`. The panel shows each field value with confidence, source, observing agent, current/historical state, and last-seen timestamp so operators can distinguish verified or manual identity from lower-confidence passive observations.
+
 ## Changelog
 
 - Version is sourced from `frontend/package.json`.

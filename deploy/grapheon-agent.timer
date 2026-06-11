@@ -2,8 +2,8 @@
 Description=Run the Graphēon passive agent collector periodically
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=15min
+OnBootSec=15s
+OnUnitActiveSec=15s
 Persistent=true
 Unit=grapheon-agent.service
 

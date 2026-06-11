@@ -7,7 +7,7 @@ It covers:
 1. Creating a passive collection policy
 2. Creating an enrollment key
 3. Running the agent manually with flags
-4. Installing the one-shot collector and `systemd` timer
+4. Installing the collector service and `systemd` timer
 5. Starting the agent for registration
 6. Approving the pending agent
 7. Starting the agent again to obtain the per-agent API key and send the first check-in
@@ -268,8 +268,16 @@ GRAPHEON_AGENT_SITE_NAME=Boise
 Optional User-Agent override for stricter edge policies:
 
 ```dotenv
-GRAPHEON_AGENT_USER_AGENT=Grapheon-Agent/0.13.0 python-urllib
+GRAPHEON_AGENT_USER_AGENT=Grapheon-Agent/0.14.0 python-urllib
 ```
+
+Optional local-noise filtering for workstation, hypervisor, or lab hosts:
+
+```dotenv
+GRAPHEON_AGENT_IGNORE_LOCAL_NET=true
+```
+
+This drops loopback, link-local, unspecified, reserved/multicast IPs, and common local virtualization bridge interfaces such as `vmnet*`, `vboxnet*`, `docker*`, and `virbr*`. Normal LAN/private addresses on primary interfaces are still collected.
 
 For local development over plain HTTP:
 
@@ -285,7 +293,7 @@ The runtime stores local state under `/var/lib/grapheon-agent`:
 
 ## 7. Start The Agent Once For Registration
 
-Run the one-shot service manually:
+Start the collector service manually:
 
 ```bash
 sudo systemctl start grapheon-agent.service
@@ -330,7 +338,7 @@ curl -sS \
 
 ## 9. Start The Agent Again To Receive Its API Key
 
-Run the one-shot service again:
+Start the collector service again:
 
 ```bash
 sudo systemctl start grapheon-agent.service
@@ -344,6 +352,8 @@ On this run the runtime will:
 - store that key at `/var/lib/grapheon-agent/api_key`
 - collect passive local observations
 - send the first gzip-compressed check-in
+
+The shipped unit uses `Type=simple`, so `systemctl start` and `restart` return after systemd starts the supervised collector process. If policy jitter is configured, the service may continue running in the background until jitter and collection finish; follow progress with `journalctl` or `systemctl status`.
 
 Verify local state:
 
@@ -386,14 +396,14 @@ sudo systemctl enable --now grapheon-agent.timer
 sudo systemctl list-timers grapheon-agent.timer
 ```
 
-The shipped timer runs every 15 minutes. The runtime uses the cached backend policy to decide whether a full collection should happen on that invocation. This allows:
+The shipped timer runs every 15 seconds to poll the backend control plane for admin-requested collections. The runtime uses the cached backend policy to decide whether a full collection should happen on that invocation. This allows:
 
 - simple static `systemd` units
 - server-controlled interval policy
-- server-controlled jitter
+- server-controlled jitter without blocking `systemctl restart`
 - server-controlled command enable/disable
 
-If the cached policy interval has not elapsed yet, the runtime exits quickly.
+If the cached policy interval has not elapsed and no on-demand collection is pending, the runtime exits quickly after the lightweight poll.
 
 An admin can request collection from the Agents page. Because the runtime is outbound-only, the request is fulfilled the next time the host timer starts the agent and the agent polls Graphēon.
 
@@ -421,7 +431,7 @@ sudo journalctl -u grapheon-agent.service -n 100 --no-pager
 Force an immediate run:
 
 ```bash
-sudo systemctl start grapheon-agent.service
+sudo systemctl restart grapheon-agent.service
 ```
 
 Run the collector directly:
@@ -441,6 +451,8 @@ Grapheon-Agent/<version> python-urllib
 Override it when needed with `GRAPHEON_AGENT_USER_AGENT` in `/etc/grapheon-agent.env` or with `--user-agent` for direct runs.
 
 If the agent was approved but the API key file was lost, rotate the key from the admin API and place the new secret back on the host:
+
+If the local API key exists but the backend rejects it with `Invalid agent API key`, the agent first tries to recover automatically by deleting the stale local key and registering again with `GRAPHEON_AGENT_ENROLLMENT_KEY`. This handles localhost database resets and other cases where the backend no longer has the matching server-side key hash. If registration returns an active agent without a replacement key, rotate the key manually:
 
 ```bash
 ROTATE_JSON="$(

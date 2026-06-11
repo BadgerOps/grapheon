@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.16.0 - 2026-06-11
+### Added
+- **Entity evidence trail**: added a generic `entity_evidence` table for field and relationship evidence with source, observer, confidence, timestamps, raw import, and agent observation references.
+- **Agent identity evidence ingest**: passive agent check-ins now write host field evidence for observed IP, MAC, hostname, vendor, and route-gateway device-type facts while preserving manual canonical identities.
+- **Host detail evidence API**: `GET /api/hosts/{id}` now returns an `evidence` list alongside host and port data.
+
 ## 0.15.0 - 2026-06-11
 ### Added
 - **Agent-aware topology metadata**: passive observations now store observer/vantage role, confidence, relationship type, and stable relationship keys.

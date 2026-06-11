@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.15.0 - 2026-06-11
+### Added
+- **Host evidence panel**: Host Detail now shows evidence records with field value, confidence, source, observing agent, current state, and last-seen timestamp.
+
 ## 0.14.0 - 2026-06-11
 ### Added
 - **Agent topology map filters**: the Network Map can filter by observing agent, toggle collector/ARP/connection/route relationship layers, set a confidence threshold, and show passive-agent collector nodes.

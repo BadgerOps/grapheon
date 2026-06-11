@@ -332,6 +332,32 @@ class HostResponse(HostFields):
     model_config = ConfigDict(from_attributes=True)
 
 
+class EntityEvidenceResponse(BaseModel):
+    """Evidence attached to a canonical entity field or relationship."""
+
+    id: int
+    entity_type: str
+    entity_id: int
+    field_name: Optional[str] = None
+    observed_value: Optional[str] = None
+    source_origin: str
+    source_type: Optional[str] = None
+    observer_agent_id: Optional[int] = None
+    raw_import_id: Optional[int] = None
+    agent_observation_id: Optional[int] = None
+    relationship_type: Optional[str] = None
+    confidence: int = Field(50, ge=0, le=100)
+    first_seen_at: datetime
+    last_seen_at: datetime
+    is_current: bool
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        validation_alias="evidence_metadata",
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 # ── Backwards compatibility alias ────────────────────────────────────
 HostBase = HostFields
 

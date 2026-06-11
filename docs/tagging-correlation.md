@@ -109,3 +109,5 @@ Passive-agent rows now keep observer metadata separate from source origin:
 - `agent_observations.relationship_type` and `relationship_key` allow the map to render evidence-backed collector, ARP neighbor, connection remote, and route gateway edges.
 
 This prevents agent-origin data from collapsing every observed IP into the collector identity. Agent self-interface evidence is high confidence, while connection-only remote evidence is lower confidence and should not overwrite stronger manual or self-interface identity data.
+
+The shared `entity_evidence` table stores host field evidence produced during agent ingest. Host evidence records include field name, observed value, source origin/type, observer agent, raw import, agent observation, relationship type, confidence, and first/last seen timestamps. Canonical hostname, vendor, and device-type fields are selected conservatively from current evidence: empty agent-only fields can be filled, but verified hosts and existing manual-origin values are preserved when weaker agent evidence arrives.

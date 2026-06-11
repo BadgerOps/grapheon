@@ -20,7 +20,7 @@ from database import get_db
 from auth.dependencies import require_any_authenticated
 from models import User
 from network.constants import COMPOUND_NODE_TYPES
-from network.validators import get_subnet
+from network.validators import get_observed_subnet
 from network.queries import (
     fetch_hosts,
     fetch_vlan_configs,
@@ -28,6 +28,7 @@ from network.queries import (
     fetch_connections,
     fetch_current_agent_observations,
     fetch_agents_by_ids,
+    fetch_observed_networks,
     fetch_port_counts,
     fetch_device_identities,
     fetch_route_hops,
@@ -51,7 +52,8 @@ async def get_network_map(
     segment_filter: Optional[str] = Query(None, description="Filter by segment/interface name"),
     vlan_filter: Optional[int] = Query(None, description="Filter by VLAN ID"),
     include_inactive: bool = Query(False, description="Include inactive hosts"),
-    subnet_prefix: int = Query(24, ge=8, le=32, description="Subnet prefix for grouping"),
+    subnet_prefix: Optional[int] = Query(None, ge=8, le=32, description="Optional fallback subnet prefix for grouping when no observed/configured CIDR matches"),
+    network_cidrs: Optional[list[str]] = Query(None, description="Operator-provided CIDR hints for map grouping"),
     group_by: str = Query("subnet", description="Grouping mode: 'subnet', 'segment', or 'vlan'"),
     layout_mode: str = Query("grouped", description="Layout hint: 'hierarchical', 'grouped', or 'force'"),
     format: str = Query("cytoscape", description="Response format: 'cytoscape' or 'legacy'"),
@@ -121,6 +123,20 @@ async def get_network_map(
     )
     logger.debug(f"[5.5/7] Loaded {len(device_identities)} device identities in {_ms(step_start)}")
 
+    # ── Step 5.75: Fetch agent-observed subnet boundaries ─────────
+    step_start = time.perf_counter()
+    agent_observed_networks = await fetch_observed_networks(
+        db,
+        observed_by_agent_id=observed_by_agent_id,
+    )
+    observed_networks = _merge_networks(
+        _parse_network_cidrs(network_cidrs or [])
+        + _parse_network_cidrs([subnet_filter] if subnet_filter else [])
+        + list(subnet_to_vlan.keys())
+        + agent_observed_networks
+    )
+    logger.debug(f"[5.75/7] Loaded {len(observed_networks)} observed networks in {_ms(step_start)}")
+
     # ── Step 6: Build Cytoscape nodes ────────────────────────────
     step_start = time.perf_counter()
     (
@@ -144,6 +160,7 @@ async def get_network_map(
         show_internet=show_internet,
         ip_to_segment=ip_to_segment,
         subnet_to_vlan=subnet_to_vlan,
+        observed_networks=observed_networks,
     )
 
     # ── Step 7: Build edges from connections ──────────────────────
@@ -157,6 +174,7 @@ async def get_network_map(
         subnet_prefix=subnet_prefix,
         shared_gateway_nodes=shared_gateway_nodes,
         shared_gateway_devices=shared_gateway_devices,
+        observed_networks=observed_networks,
     )
 
     # Prepend gateway-to-subnet edges (created during node building)
@@ -220,6 +238,12 @@ async def get_network_map(
         "shared_gateways": len(shared_gateway_nodes),
         "agent_topology_edges": sum(agent_edge_stats.values()),
         "agent_edge_counts": agent_edge_stats,
+        "observed_networks": [str(network) for network in observed_networks],
+        "unresolved_network_groups": sum(
+            1
+            for subnet_id in seen_subnets
+            if subnet_id.startswith("subnet_unresolved-")
+        ),
         "show_internet": show_internet,
         "group_mode": group_by,
         "layout_mode": layout_mode,
@@ -314,7 +338,8 @@ async def get_network_routes(
 
 @router.get("/subnets")
 async def get_subnets(
-    prefix: int = Query(24, ge=8, le=32, description="Subnet prefix length"),
+    prefix: Optional[int] = Query(None, ge=8, le=32, description="Optional fallback subnet prefix length"),
+    network_cidrs: Optional[list[str]] = Query(None, description="Operator-provided CIDR hints for subnet grouping"),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -322,6 +347,14 @@ async def get_subnets(
     start_time = time.perf_counter()
 
     hosts = await fetch_hosts(db, include_inactive=False)
+    vlan_configs = await fetch_vlan_configs(db)
+    subnet_to_vlan = _build_subnet_to_vlan(vlan_configs)
+    agent_observed_networks = await fetch_observed_networks(db)
+    observed_networks = _merge_networks(
+        _parse_network_cidrs(network_cidrs or [])
+        + list(subnet_to_vlan.keys())
+        + agent_observed_networks
+    )
 
     # Batch port counts (replaces N+1 per-host queries)
     port_counts = await fetch_port_counts(db, [h.id for h in hosts])
@@ -332,7 +365,7 @@ async def get_subnets(
     })
 
     for host in hosts:
-        subnet = get_subnet(host.ip_address, prefix)
+        subnet = get_observed_subnet(host.ip_address, prefix, observed_networks)
         subnets[subnet]["hosts"].append(host.ip_address)
         if host.device_type:
             subnets[subnet]["device_types"][host.device_type] += 1
@@ -359,6 +392,7 @@ async def get_subnets(
     return {
         "subnets": subnet_list,
         "total_subnets": len(subnet_list),
+        "observed_networks": [str(network) for network in observed_networks],
         "generation_time_ms": round(total_duration, 1),
     }
 
@@ -380,3 +414,24 @@ def _build_subnet_to_vlan(vlan_configs: dict) -> dict:
             except ValueError:
                 pass
     return subnet_to_vlan
+
+
+def _parse_network_cidrs(network_cidrs: list[str]) -> list:
+    """Parse operator-provided CIDR hints, ignoring invalid values."""
+    networks = []
+    for raw_value in network_cidrs:
+        for candidate in str(raw_value).replace(",", " ").split():
+            try:
+                networks.append(ip_network(candidate, strict=False))
+            except ValueError:
+                logger.warning("Ignoring invalid network CIDR hint: %s", candidate)
+    return networks
+
+
+def _merge_networks(networks: list) -> list:
+    """De-duplicate networks while keeping deterministic ordering."""
+    unique = set(networks)
+    return sorted(
+        unique,
+        key=lambda network: (network.version, int(network.network_address), network.prefixlen),
+    )

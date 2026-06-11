@@ -7,6 +7,7 @@ export default function HostDetail() {
   const navigate = useNavigate()
   const [host, setHost] = useState(null)
   const [ports, setPorts] = useState([])
+  const [evidence, setEvidence] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -22,6 +23,7 @@ export default function HostDetail() {
       // API returns {host: {...}, ports: [...]}
       setHost(data.host)
       setPorts(data.ports || [])
+      setEvidence(data.evidence || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -153,6 +155,62 @@ export default function HostDetail() {
                 {src}
               </span>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Evidence */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Evidence</h2>
+          <span className="text-sm text-gray-500">{evidence.length} records</span>
+        </div>
+        {evidence.length === 0 ? (
+          <p className="text-gray-500">No evidence recorded for this host</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-100 border-b-2 border-gray-300">
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Field</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Value</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Confidence</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Source</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Observer</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">State</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evidence.map((item) => (
+                  <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-900 font-medium">{item.field_name || '-'}</td>
+                    <td className="px-4 py-3 text-gray-900 font-mono text-sm">{item.observed_value || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                        {item.confidence}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-900">
+                      {[item.source_origin, item.source_type].filter(Boolean).join(' / ') || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-900">
+                      {item.observer_agent_id ? `Agent ${item.observer_agent_id}` : '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                        item.is_current ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {item.is_current ? 'Current' : 'Historical'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-900">
+                      {item.last_seen_at ? new Date(item.last_seen_at).toLocaleString() : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

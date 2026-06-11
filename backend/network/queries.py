@@ -3,6 +3,7 @@ Database query helpers for network map generation.
 """
 import logging
 from collections import defaultdict
+from ipaddress import ip_network
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +105,57 @@ async def fetch_agents_by_ids(db: AsyncSession, agent_ids: list[int]) -> dict[in
         return {}
     result = await db.execute(select(Agent).where(Agent.id.in_(sorted(set(agent_ids)))))
     return {agent.id: agent for agent in result.scalars().all()}
+
+
+def _is_groupable_network(network) -> bool:
+    """Return true for networks useful as map grouping containers."""
+    max_prefix = 30 if network.version == 4 else 126
+    return (
+        0 < network.prefixlen <= max_prefix
+        and not network.is_loopback
+        and not network.is_link_local
+        and not network.is_multicast
+        and not network.is_reserved
+        and not network.is_unspecified
+    )
+
+
+async def fetch_observed_networks(
+    db: AsyncSession,
+    observed_by_agent_id: Optional[int] = None,
+) -> list:
+    """Fetch current agent-observed networks for map subnet grouping."""
+    query = select(AgentObservation).where(
+        AgentObservation.is_current.is_(True),
+        AgentObservation.observation_type.in_(("address", "route")),
+    )
+    if observed_by_agent_id is not None:
+        query = query.where(AgentObservation.agent_id == observed_by_agent_id)
+
+    result = await db.execute(query)
+    networks = set()
+    for observation in result.scalars().all():
+        payload = observation.payload or {}
+        candidates = []
+        if observation.observation_type == "address":
+            ip_address = payload.get("ip_address")
+            prefix_length = payload.get("prefix_length")
+            if ip_address and prefix_length is not None:
+                candidates.append(f"{ip_address}/{prefix_length}")
+        elif observation.observation_type == "route":
+            destination = payload.get("destination")
+            if destination and destination != "default" and "/" in destination:
+                candidates.append(destination)
+
+        for candidate in candidates:
+            try:
+                network = ip_network(candidate, strict=False)
+            except ValueError:
+                continue
+            if _is_groupable_network(network):
+                networks.add(network)
+
+    return sorted(networks, key=lambda network: (network.version, int(network.network_address), network.prefixlen))
 
 
 async def fetch_port_counts(db: AsyncSession, host_ids: list[int]) -> dict[int, int]:

@@ -163,6 +163,31 @@ def test_agent_observer_metadata_migration_backfills_legacy_rows(tmp_path):
         ).scalar_one()
         assert connection_observer == 1
 
+        evidence_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(entity_evidence)")).fetchall()
+        }
+        assert {
+            "entity_type",
+            "entity_id",
+            "field_name",
+            "observed_value",
+            "source_origin",
+            "source_type",
+            "observer_agent_id",
+            "raw_import_id",
+            "agent_observation_id",
+            "relationship_type",
+            "confidence",
+            "metadata",
+        }.issubset(evidence_columns)
+        evidence_indexes = {
+            row[1]
+            for row in conn.execute(text("PRAGMA index_list(entity_evidence)")).fetchall()
+        }
+        assert "idx_entity_evidence_entity" in evidence_indexes
+        assert "idx_entity_evidence_field" in evidence_indexes
+
         raw_origin = conn.execute(
             text("SELECT source_origin FROM raw_imports WHERE id = 100")
         ).scalar_one()

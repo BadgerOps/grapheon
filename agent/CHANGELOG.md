@@ -4,6 +4,20 @@ All notable changes to the Graphēon passive agent will be documented in this fi
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.14.0 - 2026-06-11
+### Added
+- **Local network noise filtering**: `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true` / `--ignore-local-net` drops loopback, link-local, unspecified, reserved/multicast IPs, and common local virtualization bridge interfaces from agent collection.
+- **Startup version logging**: each agent invocation logs the passive agent version before registration, polling, or collection decisions.
+
+### Changed
+- **Fast control-plane polling**: the shipped systemd timer and default local timer interval now run every 15 seconds so UI-requested agent collections are picked up promptly while backend policy still gates full passive collection frequency.
+- **Precise timer cadence**: the shipped systemd timer now sets `AccuracySec=1s` so the 15-second control-plane poll is not delayed by systemd's default one-minute timer coalescing window.
+
+## 0.13.1 - 2026-06-11
+### Fixed
+- **Systemd restart responsiveness**: the shipped agent service now uses `Type=simple` with `RuntimeMaxSec=10min` so `systemctl restart grapheon-agent.service` returns after the supervised agent process starts instead of blocking through policy jitter and collection.
+- **Local API-key recovery**: if a stored API key is rejected during agent control polling and an enrollment key is configured, the agent clears the stale local key and attempts enrollment registration to recover from backend database resets or lost server-side key state.
+
 ## 0.13.0 - 2026-06-11
 ### Added
 - **On-demand collection polling**: the passive agent now polls Graphēon for pending collection requests on each timer run and bypasses local cadence when an admin-requested collection is pending.

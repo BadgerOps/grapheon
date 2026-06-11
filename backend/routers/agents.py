@@ -25,6 +25,7 @@ from models import (
     AgentObservation,
     AgentPolicy,
     Connection,
+    EntityEvidence,
     Host,
     RawImport,
     User,
@@ -67,6 +68,7 @@ from utils.tagging import (
     build_host_tags,
     merge_tags,
 )
+from services.mac_vendor import lookup_mac_vendor
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +316,196 @@ def _merge_unique_int(values: Optional[list[int]], value: int) -> list[int]:
     return current
 
 
+def _agent_evidence_fact(
+    host: Host,
+    field_name: str,
+    observed_value: Any,
+    confidence: int,
+    metadata: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    if observed_value is None or observed_value == "":
+        return None
+    return {
+        "entity_type": "host",
+        "entity_ref": host,
+        "field_name": field_name,
+        "observed_value": str(observed_value),
+        "confidence": confidence,
+        "metadata": metadata or {},
+    }
+
+
+def _host_identity_evidence(
+    host: Host,
+    *,
+    ip_address: Optional[str] = None,
+    mac_address: Optional[str] = None,
+    hostname: Optional[str] = None,
+    fqdn: Optional[str] = None,
+    vendor: Optional[str] = None,
+    device_type: Optional[str] = None,
+    confidence: int,
+    metadata: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    facts = [
+        _agent_evidence_fact(host, "ip_address", ip_address, confidence, metadata),
+        _agent_evidence_fact(host, "mac_address", mac_address, confidence, metadata),
+        _agent_evidence_fact(host, "hostname", hostname, confidence, metadata),
+        _agent_evidence_fact(host, "fqdn", fqdn, confidence, metadata),
+        _agent_evidence_fact(host, "vendor", vendor, max(confidence - 10, 0), metadata),
+        _agent_evidence_fact(host, "device_type", device_type, confidence, metadata),
+    ]
+    return [fact for fact in facts if fact is not None]
+
+
+async def _best_current_evidence_confidence(
+    db: AsyncSession,
+    host_id: int,
+    field_name: str,
+) -> int:
+    result = await db.execute(
+        select(func.max(EntityEvidence.confidence)).where(
+            EntityEvidence.entity_type == "host",
+            EntityEvidence.entity_id == host_id,
+            EntityEvidence.field_name == field_name,
+            EntityEvidence.is_current.is_(True),
+        )
+    )
+    return int(result.scalar() or 0)
+
+
+async def _apply_host_canonical_evidence(
+    db: AsyncSession,
+    host: Host,
+    field_name: str,
+    observed_value: str,
+    confidence: int,
+) -> None:
+    if field_name not in {"hostname", "vendor", "device_type"}:
+        return
+    current_value = getattr(host, field_name, None)
+    if current_value == observed_value:
+        return
+    if current_value:
+        if host.is_verified:
+            return
+        origins = set(host.source_origins or [])
+        if "manual" in origins and origins != {AGENT_SOURCE_ORIGIN}:
+            return
+        best_confidence = await _best_current_evidence_confidence(
+            db,
+            host.id,
+            field_name,
+        )
+        if confidence < best_confidence:
+            return
+    setattr(host, field_name, observed_value)
+    host.tags = merge_tags(
+        host.tags,
+        build_host_tags(
+            ip_address=host.ip_address,
+            mac_address=host.mac_address,
+            hostname=host.hostname,
+            fqdn=host.fqdn,
+            vendor=host.vendor,
+            os_family=host.os_family,
+            os_name=host.os_name,
+        ),
+    )
+
+
+async def _upsert_entity_evidence(
+    db: AsyncSession,
+    observation: AgentObservation,
+    fact: dict[str, Any],
+    observed_at: datetime,
+    raw_import_id: int,
+) -> bool:
+    host = fact.get("entity_ref")
+    entity_id = fact.get("entity_id") or getattr(host, "id", None)
+    if not entity_id:
+        return False
+
+    observed_value = fact.get("observed_value")
+    now = _utcnow()
+    result = await db.execute(
+        select(EntityEvidence).where(
+            EntityEvidence.entity_type == fact["entity_type"],
+            EntityEvidence.entity_id == entity_id,
+            EntityEvidence.field_name == fact.get("field_name"),
+            EntityEvidence.observed_value == observed_value,
+            EntityEvidence.source_origin == AGENT_SOURCE_ORIGIN,
+            EntityEvidence.source_type == AGENT_SOURCE_TYPE,
+            EntityEvidence.observer_agent_id == observation.agent_id,
+            EntityEvidence.relationship_type == observation.relationship_type,
+        )
+    )
+    evidence = result.scalar_one_or_none()
+    if evidence:
+        new_confidence = fact.get("confidence", evidence.confidence)
+        if new_confidence >= evidence.confidence:
+            evidence.confidence = new_confidence
+            evidence.agent_observation_id = observation.id
+            evidence.relationship_type = observation.relationship_type
+            evidence.evidence_metadata = fact.get("metadata") or {}
+        evidence.raw_import_id = raw_import_id
+        evidence.last_seen_at = observed_at
+        evidence.is_current = True
+        evidence.updated_at = now
+        created = False
+    else:
+        evidence = EntityEvidence(
+            entity_type=fact["entity_type"],
+            entity_id=entity_id,
+            field_name=fact.get("field_name"),
+            observed_value=observed_value,
+            source_origin=AGENT_SOURCE_ORIGIN,
+            source_type=AGENT_SOURCE_TYPE,
+            observer_agent_id=observation.agent_id,
+            raw_import_id=raw_import_id,
+            agent_observation_id=observation.id,
+            relationship_type=observation.relationship_type,
+            confidence=fact.get("confidence", 50),
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+            is_current=True,
+            evidence_metadata=fact.get("metadata") or {},
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(evidence)
+        created = True
+
+    await _apply_host_canonical_evidence(
+        db,
+        host,
+        fact.get("field_name"),
+        observed_value,
+        evidence.confidence,
+    )
+    return created
+
+
+async def _mark_observation_evidence_removed(
+    db: AsyncSession,
+    observation: AgentObservation,
+    removed_at: datetime,
+) -> int:
+    result = await db.execute(
+        select(EntityEvidence).where(
+            EntityEvidence.agent_observation_id == observation.id,
+            EntityEvidence.is_current.is_(True),
+        )
+    )
+    removed_count = 0
+    for evidence in result.scalars().all():
+        evidence.is_current = False
+        evidence.last_seen_at = removed_at
+        evidence.updated_at = _utcnow()
+        removed_count += 1
+    return removed_count
+
+
 def _pending_collection_request(agent: Agent) -> AgentCollectionRequestStatus:
     requested_at = agent.collection_requested_at
     fulfilled_at = agent.collection_request_fulfilled_at
@@ -484,11 +676,7 @@ async def _upsert_host(
     created = False
 
     if host:
-        current_origins = host.source_origins or []
-        can_update_hostname = (
-            not host.hostname
-            or (AGENT_SOURCE_ORIGIN in current_origins and len(current_origins) == 1)
-        )
+        can_update_hostname = not host.hostname
         if hostname and can_update_hostname:
             host.hostname = hostname
         if mac_address and not host.mac_address:
@@ -879,6 +1067,7 @@ async def _mark_removed_observations(
         observation.stale_at = removed_at
         observation.removed_at = removed_at
         observation.updated_at = _utcnow()
+        await _mark_observation_evidence_removed(db, observation, removed_at)
         removed_count += 1
     return removed_count
 
@@ -911,6 +1100,8 @@ async def _ingest_agent_payload(
     observation_refreshes = 0
     observation_reactivations = 0
     observation_removals = 0
+    evidence_creates = 0
+    evidence_refreshes = 0
 
     seen_ips: set[str] = set()
     seen_macs: set[str] = set()
@@ -928,6 +1119,7 @@ async def _ingest_agent_payload(
     }
 
     for address in payload.addresses:
+        vendor = lookup_mac_vendor(address.mac_address) if address.mac_address else None
         host, created = await _upsert_host(
             db,
             address.ip_address,
@@ -950,11 +1142,25 @@ async def _ingest_agent_payload(
                 "observation_role": "agent_self_interface",
                 "confidence": 95,
                 "relationship_type": "collector_interface",
-                "host_id": host.id,
+                "host_ref": host,
+                "evidence": _host_identity_evidence(
+                    host,
+                    ip_address=address.ip_address,
+                    mac_address=address.mac_address,
+                    hostname=payload.hostname,
+                    fqdn=payload.fqdn,
+                    vendor=vendor,
+                    confidence=95,
+                    metadata={
+                        "observation_role": "agent_self_interface",
+                        "interface": address.interface,
+                    },
+                ),
             }
         )
 
     for neighbor in payload.neighbors:
+        vendor = lookup_mac_vendor(neighbor.mac_address) if neighbor.mac_address else None
         host, created = await _upsert_host(
             db,
             neighbor.ip_address,
@@ -986,13 +1192,27 @@ async def _ingest_agent_payload(
                 "observation_role": "arp_neighbor",
                 "confidence": 80,
                 "relationship_type": "arp_neighbor",
-                "host_id": host.id,
+                "host_ref": host,
                 "arp_entry_id": arp_entry.id if arp_entry else None,
+                "evidence": _host_identity_evidence(
+                    host,
+                    ip_address=neighbor.ip_address,
+                    mac_address=neighbor.mac_address,
+                    hostname=neighbor.hostname,
+                    vendor=vendor,
+                    confidence=80,
+                    metadata={
+                        "observation_role": "arp_neighbor",
+                        "interface": neighbor.interface,
+                        "neighbor_state": neighbor.state,
+                    },
+                ),
             }
         )
 
     for route in payload.routes:
-        route_host_id = None
+        route_host = None
+        route_evidence: list[dict[str, Any]] = []
         if route.source_ip:
             if not parse_ip(route.source_ip).is_unspecified:
                 host, created = await _upsert_host(
@@ -1001,18 +1221,45 @@ async def _ingest_agent_payload(
                     hostname=payload.hostname if route.source_ip in agent_self_ips else None,
                     observed_by_agent_id=agent.id,
                 )
-                route_host_id = host.id
+                route_host = host
                 host_creates += int(created)
                 seen_ips.add(route.source_ip)
+                route_evidence.extend(
+                    _host_identity_evidence(
+                        host,
+                        ip_address=route.source_ip,
+                        hostname=payload.hostname if route.source_ip in agent_self_ips else None,
+                        confidence=70 if route.source_ip in agent_self_ips else 55,
+                        metadata={
+                            "observation_role": "route_source",
+                            "interface": route.interface,
+                            "destination": route.destination,
+                        },
+                    )
+                )
         if route.gateway:
             if not parse_ip(route.gateway).is_unspecified:
-                _, created = await _upsert_host(
+                gateway_host, created = await _upsert_host(
                     db,
                     route.gateway,
                     observed_by_agent_id=agent.id,
                 )
                 host_creates += int(created)
                 seen_ips.add(route.gateway)
+                route_evidence.extend(
+                    _host_identity_evidence(
+                        gateway_host,
+                        ip_address=route.gateway,
+                        device_type="router",
+                        confidence=70,
+                        metadata={
+                            "observation_role": "route_gateway",
+                            "interface": route.interface,
+                            "destination": route.destination,
+                            "source_ip": route.source_ip,
+                        },
+                    )
+                )
         route_payload = route.model_dump(mode="json")
         current_hashes["route"].add(
             _identity_hash("route", _observation_identity("route", route_payload))
@@ -1024,12 +1271,14 @@ async def _ingest_agent_payload(
                 "observation_role": "route_gateway" if route.gateway else "route_source",
                 "confidence": 70 if route.gateway else 55,
                 "relationship_type": "route_gateway" if route.gateway else None,
-                "host_id": route_host_id,
+                "host_ref": route_host,
+                "evidence": route_evidence,
             }
         )
 
     for connection in payload.connections:
-        connection_host_id = None
+        connection_host = None
+        connection_evidence: list[dict[str, Any]] = []
         if not parse_ip(connection.local_ip).is_unspecified:
             host, created = await _upsert_host(
                 db,
@@ -1037,17 +1286,51 @@ async def _ingest_agent_payload(
                 hostname=payload.hostname if connection.local_ip in agent_self_ips else None,
                 observed_by_agent_id=agent.id,
             )
-            connection_host_id = host.id
+            connection_host = host
             host_creates += int(created)
             seen_ips.add(connection.local_ip)
+            local_confidence = 60 if connection.local_ip in agent_self_ips else 35
+            connection_evidence.extend(
+                _host_identity_evidence(
+                    host,
+                    ip_address=connection.local_ip,
+                    hostname=payload.hostname if connection.local_ip in agent_self_ips else None,
+                    confidence=local_confidence,
+                    metadata={
+                        "observation_role": (
+                            "connection_local"
+                            if connection.local_ip in agent_self_ips
+                            else "connection_remote"
+                        ),
+                        "local_port": connection.local_port,
+                        "remote_ip": connection.remote_ip,
+                        "remote_port": connection.remote_port,
+                        "protocol": connection.protocol,
+                    },
+                )
+            )
         if not parse_ip(connection.remote_ip).is_unspecified:
-            _, remote_created = await _upsert_host(
+            remote_host, remote_created = await _upsert_host(
                 db,
                 connection.remote_ip,
                 observed_by_agent_id=agent.id,
             )
             host_creates += int(remote_created)
             seen_ips.add(connection.remote_ip)
+            connection_evidence.extend(
+                _host_identity_evidence(
+                    remote_host,
+                    ip_address=connection.remote_ip,
+                    confidence=35,
+                    metadata={
+                        "observation_role": "connection_remote",
+                        "local_ip": connection.local_ip,
+                        "local_port": connection.local_port,
+                        "remote_port": connection.remote_port,
+                        "protocol": connection.protocol,
+                    },
+                )
+            )
         db_connection, connection_created = await _upsert_connection(
             db,
             local_ip=connection.local_ip,
@@ -1079,8 +1362,9 @@ async def _ingest_agent_payload(
                 ),
                 "confidence": 60 if connection.local_ip in agent_self_ips else 35,
                 "relationship_type": "connection_remote",
-                "host_id": connection_host_id,
+                "host_ref": connection_host,
                 "connection_id": db_connection.id,
+                "evidence": connection_evidence,
             }
         )
 
@@ -1138,14 +1422,26 @@ async def _ingest_agent_payload(
                 observation_input.get("relationship_type"),
                 observation_input["payload"],
             ),
-            host_id=observation_input.get("host_id"),
+            host_id=observation_input.get("host_id")
+            or getattr(observation_input.get("host_ref"), "id", None),
             arp_entry_id=observation_input.get("arp_entry_id"),
             connection_id=observation_input.get("connection_id"),
         )
+        await db.flush()
         current_hashes[observation.observation_type].add(observation.identity_hash)
         observation_creates += int(created)
         observation_refreshes += int(not created)
         observation_reactivations += int(reactivated)
+        for evidence_fact in observation_input.get("evidence", []):
+            evidence_created = await _upsert_entity_evidence(
+                db,
+                observation,
+                evidence_fact,
+                observed_at,
+                raw_import.id,
+            )
+            evidence_creates += int(evidence_created)
+            evidence_refreshes += int(not evidence_created)
 
     commands = _enabled_commands(policy)
     if effective_full_snapshot:
@@ -1167,6 +1463,8 @@ async def _ingest_agent_payload(
         "observations_refreshed": observation_refreshes,
         "observations_reactivated": observation_reactivations,
         "observations_removed": observation_removals,
+        "evidence_created": evidence_creates,
+        "evidence_refreshed": evidence_refreshes,
         "ip_addresses_seen": sorted(seen_ips),
         "mac_addresses_seen": sorted(seen_macs),
         "address_count": len(payload.addresses),

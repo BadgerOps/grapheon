@@ -57,7 +57,7 @@ See `docs/README.md` for the full documentation index, `docs/deployment.md` for 
 
 ## Passive Agents
 
-Graphēon now includes the first passive agent slice end to end: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, an outbound-only check-in API, an admin fleet management view at `/agents`, and a lightweight host-side runtime with `systemd` service/timer units. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
+Graphēon now includes the first passive agent slice end to end: agent registry records, enrollment keys, approval workflow, low-impact policy profiles, an outbound-only check-in API, an admin fleet management view at `/agents`, and a lightweight host-side runtime with `systemd` service/timer units. Agent ingest stores evidence-backed host identity facts so host detail can show source, observer, confidence, and timestamps without treating every passive observation as verified identity. The runtime can optionally filter host-local network noise such as loopback, link-local addresses, and local virtualization bridge interfaces. Network maps use observed or configured CIDR boundaries when available and leave unknown networks unresolved instead of guessing a fixed subnet. The current bootstrap model uses admin-created enrollment keys and one per-agent API key after approval.
 
 ## Deployment
 

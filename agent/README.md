@@ -9,7 +9,7 @@ Contents:
 
 ## Design Notes
 
-- Runtime model: one-shot process, intended to run from a `systemd` timer
+- Runtime model: short-lived collector process, supervised by a `systemd` timer/service
 - Identity: persistent random `agent_uuid`
 - Bootstrap auth: enrollment key
 - Steady-state auth: per-agent API key issued by Graphēon after approval
@@ -77,10 +77,13 @@ Useful flags:
 - `--check-in-only` requires an existing local API key and skips registration
 - `--force` bypasses cached cadence gating for an immediate run
 - `--state-dir` keeps manual runs isolated from the default `/var/lib/grapheon-agent`
+- `--ignore-local-net` drops loopback/link-local IPs and common local virtualization bridge interfaces
 - `--user-agent` overrides the default `Grapheon-Agent/<version> python-urllib` HTTP User-Agent sent to Graphēon
 - `--log-level DEBUG` makes parsing, registration, and check-in troubleshooting easier
 
-During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot.
+During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. The shipped timer defaults to a 15-second control-plane poll cadence with `AccuracySec=1s` so admin-requested collections are picked up promptly. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot. Starting `grapheon-agent.service` directly performs one invocation; ongoing polling requires `grapheon-agent.timer` to be enabled and active.
+
+Set `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true` in `/etc/grapheon-agent.env` on workstation, hypervisor, or lab hosts where loopback, link-local IPv6, and local virtualization bridge interfaces such as `vmnet*`, `vboxnet*`, `docker*`, or `virbr*` would otherwise add noisy host-local observations. Normal LAN/private addresses on physical or primary interfaces are still collected.
 
 Versioned install helpers:
 
@@ -100,8 +103,8 @@ usage: grapheon_agent.py [-h] [--config CONFIG] [--state-dir STATE_DIR]
                          [--request-timeout-seconds REQUEST_TIMEOUT_SECONDS]
                          [--timer-interval-seconds TIMER_INTERVAL_SECONDS]
                          [--api-key-header API_KEY_HEADER]
-                         [--user-agent USER_AGENT] [--ca-file CA_FILE]
-                         [--insecure-skip-verify]
+                         [--user-agent USER_AGENT] [--ignore-local-net]
+                         [--ca-file CA_FILE] [--insecure-skip-verify]
                          [--register-only | --check-in-only] [--force]
                          [--log-level LOG_LEVEL]
 

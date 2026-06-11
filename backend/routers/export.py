@@ -443,6 +443,7 @@ async def _fetch_network_elements(
         fetch_connections,
         fetch_port_counts,
         fetch_device_identities,
+        fetch_observed_networks,
         build_device_id_to_hosts,
     )
     from network.nodes import build_all_nodes
@@ -465,6 +466,16 @@ async def _fetch_network_elements(
                 subnet_to_vlan[ip_network(cidr, strict=False)] = vconfig
             except ValueError:
                 pass
+    filter_networks = set()
+    if subnet_filter:
+        try:
+            filter_networks.add(ip_network(subnet_filter, strict=False))
+        except ValueError:
+            pass
+    observed_networks = sorted(
+        set(subnet_to_vlan.keys()) | set(await fetch_observed_networks(db)) | filter_networks,
+        key=lambda network: (network.version, int(network.network_address), network.prefixlen),
+    )
 
     nodes, _, _, ip_to_host_id, shared_gw_nodes, shared_gw_devices, _, gw_edges = (
         build_all_nodes(
@@ -473,10 +484,11 @@ async def _fetch_network_elements(
             port_counts=port_counts,
             device_id_to_hosts=device_id_to_hosts,
             device_identities=device_identities,
-            subnet_prefix=24,
+            subnet_prefix=None,
             subnet_filter=subnet_filter,
             show_internet=show_internet,
             subnet_to_vlan=subnet_to_vlan,
+            observed_networks=observed_networks,
         )
     )
 
@@ -487,9 +499,10 @@ async def _fetch_network_elements(
         ip_to_host_id=ip_to_host_id,
         show_internet=show_internet,
         route_through_gateway=False,
-        subnet_prefix=24,
+        subnet_prefix=None,
         shared_gateway_nodes=shared_gw_nodes,
         shared_gateway_devices=shared_gw_devices,
+        observed_networks=observed_networks,
     )
     edges = gw_edges + edges
 

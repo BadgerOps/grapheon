@@ -16,6 +16,7 @@ from models import (
     AgentEnrollmentKey,
     AgentObservation,
     Connection,
+    EntityEvidence,
     Host,
     RawImport,
 )
@@ -468,6 +469,63 @@ class TestAgentEnrollmentAndCheckIn:
         assert observations_by_type["route"].confidence == 70
         assert observations_by_type["route"].relationship_type == "route_gateway"
 
+        evidence_rows = (
+            await db.execute(
+                select(EntityEvidence).order_by(
+                    EntityEvidence.entity_id,
+                    EntityEvidence.field_name,
+                    EntityEvidence.confidence.desc(),
+                )
+            )
+        ).scalars().all()
+        assert evidence_rows
+        host_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.entity_type == "host" and evidence.entity_id == host.id
+        ]
+        self_hostname_evidence = [
+            evidence
+            for evidence in host_evidence
+            if evidence.field_name == "hostname"
+            and evidence.observed_value == "collector-01"
+            and evidence.confidence == 95
+        ]
+        assert len(self_hostname_evidence) == 1
+        assert self_hostname_evidence[0].source_origin == "agent"
+        assert self_hostname_evidence[0].observer_agent_id == agent_id
+        assert self_hostname_evidence[0].agent_observation_id == observations_by_type["address"].id
+        remote_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.entity_type == "host" and evidence.entity_id == remote_host.id
+        ]
+        assert any(
+            evidence.field_name == "ip_address"
+            and evidence.observed_value == "10.0.0.10"
+            and evidence.confidence == 35
+            for evidence in remote_evidence
+        )
+        gateway_evidence = [
+            evidence
+            for evidence in evidence_rows
+            if evidence.field_name == "device_type"
+            and evidence.observed_value == "router"
+        ]
+        assert gateway_evidence
+
+        host_detail_response = await async_client.get(
+            f"/api/hosts/{host.id}",
+            headers=admin_headers,
+        )
+        assert host_detail_response.status_code == 200
+        host_detail_data = host_detail_response.json()
+        assert host_detail_data["evidence"]
+        assert {
+            item["field_name"]
+            for item in host_detail_data["evidence"]
+        } >= {"hostname", "ip_address", "mac_address"}
+
         import_filter = await async_client.get(
             "/api/imports",
             params={"source_origin": "agent"},
@@ -682,6 +740,94 @@ class TestAgentEnrollmentAndCheckIn:
         assert agent_response.json()["collection_request_fulfilled_at"] is not None
 
     @pytest.mark.asyncio
+    async def test_network_map_uses_agent_observed_subnet_boundaries(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_observed_subnet_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "agent-observed-subnet")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "agent-observed-subnet-key",
+            policy_id,
+            auto_approve=True,
+        )
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-observed-subnet-001",
+            ip_address="192.168.224.172",
+            mac_address="00:50:B6:29:3D:D3",
+        )
+        assert register_response.status_code == 200
+        api_key = register_response.json()["api_key"]
+
+        payload = _checkin_payload("agent-observed-subnet-001")
+        payload["hostname"] = "variks"
+        payload["addresses"] = [
+            {
+                "ip_address": "192.168.224.172",
+                "interface": "enp0s20f0u1",
+                "prefix_length": 23,
+                "mac_address": "00:50:B6:29:3D:D3",
+            }
+        ]
+        payload["neighbors"] = [
+            {
+                "ip_address": "192.168.225.42",
+                "mac_address": "00:30:A7:3C:B9:01",
+                "interface": "enp0s20f0u1",
+                "state": "stale",
+            }
+        ]
+        payload["connections"] = []
+        payload["routes"] = [
+            {
+                "destination": "192.168.224.0/23",
+                "gateway": None,
+                "interface": "enp0s20f0u1",
+                "source_ip": "192.168.224.172",
+            }
+        ]
+        checkin_response = await _post_checkin(async_client, api_key, payload)
+        assert checkin_response.status_code == 200
+
+        map_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("format", "cytoscape"),
+                ("relationship_types", "collector_interface"),
+                ("relationship_types", "arp_neighbor"),
+                ("relationship_types", "route_gateway"),
+                ("include_collector_nodes", "true"),
+            ],
+            headers=admin_headers,
+        )
+        assert map_response.status_code == 200
+        map_data = map_response.json()
+        subnet_labels = {
+            node["data"]["label"]
+            for node in map_data["elements"]["nodes"]
+            if node["data"].get("type") == "subnet"
+        }
+        assert "192.168.224.0/23" in subnet_labels
+        assert "192.168.224.0/24" not in subnet_labels
+        assert "192.168.225.0/24" not in subnet_labels
+        host_subnets = {
+            node["data"].get("ip"): node["data"].get("subnet")
+            for node in map_data["elements"]["nodes"]
+            if node["data"].get("ip") in {"192.168.224.172", "192.168.225.42"}
+        }
+        assert host_subnets == {
+            "192.168.224.172": "192.168.224.0/23",
+            "192.168.225.42": "192.168.224.0/23",
+        }
+        assert "192.168.224.0/23" in map_data["stats"]["observed_networks"]
+        assert map_data["stats"]["agent_edge_counts"]["arp_neighbor"] == 1
+
+    @pytest.mark.asyncio
     async def test_agent_self_hostname_does_not_overwrite_manual_hostname(
         self,
         async_client: AsyncClient,
@@ -736,6 +882,18 @@ class TestAgentEnrollmentAndCheckIn:
         assert host.hostname == "manual-hostname"
         assert sorted(host.source_origins) == ["agent", "manual"]
         assert host.observed_by_agent_ids == [agent_id]
+        hostname_evidence = (
+            await db.execute(
+                select(EntityEvidence).where(
+                    EntityEvidence.entity_type == "host",
+                    EntityEvidence.entity_id == host.id,
+                    EntityEvidence.field_name == "hostname",
+                    EntityEvidence.observed_value == "collector-hostname",
+                )
+            )
+        ).scalar_one()
+        assert hostname_evidence.confidence == 95
+        assert hostname_evidence.source_origin == "agent"
 
     @pytest.mark.asyncio
     async def test_rotate_agent_api_key_invalidates_previous_key(

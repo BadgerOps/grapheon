@@ -205,6 +205,7 @@ def _run_migrations(sync_conn) -> None:
     _create_index_if_missing(sync_conn, "idx_agent_observations_confidence", "agent_observations", "confidence")
     _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_type", "agent_observations", "relationship_type")
     _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_key", "agent_observations", "relationship_key")
+    _create_entity_evidence_table(sync_conn)
     _backfill_agent_observer_metadata(sync_conn)
 
 
@@ -464,6 +465,66 @@ def _create_agent_observations_table(sync_conn) -> None:
         sync_conn.execute(
             text(f'CREATE INDEX IF NOT EXISTS {index_name} ON agent_observations ("{column}")')
         )
+
+
+def _create_entity_evidence_table(sync_conn) -> None:
+    sync_conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS entity_evidence (
+                id INTEGER PRIMARY KEY,
+                entity_type VARCHAR(50) NOT NULL,
+                entity_id INTEGER NOT NULL,
+                field_name VARCHAR(100),
+                observed_value TEXT,
+                source_origin VARCHAR(50) NOT NULL,
+                source_type VARCHAR(50),
+                observer_agent_id INTEGER,
+                raw_import_id INTEGER,
+                agent_observation_id INTEGER,
+                relationship_type VARCHAR(64),
+                confidence INTEGER NOT NULL DEFAULT 50,
+                first_seen_at DATETIME NOT NULL,
+                last_seen_at DATETIME NOT NULL,
+                is_current BOOLEAN NOT NULL DEFAULT 1,
+                metadata JSON,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                FOREIGN KEY(observer_agent_id) REFERENCES agents(id) ON DELETE SET NULL,
+                FOREIGN KEY(raw_import_id) REFERENCES raw_imports(id) ON DELETE SET NULL,
+                FOREIGN KEY(agent_observation_id) REFERENCES agent_observations(id) ON DELETE SET NULL
+            )
+            """
+        )
+    )
+    for index_name, column in [
+        ("idx_entity_evidence_entity_type", "entity_type"),
+        ("idx_entity_evidence_entity_id", "entity_id"),
+        ("idx_entity_evidence_field_name", "field_name"),
+        ("idx_entity_evidence_source_origin", "source_origin"),
+        ("idx_entity_evidence_source_type", "source_type"),
+        ("idx_entity_evidence_observer_agent_id", "observer_agent_id"),
+        ("idx_entity_evidence_raw_import_id", "raw_import_id"),
+        ("idx_entity_evidence_agent_observation_id", "agent_observation_id"),
+        ("idx_entity_evidence_relationship_type", "relationship_type"),
+        ("idx_entity_evidence_confidence", "confidence"),
+        ("idx_entity_evidence_is_current", "is_current"),
+    ]:
+        sync_conn.execute(
+            text(f'CREATE INDEX IF NOT EXISTS {index_name} ON entity_evidence ("{column}")')
+        )
+    sync_conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_entity_evidence_entity "
+            'ON entity_evidence ("entity_type", "entity_id")'
+        )
+    )
+    sync_conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_entity_evidence_field "
+            'ON entity_evidence ("entity_type", "entity_id", "field_name")'
+        )
+    )
 
 
 def _make_column_nullable(sync_conn, table: str, column: str) -> None:

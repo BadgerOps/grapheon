@@ -12,6 +12,7 @@ from .conflict import Conflict
 from .route_hop import RouteHop
 from .vlan_config import VLANConfig
 from .device_identity import DeviceIdentity
+from .entity_evidence import EntityEvidence
 from .user import User
 from .auth_provider import AuthProvider
 from .role_mapping import RoleMapping
@@ -31,6 +32,7 @@ __all__ = [
     "RouteHop",
     "VLANConfig",
     "DeviceIdentity",
+    "EntityEvidence",
     "User",
     "AuthProvider",
     "RoleMapping",

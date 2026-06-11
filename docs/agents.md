@@ -6,7 +6,7 @@ For a concrete runtime walkthrough, see `docs/agent_quickstart.md`. For host-sid
 
 ## MVP Shape
 
-- Runtime model: one-shot collector plus `systemd` timer on the managed host.
+- Runtime model: short-lived collector plus `systemd` timer/service on the managed host.
 - Collection model: local/passive commands only such as `ip neigh`, `ss -tunap`, `ip addr`, and `ip route`.
 - Transport model: compressed JSON reports over HTTPS with outbound-only check-in.
 - Backend model: agent registry, enrollment keys, approval workflow, policy profiles, check-in audit records, and normalized ingest into existing Graphēon tables.
@@ -138,6 +138,10 @@ Agent ingest also tracks the collector separately from what it observed:
 
 Agent-local interface addresses are high-confidence self observations and may carry the agent hostname. ARP neighbors, route gateways, and connection-only remote IPs are observed entities and are not labeled as the collector just because the collector saw them.
 
+Agent ingest also writes host identity facts into `entity_evidence`. Evidence rows keep the observed field value, source origin/type, observing agent, raw import, agent observation, relationship type, confidence, first/last seen timestamps, and current/historical state. Host detail responses include these evidence rows so operators can inspect why a label, vendor, or device type exists without treating low-confidence observations as verified identity.
+
+Canonical host fields are updated conservatively from evidence. Empty agent-only hostname, vendor, and device-type fields can be filled from current evidence, but verified hosts and existing manual-origin values are not overwritten by lower-confidence agent observations.
+
 The ingest path upserts:
 
 - `hosts`
@@ -155,6 +159,8 @@ The network map can derive optional agent topology layers from current observati
 
 `GET /api/network/map` supports `observed_by_agent_id`, repeated `relationship_types`, `min_confidence`, and `include_collector_nodes` for these layers.
 
+The map also uses current agent address prefixes, route destinations, configured VLAN CIDRs, and operator-provided `network_cidrs` hints as network boundaries. For example, a collector interface observed as `192.168.224.172/23` groups both `192.168.224.x` and `192.168.225.x` hosts under `192.168.224.0/23`. If no observed or configured CIDR covers a host, the map marks it as unresolved instead of assigning a hard-coded subnet.
+
 ## Runtime Notes
 
 The shipped runtime lives in `agent/grapheon_agent.py` and is designed to be run from `deploy/grapheon-agent.service` and `deploy/grapheon-agent.timer`.
@@ -166,6 +172,8 @@ Current behavior:
 - re-registers once approved to receive the per-agent API key
 - supports direct manual execution with CLI flags in addition to the shipped `systemd` units
 - polls Graphēon on each timer run before local cadence gating so admin-requested collections can run on the next outbound agent invocation
+- uses a shipped 15-second timer cadence for lightweight control-plane polls while backend policy controls full collection frequency
+- can optionally filter host-local network noise with `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true`, dropping loopback/link-local IPs and common local virtualization bridge interfaces while keeping normal LAN/private addresses on primary interfaces
 - ships as both a GHCR container image and a GitHub release tarball for distribution
 - installs host releases under a versioned `releases/` directory with a stable `current` symlink for rollback
 - uses cached backend policy for:

@@ -8,9 +8,11 @@ import pytest
 
 from agent.grapheon_agent import (
     AgentConfig,
+    AGENT_VERSION,
     DEFAULT_USER_AGENT,
     build_snapshot_payload,
     build_config,
+    filter_local_net_records,
     http_json,
     parse_ip_addr_json,
     parse_ip_neigh_json,
@@ -18,6 +20,7 @@ from agent.grapheon_agent import (
     parse_args,
     parse_ss_output,
     parse_timestamp,
+    main,
     run_agent,
     should_run_with_policy,
 )
@@ -57,6 +60,32 @@ def test_parse_ip_addr_json_ignores_loopback_and_extracts_mac():
             "mac_address": "aa:bb:cc:dd:ee:ff",
             "prefix_length": 64,
         },
+    ]
+
+
+def test_filter_local_net_records_removes_host_local_noise():
+    records = [
+        {"interface": "lo", "ip_address": "127.0.0.1"},
+        {"interface": "vmnet1", "ip_address": "172.16.238.1"},
+        {"interface": "eth0", "ip_address": "fe80::1"},
+        {"interface": "eth0", "ip_address": "0.0.0.0"},
+        {"interface": "eth0", "ip_address": "10.20.0.5"},
+    ]
+
+    assert filter_local_net_records(records, ip_fields=["ip_address"]) == [
+        {"interface": "eth0", "ip_address": "10.20.0.5"}
+    ]
+
+
+def test_filter_local_net_records_removes_local_noise_networks():
+    records = [
+        {"interface": "eth0", "destination": "fe80::/64", "gateway": None},
+        {"interface": "eth0", "destination": "169.254.0.0/16", "gateway": None},
+        {"interface": "eth0", "destination": "10.20.0.0/24", "gateway": None},
+    ]
+
+    assert filter_local_net_records(records, ip_fields=["destination", "gateway"]) == [
+        {"interface": "eth0", "destination": "10.20.0.0/24", "gateway": None}
     ]
 
 
@@ -231,6 +260,7 @@ def test_help_output_mentions_manual_modes_and_examples():
     assert result.returncode == 0
     assert "--register-only" in result.stdout
     assert "--check-in-only" in result.stdout
+    assert "--ignore-local-net" in result.stdout
     assert "--user-agent" in result.stdout
     assert "Examples:" in result.stdout
     assert "python3 agent/grapheon_agent.py" in result.stdout
@@ -256,6 +286,16 @@ def test_build_config_uses_default_user_agent(monkeypatch, tmp_path):
     assert config.user_agent == DEFAULT_USER_AGENT
 
 
+def test_main_logs_agent_version_on_startup(monkeypatch, caplog):
+    monkeypatch.setattr("agent.grapheon_agent.build_config", lambda args: object())
+    monkeypatch.setattr("agent.grapheon_agent.run_agent", lambda *args, **kwargs: 0)
+
+    with caplog.at_level("INFO", logger="grapheon_agent"):
+        assert main(["--log-level", "INFO"]) == 0
+
+    assert f"Starting Graphēon passive agent version {AGENT_VERSION}" in caplog.text
+
+
 def test_build_config_reads_user_agent_from_env_file(monkeypatch, tmp_path):
     monkeypatch.delenv("GRAPHEON_AGENT_SERVER_URL", raising=False)
     monkeypatch.delenv("GRAPHEON_AGENT_USER_AGENT", raising=False)
@@ -273,6 +313,25 @@ def test_build_config_reads_user_agent_from_env_file(monkeypatch, tmp_path):
     config = build_config(args)
 
     assert config.user_agent == "Custom-Agent/1.0"
+
+
+def test_build_config_reads_ignore_local_net_from_env_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("GRAPHEON_AGENT_SERVER_URL", raising=False)
+    monkeypatch.delenv("GRAPHEON_AGENT_IGNORE_LOCAL_NET", raising=False)
+    env_file = tmp_path / "agent.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "GRAPHEON_AGENT_SERVER_URL=https://grapheon.example.com",
+                "GRAPHEON_AGENT_IGNORE_LOCAL_NET=true",
+            ]
+        )
+    )
+    args = parse_args(["--config", str(env_file), "--state-dir", str(tmp_path)])
+
+    config = build_config(args)
+
+    assert config.ignore_local_net is True
 
 
 def test_build_config_cli_user_agent_overrides_env_file(monkeypatch, tmp_path):
@@ -337,6 +396,7 @@ def test_http_json_sends_configured_user_agent(monkeypatch, tmp_path):
         timer_interval_seconds=900,
         api_key_header="X-Agent-Api-Key",
         user_agent="Custom-Agent/1.0",
+        ignore_local_net=False,
     )
 
     http_json(
@@ -378,7 +438,7 @@ def test_run_agent_polls_before_skipping_for_cached_interval(monkeypatch, tmp_pa
     monkeypatch.setattr("agent.grapheon_agent.poll_agent_control", fake_poll)
     monkeypatch.setattr(
         "agent.grapheon_agent.build_current_snapshot",
-        lambda policy: pytest.fail("collection should not run"),
+        lambda policy, ignore_local_net=False: pytest.fail("collection should not run"),
     )
     config = AgentConfig(
         server_url="https://grapheon.example.com",
@@ -394,6 +454,7 @@ def test_run_agent_polls_before_skipping_for_cached_interval(monkeypatch, tmp_pa
         timer_interval_seconds=900,
         api_key_header="X-Agent-Api-Key",
         user_agent=DEFAULT_USER_AGENT,
+        ignore_local_net=False,
     )
 
     assert run_agent(config, force=False) == 0
@@ -435,7 +496,7 @@ def test_run_agent_on_demand_request_bypasses_cached_interval(monkeypatch, tmp_p
     monkeypatch.setattr("agent.grapheon_agent.maybe_sleep_for_policy_jitter", lambda policy: 0)
     monkeypatch.setattr(
         "agent.grapheon_agent.build_current_snapshot",
-        lambda policy: {
+        lambda policy, ignore_local_net=False: {
             "addresses": [],
             "neighbors": [],
             "connections": [],
@@ -457,6 +518,7 @@ def test_run_agent_on_demand_request_bypasses_cached_interval(monkeypatch, tmp_p
         timer_interval_seconds=900,
         api_key_header="X-Agent-Api-Key",
         user_agent=DEFAULT_USER_AGENT,
+        ignore_local_net=False,
     )
 
     assert run_agent(config, force=False) == 0
@@ -464,6 +526,71 @@ def test_run_agent_on_demand_request_bypasses_cached_interval(monkeypatch, tmp_p
     assert checkins[0]["agent_uuid"] == "agent-poll-2"
     state = json.loads((tmp_path / "state.json").read_text())
     assert state["last_collection_request_at"] == "2026-06-11T12:00:00Z"
+
+
+def test_run_agent_recovers_invalid_local_api_key_with_enrollment(monkeypatch, tmp_path):
+    (tmp_path / "agent_uuid").write_text("agent-recover-1\n")
+    (tmp_path / "api_key").write_text("stale-secret\n")
+    registrations = []
+    checkins = []
+
+    def fake_poll(config, api_key, agent_uuid_value):
+        assert api_key == "stale-secret"
+        raise RuntimeError(
+            'HTTP 401 calling api/agents/poll: {"detail":"Invalid agent API key"}'
+        )
+
+    def fake_register(config, agent_uuid_value):
+        registrations.append(agent_uuid_value)
+        return {
+            "status": "active",
+            "api_key": "new-secret",
+            "agent": {"id": 42, "enrollment_state": "active"},
+            "policy": {"checkin_interval_seconds": 3600, "jitter_seconds": 0},
+        }
+
+    def fake_check_in(config, api_key, payload):
+        checkins.append((api_key, payload))
+        return {
+            "server_time": "2026-06-11T12:01:00Z",
+            "summary": {"accepted": True},
+            "policy": {"checkin_interval_seconds": 3600, "jitter_seconds": 0},
+        }
+
+    monkeypatch.setattr("agent.grapheon_agent.poll_agent_control", fake_poll)
+    monkeypatch.setattr("agent.grapheon_agent.register_agent", fake_register)
+    monkeypatch.setattr("agent.grapheon_agent.maybe_sleep_for_policy_jitter", lambda policy: 0)
+    monkeypatch.setattr(
+        "agent.grapheon_agent.build_current_snapshot",
+        lambda policy, ignore_local_net=False: {
+            "addresses": [],
+            "neighbors": [],
+            "connections": [],
+            "routes": [],
+        },
+    )
+    monkeypatch.setattr("agent.grapheon_agent.check_in_agent", fake_check_in)
+    config = AgentConfig(
+        server_url="https://grapheon.example.com",
+        enrollment_key="gaek_recovery",
+        state_dir=tmp_path,
+        config_path=tmp_path / "agent.env",
+        request_timeout_seconds=30,
+        verify_tls=True,
+        ca_file=None,
+        display_name=None,
+        site_name=None,
+        hostname=None,
+        timer_interval_seconds=900,
+        api_key_header="X-Agent-Api-Key",
+        user_agent=DEFAULT_USER_AGENT,
+        ignore_local_net=False,
+    )
+
+    assert run_agent(config, force=True) == 0
+    assert registrations == ["agent-recover-1"]
+    assert (tmp_path / "api_key").read_text(encoding="utf-8").strip() == "new-secret"
+    assert checkins[0][0] == "new-secret"
 
 
 def test_check_in_only_requires_existing_api_key(tmp_path):
@@ -481,6 +608,7 @@ def test_check_in_only_requires_existing_api_key(tmp_path):
         timer_interval_seconds=900,
         api_key_header="X-Agent-Api-Key",
         user_agent=DEFAULT_USER_AGENT,
+        ignore_local_net=False,
     )
 
     with pytest.raises(RuntimeError, match="existing local agent API key"):

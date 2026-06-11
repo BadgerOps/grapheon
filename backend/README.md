@@ -85,7 +85,14 @@ The API will be available at `http://localhost:8000`
 - `POST /api/correlate` - Trigger host correlation
 
 ### Network
-- `GET /api/network` - Graph data for network visualization
+- `GET /api/network/map` - Cytoscape graph data for network visualization
+- `GET /api/network/subnets` - Detected subnet summary using observed and saved network boundaries
+- `GET /api/network/groups` - List saved network grouping overrides
+- `POST /api/network/groups` - Create a saved CIDR grouping override
+- `PATCH /api/network/groups/{id}` - Update a saved network grouping override
+- `DELETE /api/network/groups/{id}` - Delete a saved network grouping override
+
+Saved network groups provide operator-controlled CIDR labels and hidden/expected state. The map, subnet summary, and network graph exports apply saved groups alongside VLAN CIDRs, passive-agent interface/route evidence, subnet filters, and temporary `network_cidrs` query hints.
 
 ### Connections
 - `GET /api/connections` - List parsed connection records

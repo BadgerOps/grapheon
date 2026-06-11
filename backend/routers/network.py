@@ -13,17 +13,22 @@ from typing import Optional, Dict, Any
 from collections import defaultdict
 from ipaddress import ip_network
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from auth.dependencies import require_any_authenticated
-from models import User
+from models import NetworkGroup, User
 from network.constants import COMPOUND_NODE_TYPES
 from network.validators import get_observed_subnet
 from network.queries import (
     fetch_hosts,
     fetch_vlan_configs,
+    fetch_network_groups,
+    filter_hosts_by_hidden_networks,
+    parse_network_group_networks,
     fetch_arp_segments,
     fetch_connections,
     fetch_current_agent_observations,
@@ -42,6 +47,147 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 router = APIRouter(prefix="/api/network", tags=["network"])
+
+
+class NetworkGroupCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cidr: str = Field(..., min_length=1, max_length=64)
+    label: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    is_expected: bool = True
+    is_hidden: bool = False
+    confidence: int = Field(100, ge=0, le=100)
+    metadata: Optional[dict[str, Any]] = None
+
+
+class NetworkGroupUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cidr: Optional[str] = Field(None, min_length=1, max_length=64)
+    label: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    is_expected: Optional[bool] = None
+    is_hidden: Optional[bool] = None
+    confidence: Optional[int] = Field(None, ge=0, le=100)
+    metadata: Optional[dict[str, Any]] = None
+
+
+@router.get("/groups")
+async def list_network_groups(
+    include_hidden: bool = Query(True, description="Include hidden groups"),
+    source: Optional[str] = Query(None, description="Filter by group source"),
+    q: Optional[str] = Query(None, description="Search CIDR, label, or description"),
+    user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """List saved network grouping definitions."""
+    groups = await fetch_network_groups(
+        db,
+        include_hidden=include_hidden,
+        source=source,
+        q=q,
+    )
+    return {
+        "items": [_network_group_response(group) for group in groups],
+        "total": len(groups),
+    }
+
+
+@router.post("/groups", status_code=status.HTTP_201_CREATED)
+async def create_network_group(
+    payload: NetworkGroupCreate,
+    user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Create a manual network grouping definition."""
+    cidr = _normalize_network_group_cidr(payload.cidr)
+    group = NetworkGroup(
+        cidr=cidr,
+        label=_clean_optional_text(payload.label),
+        description=_clean_optional_text(payload.description),
+        source="manual",
+        confidence=payload.confidence,
+        is_expected=payload.is_expected,
+        is_hidden=payload.is_hidden,
+        group_metadata=payload.metadata,
+    )
+    db.add(group)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Network group already exists for {cidr}",
+        ) from exc
+    await db.refresh(group)
+    return _network_group_response(group)
+
+
+@router.patch("/groups/{group_id}")
+async def update_network_group(
+    group_id: int,
+    payload: NetworkGroupUpdate,
+    user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Update a saved network grouping definition."""
+    group = await db.get(NetworkGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Network group not found")
+    if group.source != "manual":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only manual network groups can be updated",
+        )
+
+    values = payload.model_dump(exclude_unset=True)
+    if "cidr" in values:
+        group.cidr = _normalize_network_group_cidr(values["cidr"])
+    if "label" in values:
+        group.label = _clean_optional_text(values["label"])
+    if "description" in values:
+        group.description = _clean_optional_text(values["description"])
+    if "is_expected" in values:
+        group.is_expected = values["is_expected"]
+    if "is_hidden" in values:
+        group.is_hidden = values["is_hidden"]
+    if "confidence" in values:
+        group.confidence = values["confidence"]
+    if "metadata" in values:
+        group.group_metadata = values["metadata"]
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Network group already exists for {group.cidr}",
+        ) from exc
+    await db.refresh(group)
+    return _network_group_response(group)
+
+
+@router.delete("/groups/{group_id}")
+async def delete_network_group(
+    group_id: int,
+    user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Delete a manual network grouping definition."""
+    group = await db.get(NetworkGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Network group not found")
+    if group.source != "manual":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only manual network groups can be deleted",
+        )
+    await db.delete(group)
+    await db.commit()
+    return {"status": "deleted", "id": group_id}
 
 
 # ── Main map endpoint ────────────────────────────────────────────────
@@ -90,11 +236,22 @@ async def get_network_map(
     )
     logger.debug(f"[1/7] Fetched {len(hosts)} hosts in {_ms(step_start)}")
 
-    # ── Step 2: Fetch VLAN configs + subnet→VLAN lookup ──────────
+    # ── Step 2: Fetch VLAN configs + saved network groups ─────────
     step_start = time.perf_counter()
     vlan_configs = await fetch_vlan_configs(db)
     subnet_to_vlan = _build_subnet_to_vlan(vlan_configs)
-    logger.debug(f"[2/7] Loaded {len(vlan_configs)} VLAN configs in {_ms(step_start)}")
+    network_groups = await fetch_network_groups(db, include_hidden=True)
+    hidden_networks, _ = parse_network_group_networks([
+        group for group in network_groups if group.is_hidden
+    ])
+    visible_network_group_networks, network_group_by_cidr = parse_network_group_networks([
+        group for group in network_groups if not group.is_hidden
+    ])
+    hosts, hidden_host_count = filter_hosts_by_hidden_networks(hosts, hidden_networks)
+    logger.debug(
+        f"[2/7] Loaded {len(vlan_configs)} VLAN configs, "
+        f"{len(network_groups)} network groups, hid {hidden_host_count} hosts in {_ms(step_start)}"
+    )
 
     # ── Step 3: Fetch ARP entries for segment info ───────────────
     step_start = time.perf_counter()
@@ -132,6 +289,7 @@ async def get_network_map(
     observed_networks = _merge_networks(
         _parse_network_cidrs(network_cidrs or [])
         + _parse_network_cidrs([subnet_filter] if subnet_filter else [])
+        + visible_network_group_networks
         + list(subnet_to_vlan.keys())
         + agent_observed_networks
     )
@@ -161,6 +319,7 @@ async def get_network_map(
         ip_to_segment=ip_to_segment,
         subnet_to_vlan=subnet_to_vlan,
         observed_networks=observed_networks,
+        network_group_by_cidr=network_group_by_cidr,
     )
 
     # ── Step 7: Build edges from connections ──────────────────────
@@ -239,6 +398,12 @@ async def get_network_map(
         "agent_topology_edges": sum(agent_edge_stats.values()),
         "agent_edge_counts": agent_edge_stats,
         "observed_networks": [str(network) for network in observed_networks],
+        "saved_network_groups": [
+            _network_group_summary(group)
+            for group in network_groups
+        ],
+        "hidden_network_groups": len(hidden_networks),
+        "hidden_hosts": hidden_host_count,
         "unresolved_network_groups": sum(
             1
             for subnet_id in seen_subnets
@@ -349,9 +514,18 @@ async def get_subnets(
     hosts = await fetch_hosts(db, include_inactive=False)
     vlan_configs = await fetch_vlan_configs(db)
     subnet_to_vlan = _build_subnet_to_vlan(vlan_configs)
+    network_groups = await fetch_network_groups(db, include_hidden=True)
+    hidden_networks, _ = parse_network_group_networks([
+        group for group in network_groups if group.is_hidden
+    ])
+    visible_network_group_networks, network_group_by_cidr = parse_network_group_networks([
+        group for group in network_groups if not group.is_hidden
+    ])
+    hosts, hidden_host_count = filter_hosts_by_hidden_networks(hosts, hidden_networks)
     agent_observed_networks = await fetch_observed_networks(db)
     observed_networks = _merge_networks(
         _parse_network_cidrs(network_cidrs or [])
+        + visible_network_group_networks
         + list(subnet_to_vlan.keys())
         + agent_observed_networks
     )
@@ -376,8 +550,14 @@ async def get_subnets(
 
     subnet_list = []
     for subnet, data in subnets.items():
+        network_group = network_group_by_cidr.get(subnet)
         subnet_list.append({
             "subnet": subnet,
+            "label": network_group.label if network_group and network_group.label else subnet,
+            "network_group_id": network_group.id if network_group else None,
+            "network_group_source": network_group.source if network_group else None,
+            "network_group_confidence": network_group.confidence if network_group else None,
+            "network_group_expected": network_group.is_expected if network_group else None,
             "host_count": len(data["hosts"]),
             "hosts": data["hosts"],
             "open_ports": data["open_ports"],
@@ -393,6 +573,12 @@ async def get_subnets(
         "subnets": subnet_list,
         "total_subnets": len(subnet_list),
         "observed_networks": [str(network) for network in observed_networks],
+        "saved_network_groups": [
+            _network_group_summary(group)
+            for group in network_groups
+        ],
+        "hidden_network_groups": len(hidden_networks),
+        "hidden_hosts": hidden_host_count,
         "generation_time_ms": round(total_duration, 1),
     }
 
@@ -414,6 +600,51 @@ def _build_subnet_to_vlan(vlan_configs: dict) -> dict:
             except ValueError:
                 pass
     return subnet_to_vlan
+
+
+def _normalize_network_group_cidr(cidr: str) -> str:
+    try:
+        return str(ip_network(str(cidr).strip(), strict=False))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid CIDR: {cidr}",
+        ) from exc
+
+
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _network_group_response(group: NetworkGroup) -> dict:
+    return {
+        "id": group.id,
+        "cidr": group.cidr,
+        "label": group.label,
+        "description": group.description,
+        "source": group.source,
+        "confidence": group.confidence,
+        "is_expected": group.is_expected,
+        "is_hidden": group.is_hidden,
+        "metadata": group.group_metadata,
+        "created_at": group.created_at,
+        "updated_at": group.updated_at,
+    }
+
+
+def _network_group_summary(group: NetworkGroup) -> dict:
+    return {
+        "id": group.id,
+        "cidr": group.cidr,
+        "label": group.label,
+        "source": group.source,
+        "confidence": group.confidence,
+        "is_expected": group.is_expected,
+        "is_hidden": group.is_hidden,
+    }
 
 
 def _parse_network_cidrs(network_cidrs: list[str]) -> list:

@@ -188,6 +188,27 @@ def test_agent_observer_metadata_migration_backfills_legacy_rows(tmp_path):
         assert "idx_entity_evidence_entity" in evidence_indexes
         assert "idx_entity_evidence_field" in evidence_indexes
 
+        network_group_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(network_groups)")).fetchall()
+        }
+        assert {
+            "cidr",
+            "label",
+            "description",
+            "source",
+            "confidence",
+            "is_expected",
+            "is_hidden",
+            "metadata",
+        }.issubset(network_group_columns)
+        network_group_indexes = {
+            row[1]
+            for row in conn.execute(text("PRAGMA index_list(network_groups)")).fetchall()
+        }
+        assert "idx_network_groups_cidr" in network_group_indexes
+        assert "idx_network_groups_hidden" in network_group_indexes
+
         raw_origin = conn.execute(
             text("SELECT source_origin FROM raw_imports WHERE id = 100")
         ).scalar_one()

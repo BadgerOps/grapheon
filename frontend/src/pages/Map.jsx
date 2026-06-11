@@ -33,10 +33,12 @@ export default function Map() {
   const [vlans, setVlans] = useState([])
   const [subnets, setSubnets] = useState([])
   const [agents, setAgents] = useState([])
+  const [networkGroups, setNetworkGroups] = useState([])
   const [routeData, setRouteData] = useState({ traces: {}, path_edges: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState([])
+  const [networkGroupError, setNetworkGroupError] = useState('')
 
   // ── View mode ──────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState('graph') // 'graph' | 'isometric'
@@ -56,12 +58,31 @@ export default function Map() {
   const [minConfidence, setMinConfidence] = useState(0)
   const [includeCollectorNodes, setIncludeCollectorNodes] = useState(true)
   const [cidrHints, setCidrHints] = useState('')
+  const [networkGroupForm, setNetworkGroupForm] = useState({
+    cidr: '',
+    label: '',
+    is_expected: true,
+    is_hidden: false,
+  })
+  const [editingNetworkGroupId, setEditingNetworkGroupId] = useState(null)
+  const [networkGroupDraft, setNetworkGroupDraft] = useState(null)
+  const [promoteDrafts, setPromoteDrafts] = useState({})
 
   // ── Cytoscape ref ───────────────────────────────────────────────
   const cyRef = useRef(null)
   const networkCidrHints = useMemo(
     () => cidrHints.split(/[\s,]+/).map(item => item.trim()).filter(Boolean),
     [cidrHints],
+  )
+  const unresolvedGroups = useMemo(
+    () => (elements.nodes || [])
+      .filter(node => node.data?.type === 'subnet' && node.data?.is_inferred)
+      .map(node => ({
+        id: node.data.id,
+        label: node.data.label,
+        subnet_cidr: node.data.subnet_cidr,
+      })),
+    [elements.nodes],
   )
 
   // ── Fetch data ──────────────────────────────────────────────────
@@ -145,6 +166,16 @@ export default function Map() {
     }
   }
 
+  const fetchNetworkGroups = async () => {
+    try {
+      const data = await api.getNetworkGroups({ include_hidden: true })
+      setNetworkGroups(data.items || [])
+    } catch (err) {
+      console.error('Failed to fetch network groups:', err)
+      setWarnings(prev => [...prev.filter(w => w.key !== 'network-groups'), { key: 'network-groups', msg: 'Could not load saved network groups' }])
+    }
+  }
+
   const fetchRoutes = async () => {
     try {
       const data = await api.getNetworkRoutes()
@@ -161,6 +192,7 @@ export default function Map() {
     fetchVlans()
     fetchSubnets()
     fetchAgents()
+    fetchNetworkGroups()
   }, [fetchNetworkMap])
 
   useEffect(() => {
@@ -249,6 +281,101 @@ export default function Map() {
     setCidrHints('')
     if (cyRef.current) {
       clearAllFilters(cyRef.current)
+    }
+  }
+
+  const handleCreateNetworkGroup = async (event) => {
+    event.preventDefault()
+    setNetworkGroupError('')
+    try {
+      await api.createNetworkGroup({
+        cidr: networkGroupForm.cidr,
+        label: networkGroupForm.label || null,
+        is_expected: networkGroupForm.is_expected,
+        is_hidden: networkGroupForm.is_hidden,
+      })
+      setNetworkGroupForm({
+        cidr: '',
+        label: '',
+        is_expected: true,
+        is_hidden: false,
+      })
+      await fetchNetworkGroups()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
+  const handleEditNetworkGroup = (group) => {
+    setNetworkGroupError('')
+    setEditingNetworkGroupId(group.id)
+    setNetworkGroupDraft({
+      cidr: group.cidr,
+      label: group.label || '',
+      description: group.description || '',
+      is_expected: Boolean(group.is_expected),
+      is_hidden: Boolean(group.is_hidden),
+      confidence: group.confidence ?? 100,
+    })
+  }
+
+  const handleSaveNetworkGroup = async (groupId) => {
+    if (!networkGroupDraft) return
+    setNetworkGroupError('')
+    try {
+      await api.updateNetworkGroup(groupId, {
+        cidr: networkGroupDraft.cidr,
+        label: networkGroupDraft.label || null,
+        description: networkGroupDraft.description || null,
+        is_expected: networkGroupDraft.is_expected,
+        is_hidden: networkGroupDraft.is_hidden,
+        confidence: Number(networkGroupDraft.confidence) || 0,
+      })
+      setEditingNetworkGroupId(null)
+      setNetworkGroupDraft(null)
+      await fetchNetworkGroups()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
+  const handleDeleteNetworkGroup = async (groupId) => {
+    setNetworkGroupError('')
+    try {
+      await api.deleteNetworkGroup(groupId)
+      if (editingNetworkGroupId === groupId) {
+        setEditingNetworkGroupId(null)
+        setNetworkGroupDraft(null)
+      }
+      await fetchNetworkGroups()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
+  const handlePromoteUnresolvedGroup = async (groupId) => {
+    const draft = promoteDrafts[groupId] || {}
+    if (!draft.cidr) return
+    setNetworkGroupError('')
+    try {
+      await api.createNetworkGroup({
+        cidr: draft.cidr,
+        label: draft.label || null,
+        is_expected: true,
+        is_hidden: false,
+      })
+      setPromoteDrafts(current => {
+        const next = { ...current }
+        delete next[groupId]
+        return next
+      })
+      await fetchNetworkGroups()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
     }
   }
 
@@ -526,6 +653,170 @@ export default function Map() {
               placeholder="192.168.224.0/23, 10.10.10.0/24"
               className="input w-full"
             />
+          </div>
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Saved Network Groups</h3>
+              <span className="text-xs text-gray-500 dark:text-gray-400">{networkGroups.length} saved</span>
+            </div>
+            {networkGroupError && (
+              <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                {networkGroupError}
+              </div>
+            )}
+            <form onSubmit={handleCreateNetworkGroup} className="grid gap-2 lg:grid-cols-[minmax(150px,220px)_minmax(150px,1fr)_auto_auto_auto] lg:items-center">
+              <input
+                type="text"
+                value={networkGroupForm.cidr}
+                onChange={(e) => setNetworkGroupForm(current => ({ ...current, cidr: e.target.value }))}
+                placeholder="192.168.224.0/23"
+                className="input"
+                required
+              />
+              <input
+                type="text"
+                value={networkGroupForm.label}
+                onChange={(e) => setNetworkGroupForm(current => ({ ...current, label: e.target.value }))}
+                placeholder="Label"
+                className="input"
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={networkGroupForm.is_expected}
+                  onChange={(e) => setNetworkGroupForm(current => ({ ...current, is_expected: e.target.checked }))}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                />
+                Expected
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={networkGroupForm.is_hidden}
+                  onChange={(e) => setNetworkGroupForm(current => ({ ...current, is_hidden: e.target.checked }))}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                />
+                Hidden
+              </label>
+              <button type="submit" className="btn btn-primary">
+                Save
+              </button>
+            </form>
+            {networkGroups.length > 0 && (
+              <div className="mt-3 max-h-56 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
+                {networkGroups.map(group => {
+                  const editing = editingNetworkGroupId === group.id
+                  const draft = editing ? networkGroupDraft : null
+                  return (
+                    <div key={group.id} className="border-b border-gray-200 p-3 last:border-b-0 dark:border-gray-700">
+                      {editing ? (
+                        <div className="grid gap-2 lg:grid-cols-[minmax(150px,210px)_minmax(130px,1fr)_auto_auto_auto_auto] lg:items-center">
+                          <input
+                            type="text"
+                            value={draft.cidr}
+                            onChange={(e) => setNetworkGroupDraft(current => ({ ...current, cidr: e.target.value }))}
+                            className="input"
+                          />
+                          <input
+                            type="text"
+                            value={draft.label}
+                            onChange={(e) => setNetworkGroupDraft(current => ({ ...current, label: e.target.value }))}
+                            className="input"
+                          />
+                          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={draft.is_expected}
+                              onChange={(e) => setNetworkGroupDraft(current => ({ ...current, is_expected: e.target.checked }))}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                            />
+                            Expected
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={draft.is_hidden}
+                              onChange={(e) => setNetworkGroupDraft(current => ({ ...current, is_hidden: e.target.checked }))}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                            />
+                            Hidden
+                          </label>
+                          <button type="button" onClick={() => handleSaveNetworkGroup(group.id)} className="btn btn-primary">
+                            Save
+                          </button>
+                          <button type="button" onClick={() => { setEditingNetworkGroupId(null); setNetworkGroupDraft(null) }} className="btn btn-secondary">
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-sm text-gray-900 dark:text-gray-100">{group.cidr}</span>
+                              {group.label && (
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{group.label}</span>
+                              )}
+                              <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">{group.source}</span>
+                              {group.is_expected && (
+                                <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">Expected</span>
+                              )}
+                              {group.is_hidden && (
+                                <span className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">Hidden</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={() => handleEditNetworkGroup(group)} className="btn btn-secondary text-xs">
+                              Edit
+                            </button>
+                            <button type="button" onClick={() => handleDeleteNetworkGroup(group.id)} className="btn btn-secondary text-xs">
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {unresolvedGroups.length > 0 && (
+              <div className="mt-4">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Unresolved Groups</h4>
+                <div className="space-y-2">
+                  {unresolvedGroups.map(group => {
+                    const draft = promoteDrafts[group.id] || { cidr: '', label: '' }
+                    return (
+                      <div key={group.id} className="grid gap-2 rounded border border-gray-200 p-2 dark:border-gray-700 lg:grid-cols-[minmax(130px,180px)_minmax(150px,220px)_minmax(130px,1fr)_auto] lg:items-center">
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{group.label}</span>
+                        <input
+                          type="text"
+                          value={draft.cidr}
+                          onChange={(e) => setPromoteDrafts(current => ({ ...current, [group.id]: { ...draft, cidr: e.target.value } }))}
+                          placeholder="Actual CIDR"
+                          className="input"
+                        />
+                        <input
+                          type="text"
+                          value={draft.label}
+                          onChange={(e) => setPromoteDrafts(current => ({ ...current, [group.id]: { ...draft, label: e.target.value } }))}
+                          placeholder="Label"
+                          className="input"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handlePromoteUnresolvedGroup(group.id)}
+                          className="btn btn-primary"
+                          disabled={!draft.cidr}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

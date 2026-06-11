@@ -3,13 +3,13 @@ Database query helpers for network map generation.
 """
 import logging
 from collections import defaultdict
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, String, or_
 
-from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity, AgentObservation, Agent
+from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity, AgentObservation, Agent, NetworkGroup
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,67 @@ async def fetch_vlan_configs(db: AsyncSession) -> dict:
     """Fetch all VLAN configs, keyed by vlan_id."""
     result = await db.execute(select(VLANConfig).order_by(VLANConfig.vlan_id))
     return {v.vlan_id: v for v in result.scalars().all()}
+
+
+async def fetch_network_groups(
+    db: AsyncSession,
+    include_hidden: bool = True,
+    source: Optional[str] = None,
+    q: Optional[str] = None,
+) -> list[NetworkGroup]:
+    """Fetch saved network grouping hints."""
+    query = select(NetworkGroup).order_by(NetworkGroup.cidr)
+    if not include_hidden:
+        query = query.where(NetworkGroup.is_hidden.is_(False))
+    if source:
+        query = query.where(NetworkGroup.source == source)
+    if q:
+        pattern = f"%{q}%"
+        query = query.where(
+            or_(
+                NetworkGroup.cidr.ilike(pattern),
+                NetworkGroup.label.ilike(pattern),
+                NetworkGroup.description.ilike(pattern),
+            )
+        )
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+def parse_network_group_networks(network_groups: list[NetworkGroup]) -> tuple[list, dict[str, NetworkGroup]]:
+    """Parse valid saved group CIDRs into networks and an exact-CIDR lookup."""
+    networks = []
+    group_by_cidr = {}
+    for group in network_groups:
+        try:
+            network = ip_network(group.cidr, strict=False)
+        except ValueError:
+            logger.warning("Ignoring invalid saved network group CIDR: %s", group.cidr)
+            continue
+        canonical = str(network)
+        networks.append(network)
+        group_by_cidr[canonical] = group
+    return networks, group_by_cidr
+
+
+def filter_hosts_by_hidden_networks(hosts: list, hidden_networks: list) -> tuple[list, int]:
+    """Remove hosts whose IP falls inside any hidden saved network group."""
+    if not hidden_networks:
+        return hosts, 0
+
+    visible_hosts = []
+    hidden_count = 0
+    for host in hosts:
+        try:
+            addr = ip_address(host.ip_address)
+        except ValueError:
+            visible_hosts.append(host)
+            continue
+        if any(addr.version == network.version and addr in network for network in hidden_networks):
+            hidden_count += 1
+        else:
+            visible_hosts.append(host)
+    return visible_hosts, hidden_count
 
 
 async def fetch_arp_segments(db: AsyncSession) -> dict:

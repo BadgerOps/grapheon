@@ -79,6 +79,18 @@ function freshnessForAgent(agent) {
   return { label: labels[state] || state, tone: tones[state] || 'slate' }
 }
 
+function collectionRequestLabel(agent) {
+  if (!agent?.collection_requested_at) return 'None pending'
+  const requestedAt = new Date(agent.collection_requested_at).getTime()
+  const fulfilledAt = agent.collection_request_fulfilled_at
+    ? new Date(agent.collection_request_fulfilled_at).getTime()
+    : null
+  if (!fulfilledAt || requestedAt > fulfilledAt) {
+    return `Pending since ${formatDate(agent.collection_requested_at)}`
+  }
+  return `Fulfilled ${formatDate(agent.collection_request_fulfilled_at)}`
+}
+
 function stateBadge(state) {
   const tones = {
     active: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
@@ -580,6 +592,26 @@ export default function Agents() {
     }
   }
 
+  const handleRequestCollection = async () => {
+    if (!selectedAgent) return
+
+    const reason = window.prompt('Reason for requesting collection:', 'operator requested refresh')
+    if (reason === null) return
+
+    try {
+      setSavingAgent(true)
+      setError('')
+      await api.requestAgentCollection(selectedAgent.id, { reason: reason || null })
+      showSuccess('Collection requested; the agent will collect on its next timer run')
+      await fetchAgents()
+      await fetchCheckins(selectedAgent.id)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingAgent(false)
+    }
+  }
+
   const handlePolicyFormChange = (field, value) => {
     setPolicyForm((current) => ({ ...current, [field]: value }))
   }
@@ -955,6 +987,10 @@ export default function Agents() {
                       <span className="font-medium text-gray-900 dark:text-gray-100">Last IP Summary:</span>{' '}
                       {(selectedAgent.last_ip_addresses || []).join(', ') || 'None reported'}
                     </div>
+                    <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-900/40">
+                      <span className="font-medium text-gray-900 dark:text-gray-100">Collection Request:</span>{' '}
+                      {collectionRequestLabel(selectedAgent)}
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap gap-3">
@@ -973,6 +1009,9 @@ export default function Agents() {
                     )}
                     {selectedAgent.enrollment_state === 'active' && selectedAgent.is_active && (
                       <>
+                        <button type="button" className="btn btn-primary" onClick={handleRequestCollection} disabled={savingAgent}>
+                          Request Collection
+                        </button>
                         <button type="button" className="btn btn-secondary" onClick={handleRotateApiKey} disabled={savingAgent}>
                           Rotate API Key
                         </button>

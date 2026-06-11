@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import String, select, func
 from datetime import datetime
 
 from database import get_db
@@ -18,11 +18,16 @@ from utils.audit import audit
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
 
+def _json_list_contains(column, value: str):
+    return column.cast(String).contains(f'"{value}"')
+
+
 @router.get("", response_model=PaginatedResponse)
 async def list_hosts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: bool = Query(True),
+    source_origin: str | None = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -34,16 +39,18 @@ async def list_hosts(
     - limit: Number of hosts to return (default 50, max 1000)
     - is_active: Filter by active status (default True)
     """
+    filters = [Host.is_active == is_active]
+    if source_origin:
+        filters.append(_json_list_contains(Host.source_origins, source_origin))
+
     # Get total count
-    count_result = await db.execute(
-        select(func.count(Host.id)).where(Host.is_active == is_active)
-    )
+    count_result = await db.execute(select(func.count(Host.id)).where(*filters))
     total = count_result.scalar()
 
     # Get paginated results
     result = await db.execute(
         select(Host)
-        .where(Host.is_active == is_active)
+        .where(*filters)
         .offset(skip)
         .limit(limit)
         .order_by(Host.last_seen.desc())
@@ -136,7 +143,8 @@ async def create_host(
         notes=host.notes,
         is_verified=host.is_verified,
         is_active=host.is_active,
-        source_types=host.source_types,
+        source_types=host.source_types or ["manual"],
+        source_origins=host.source_origins or ["manual"],
         first_seen=datetime.utcnow(),
         last_seen=datetime.utcnow(),
     )

@@ -47,6 +47,13 @@ All import routes accept:
 - `source_type`: `nmap`, `netstat`, `arp`, `ping`, `traceroute`, or `pcap`.
 - `source_host`: IP or hostname of the collector. A host record is created or updated for this value.
 
+Graphēon also tracks `source_origin`, which answers how the data entered the system:
+
+- `manual`: paste, file, and bulk uploads through the import APIs/UI.
+- `agent`: passive agent check-ins.
+
+List APIs for imports, hosts, ARP entries, and connections accept `source_origin=manual` or `source_origin=agent` to filter views by origin.
+
 ## Parsing Flow
 
 1. The import router selects a parser from `backend/parsers/` based on the `source_type` parameter.
@@ -54,7 +61,7 @@ All import routes accept:
 3. The parser produces normalized objects: `ParsedHost`, `ParsedPort`, `ParsedConnection`, `ParsedARPEntry`, or `ParsedRouteHop`.
 4. The pipeline upserts hosts, ports, connections, and ARP entries into the database.
 5. Tags are derived from IPs, MACs, ports, services, and subnets (see `docs/tagging-correlation.md`).
-6. The `raw_imports` table records the input, status, and any errors.
+6. The `raw_imports` table records the input, origin, status, and any errors.
 
 ## Parser Output Models
 

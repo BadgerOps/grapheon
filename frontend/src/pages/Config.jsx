@@ -286,7 +286,10 @@ export default function Config() {
       setLoading(prev => ({ ...prev, cleanup: true }))
       setError('')
       const result = await api.runCleanup(cleanupDays)
-      setSuccess(`Cleanup complete: ${result.hosts_deleted} hosts, ${result.ports_deleted} ports, ${result.connections_deleted} connections deleted`)
+      const cleaned = result.cleaned || {}
+      setSuccess(
+        `Cleanup complete: ${cleaned.hosts_deactivated || 0} hosts deactivated, ${cleaned.connections_deleted || 0} connections deleted, ${cleaned.arp_entries_deleted || 0} ARP entries deleted`
+      )
       setTimeout(() => setSuccess(''), 5000)
       setCleanupPreview(null)
       fetchStats()
@@ -308,6 +311,8 @@ export default function Config() {
   const formatDate = (dateStr) => {
     return new Date(dateStr).toLocaleString()
   }
+
+  const cleanupPreviewCounts = cleanupPreview?.would_affect || {}
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -873,7 +878,7 @@ export default function Config() {
             <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <h4 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Cleanup Preview</h4>
               <p className="text-yellow-700 dark:text-yellow-300 text-sm">
-                This will delete: {cleanupPreview.hosts_to_delete || 0} hosts, {cleanupPreview.ports_to_delete || 0} ports, {cleanupPreview.connections_to_delete || 0} connections
+                This will mark {cleanupPreviewCounts.hosts_marked_stale || 0} hosts stale, deactivate {cleanupPreviewCounts.hosts_deactivated || 0} hosts, delete {cleanupPreviewCounts.connections_deleted || 0} connections, delete {cleanupPreviewCounts.arp_entries_deleted || 0} ARP entries, clear {cleanupPreviewCounts.imports_cleaned || 0} import payloads, and clear {cleanupPreviewCounts.agent_checkin_reports_cleaned || 0} agent report bodies.
               </p>
             </div>
           )}

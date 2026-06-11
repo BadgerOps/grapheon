@@ -183,6 +183,9 @@ Relevant flags:
 - `--force` bypasses cached cadence gating
 - `--state-dir` isolates local agent state for testing or manual runs
 - `--config` loads the same env-style settings used by the installed `systemd` unit
+- `--user-agent` overrides the default `Grapheon-Agent/<version> python-urllib` HTTP User-Agent sent to Graphēon
+
+On each installed timer run, the agent also performs a lightweight authenticated poll before local cadence gating. Admin-requested collections in Graphēon are delivered through that poll and run on the next outbound agent invocation.
 
 The help output includes these manual examples:
 
@@ -221,7 +224,7 @@ sudo bash scripts/install-passive-agent.sh
 
 This installs:
 
-- `/opt/grapheon/agent/grapheon_agent.py`
+- `/opt/grapheon/agent/current/grapheon_agent.py`
 - `/etc/systemd/system/grapheon-agent.service`
 - `/etc/systemd/system/grapheon-agent.timer`
 - `/etc/grapheon-agent.env` if it does not already exist
@@ -262,6 +265,12 @@ GRAPHEON_AGENT_DISPLAY_NAME=Branch Router 01
 GRAPHEON_AGENT_SITE_NAME=Boise
 ```
 
+Optional User-Agent override for stricter edge policies:
+
+```dotenv
+GRAPHEON_AGENT_USER_AGENT=Grapheon-Agent/0.13.0 python-urllib
+```
+
 For local development over plain HTTP:
 
 ```dotenv
@@ -288,6 +297,8 @@ On first run with a non-auto-approved enrollment key, the runtime will:
 - generate and persist `agent_uuid`
 - register with Graphēon
 - exit cleanly in `pending` state
+
+The log line `No agent API key found; registering agent <agent_uuid>` is normal on first bootstrap. The API key is the per-agent key issued later and stored at `/var/lib/grapheon-agent/api_key`; the env file contains the enrollment key.
 
 ## 8. Review And Approve The Pending Agent
 
@@ -384,6 +395,8 @@ The shipped timer runs every 15 minutes. The runtime uses the cached backend pol
 
 If the cached policy interval has not elapsed yet, the runtime exits quickly.
 
+An admin can request collection from the Agents page. Because the runtime is outbound-only, the request is fulfilled the next time the host timer starts the agent and the agent polls Graphēon.
+
 ## Operational Notes
 
 - Do not derive `agent_uuid` from MAC addresses.
@@ -414,8 +427,18 @@ sudo systemctl start grapheon-agent.service
 Run the collector directly:
 
 ```bash
-sudo /usr/bin/env python3 /opt/grapheon/agent/grapheon_agent.py --force --log-level DEBUG
+sudo /usr/bin/env python3 /opt/grapheon/agent/current/grapheon_agent.py --force --log-level DEBUG
 ```
+
+If registration fails with `HTTP 403 calling api/agents/register: error code: 1010`, the request was rejected before the Graphēon backend handled the enrollment key. Check the edge proxy, bot protection, browser-integrity checks, or WAF policy in front of Graphēon. Allow the agent host/IP or bypass those checks for `/api/agents/*`.
+
+The agent sends a deterministic User-Agent header by default:
+
+```text
+Grapheon-Agent/<version> python-urllib
+```
+
+Override it when needed with `GRAPHEON_AGENT_USER_AGENT` in `/etc/grapheon-agent.env` or with `--user-agent` for direct runs.
 
 If the agent was approved but the API key file was lost, rotate the key from the admin API and place the new secret back on the host:
 

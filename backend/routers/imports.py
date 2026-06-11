@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
+MANUAL_SOURCE_ORIGIN = "manual"
+
 
 def _generate_guid() -> str:
     return str(uuid.uuid4())
@@ -85,10 +87,18 @@ def _decode_upload_content(source_type: str, content: bytes) -> Optional[str]:
         return content.decode("latin-1")
 
 
+def _merge_unique(values: Optional[list[str]], value: str) -> list[str]:
+    current = list(values or [])
+    if value not in current:
+        current.append(value)
+    return current
+
+
 async def _upsert_host_from_value(
     db: AsyncSession,
     value: Optional[str],
     source_type: str,
+    source_origin: str = MANUAL_SOURCE_ORIGIN,
     mac_address: Optional[str] = None,
     hostname: Optional[str] = None,
 ) -> Optional[Host]:
@@ -131,6 +141,7 @@ async def _upsert_host_from_value(
         current_sources = host.source_types or []
         if source_type not in current_sources:
             host.source_types = current_sources + [source_type]
+        host.source_origins = _merge_unique(host.source_origins, source_origin)
         host.last_seen = datetime.utcnow()
         return host
 
@@ -144,6 +155,7 @@ async def _upsert_host_from_value(
         hostname=hostname_value,
         mac_address=mac_address,
         source_types=[source_type],
+        source_origins=[source_origin],
         guid=_generate_guid(),
         first_seen=datetime.utcnow(),
         last_seen=datetime.utcnow(),
@@ -163,6 +175,7 @@ async def _process_import(
     import_record: RawImport,
     source_type: str,
     parse_input: str | bytes,
+    source_origin: str = MANUAL_SOURCE_ORIGIN,
 ) -> None:
     """Parse raw data and create database records."""
 
@@ -223,6 +236,7 @@ async def _process_import(
                         current_sources = host.source_types or []
                         if source_type not in current_sources:
                             host.source_types = current_sources + [source_type]
+                        host.source_origins = _merge_unique(host.source_origins, source_origin)
 
                         host.last_seen = datetime.utcnow()
                         host.tags = merge_tags(
@@ -251,6 +265,7 @@ async def _process_import(
                             os_confidence=parsed_host.os_confidence,
                             device_type=parsed_host.device_type,
                             source_types=[source_type],
+                            source_origins=[source_origin],
                             guid=_generate_guid(),
                             first_seen=datetime.utcnow(),
                             last_seen=datetime.utcnow(),
@@ -292,6 +307,10 @@ async def _process_import(
                                 port.service_version = parsed_port.service_version
                             if parsed_port.service_product:
                                 port.product = parsed_port.service_product
+                            current_sources = port.source_types or []
+                            if source_type not in current_sources:
+                                port.source_types = current_sources + [source_type]
+                            port.source_origins = _merge_unique(port.source_origins, source_origin)
                             port.last_seen = datetime.utcnow()
                             port.tags = merge_tags(
                                 port.tags,
@@ -317,6 +336,7 @@ async def _process_import(
                                 service_extrainfo=parsed_port.service_banner,
                                 confidence=parsed_port.confidence,
                                 source_types=[source_type],
+                                source_origins=[source_origin],
                                 first_seen=datetime.utcnow(),
                                 last_seen=datetime.utcnow(),
                             )
@@ -337,6 +357,7 @@ async def _process_import(
                         db,
                         parsed_conn.local_ip,
                         source_type,
+                        source_origin,
                     )
                     # Skip host upsert for unspecified remote IPs (LISTEN state)
                     remote_ip = parsed_conn.remote_ip or "0.0.0.0"
@@ -345,6 +366,7 @@ async def _process_import(
                             db,
                             remote_ip,
                             source_type,
+                            source_origin,
                         )
                     conn = Connection(
                         local_ip=parsed_conn.local_ip,
@@ -356,6 +378,7 @@ async def _process_import(
                         pid=parsed_conn.pid,
                         process_name=parsed_conn.process_name,
                         source_type=source_type,
+                        source_origin=source_origin,
                         first_seen=datetime.utcnow(),
                         last_seen=datetime.utcnow(),
                     )
@@ -377,6 +400,7 @@ async def _process_import(
                         db,
                         parsed_arp.ip_address,
                         source_type,
+                        source_origin,
                         mac_address=parsed_arp.mac_address,
                     )
                     if not parsed_arp.mac_address:
@@ -398,6 +422,7 @@ async def _process_import(
                             entry_type=parsed_arp.entry_type,
                             vendor=parsed_arp.vendor,
                             source_type=source_type,
+                            source_origin=source_origin,
                             first_seen=datetime.utcnow(),
                         )
                         arp.tags = build_arp_tags(
@@ -409,6 +434,20 @@ async def _process_import(
                         )
                         db.add(arp)
                         records_created += 1
+                    else:
+                        arp.source_type = source_type
+                        arp.source_origin = source_origin
+                        arp.last_seen = datetime.utcnow()
+                        arp.tags = merge_tags(
+                            arp.tags,
+                            build_arp_tags(
+                                ip_address=arp.ip_address,
+                                mac_address=arp.mac_address,
+                                interface=arp.interface,
+                                entry_type=arp.entry_type,
+                                vendor=arp.vendor,
+                            ),
+                        )
 
         except Exception as db_err:
             # Savepoint was rolled back automatically; outer transaction is intact.
@@ -450,11 +489,22 @@ async def _run_import_background(
             raise ValueError(f"Import record {import_id} not found")
 
         if source_host:
-            await _upsert_host_from_value(db, source_host, "import_source")
+            await _upsert_host_from_value(
+                db,
+                source_host,
+                "import_source",
+                MANUAL_SOURCE_ORIGIN,
+            )
         parse_input = import_record.stored_file_path if source_type == "pcap" else import_record.raw_data
         if parse_input is None:
             raise ValueError(f"Import record {import_id} has no input payload")
-        await _process_import(db, import_record, source_type, parse_input)
+        await _process_import(
+            db,
+            import_record,
+            source_type,
+            parse_input,
+            import_record.source_origin or MANUAL_SOURCE_ORIGIN,
+        )
 
         await db.commit()
         await db.refresh(import_record)
@@ -508,6 +558,7 @@ async def import_raw_data(
     # Create import record
     import_record = RawImport(
         source_type=source_type,
+        source_origin=MANUAL_SOURCE_ORIGIN,
         import_type="paste",
         filename=filename,
         source_host=source_host,
@@ -589,6 +640,7 @@ async def import_file(
     # Create import record and commit so background task can see it
     import_record = RawImport(
         source_type=source_type,
+        source_origin=MANUAL_SOURCE_ORIGIN,
         import_type="file",
         filename=file.filename,
         source_host=source_host,
@@ -632,6 +684,7 @@ async def list_imports(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     source_type: Optional[str] = Query(None),
+    source_origin: Optional[str] = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -648,11 +701,15 @@ async def list_imports(
 
     if source_type:
         query = query.where(RawImport.source_type == source_type)
+    if source_origin:
+        query = query.where(RawImport.source_origin == source_origin)
 
     # Get total count
     count_query = select(func.count(RawImport.id))
     if source_type:
         count_query = count_query.where(RawImport.source_type == source_type)
+    if source_origin:
+        count_query = count_query.where(RawImport.source_origin == source_origin)
 
     count_result = await db.execute(count_query)
     total = count_result.scalar()
@@ -715,7 +772,13 @@ async def reparse_import(import_id: int, user: User = Depends(require_editor), d
         raise HTTPException(status_code=404, detail="Import not found")
 
     # Re-parse the data
-    await _process_import(db, import_record, import_record.source_type, import_record.raw_data)
+    await _process_import(
+        db,
+        import_record,
+        import_record.source_type,
+        import_record.raw_data,
+        import_record.source_origin or MANUAL_SOURCE_ORIGIN,
+    )
 
     await db.commit()
     await db.refresh(import_record)
@@ -753,11 +816,22 @@ async def _run_bulk_import_background(
                     raise ValueError(f"Import record {import_id} not found")
 
                 if source_host:
-                    await _upsert_host_from_value(db, source_host, "import_source")
+                    await _upsert_host_from_value(
+                        db,
+                        source_host,
+                        "import_source",
+                        MANUAL_SOURCE_ORIGIN,
+                    )
                 parse_input = import_record.stored_file_path if source_type == "pcap" else import_record.raw_data
                 if parse_input is None:
                     raise ValueError(f"Import record {import_id} has no input payload")
-                await _process_import(db, import_record, source_type, parse_input)
+                await _process_import(
+                    db,
+                    import_record,
+                    source_type,
+                    parse_input,
+                    import_record.source_origin or MANUAL_SOURCE_ORIGIN,
+                )
                 await db.commit()
                 await db.refresh(import_record)
 
@@ -848,6 +922,7 @@ async def bulk_import_files(
 
             import_record = RawImport(
                 source_type=source_type,
+                source_origin=MANUAL_SOURCE_ORIGIN,
                 import_type="file",
                 filename=file.filename,
                 source_host=source_host,

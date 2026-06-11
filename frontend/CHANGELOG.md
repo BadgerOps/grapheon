@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.13.0 - 2026-06-11
+### Added
+- **On-demand agent collection action**: the Agents page can request a collection from an active passive agent and shows pending or fulfilled collection request state.
+- **Import origin filtering**: Hosts, ARP, Connections, and Import History views can filter records by manual or agent origin and display origin metadata.
+
 ## 0.12.0 - 2026-06-11
 ### Changed
 - **Agent health rendering**: the Agents page now renders backend-computed health state instead of inferring check-in freshness in the browser.

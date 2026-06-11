@@ -145,6 +145,16 @@ export default function HostDetail() {
             ))}
           </div>
         )}
+        {host.source_origins && host.source_origins.length > 0 && (
+          <div className="mt-4">
+            <span className="text-sm font-medium text-gray-500">Import Origins: </span>
+            {host.source_origins.map((src, i) => (
+              <span key={i} className="inline-block bg-slate-100 text-slate-800 text-xs px-2 py-1 rounded mr-2">
+                {src}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Ports */}

@@ -31,6 +31,7 @@ class ARPEntry(Base):
 
     # Data provenance
     source_type = Column(String(50), nullable=True)  # e.g., "arp_scan", "arp_table"
+    source_origin = Column(String(50), nullable=True)  # e.g., "manual", "agent"
 
     # Indexes
     __table_args__ = (

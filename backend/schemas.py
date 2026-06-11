@@ -69,6 +69,10 @@ VALID_IMPORT_TYPES = frozenset({
     "file", "paste", "agent",  # set by the import endpoints themselves
 })
 
+VALID_SOURCE_ORIGINS = frozenset({
+    "manual", "agent", "api", "system",
+})
+
 VALID_AGENT_COMMANDS = frozenset({
     "ip_neigh",
     "ss_tunap",
@@ -182,6 +186,7 @@ class HostFields(BaseModel):
     is_verified: bool = False
     is_active: bool = True
     source_types: Optional[List[str]] = None
+    source_origins: Optional[List[str]] = None
 
 
 class _HostValidators:
@@ -310,6 +315,7 @@ class HostUpdate(BaseModel, _HostValidators):
     is_verified: Optional[bool] = None
     is_active: Optional[bool] = None
     source_types: Optional[List[str]] = None
+    source_origins: Optional[List[str]] = None
 
 
 class HostResponse(HostFields):
@@ -349,6 +355,7 @@ class PortFields(BaseModel):
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
     source_types: Optional[List[str]] = None
+    source_origins: Optional[List[str]] = None
 
 
 class _PortValidators:
@@ -402,6 +409,7 @@ class PortUpdate(BaseModel, _PortValidators):
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
     source_types: Optional[List[str]] = None
+    source_origins: Optional[List[str]] = None
 
 
 class PortResponse(PortFields):
@@ -437,6 +445,7 @@ class ConnectionFields(BaseModel):
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
     source_type: Optional[str] = None
+    source_origin: Optional[str] = None
 
 
 class _ConnectionValidators:
@@ -520,6 +529,7 @@ class ARPEntryFields(BaseModel):
     tags: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=5000)
     source_type: Optional[str] = None
+    source_origin: Optional[str] = None
 
 
 class _ARPValidators:
@@ -567,6 +577,7 @@ class RawImportFields(BaseModel):
     """Pure field definitions for raw imports.  No validators."""
 
     source_type: str
+    source_origin: str = "manual"
     import_type: str
     filename: Optional[str] = Field(None, max_length=500)
     source_host: Optional[str] = None
@@ -601,6 +612,19 @@ class _RawImportValidators:
             raise ValueError(
                 f"Invalid import type '{v}'. "
                 f"Allowed values: {', '.join(sorted(VALID_IMPORT_TYPES))}"
+            )
+        return lower
+
+    @field_validator("source_origin")
+    @classmethod
+    def validate_source_origin(cls, v):
+        if v is None:
+            return v
+        lower = v.lower()
+        if lower not in VALID_SOURCE_ORIGINS:
+            raise ValueError(
+                f"Invalid source origin '{v}'. "
+                f"Allowed values: {', '.join(sorted(VALID_SOURCE_ORIGINS))}"
             )
         return lower
 
@@ -962,6 +986,9 @@ class AgentResponse(AgentFields):
     last_mac_addresses: Optional[List[str]] = None
     last_registration_summary: Optional[Dict[str, Any]] = None
     last_checkin_summary: Optional[Dict[str, Any]] = None
+    collection_requested_at: Optional[datetime] = None
+    collection_request_reason: Optional[str] = None
+    collection_request_fulfilled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -1154,6 +1181,26 @@ class AgentReactivateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000)
 
 
+class AgentCollectionRequestCreate(BaseModel):
+    """Admin request to make an agent collect on its next poll."""
+
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class AgentPollRequest(BaseModel):
+    """Lightweight poll sent by an agent timer run before local cadence gating."""
+
+    agent_uuid: str = Field(..., min_length=1, max_length=128)
+
+
+class AgentCollectionRequestStatus(BaseModel):
+    """Pending on-demand collection request state returned to an agent."""
+
+    requested: bool
+    requested_at: Optional[datetime] = None
+    reason: Optional[str] = None
+
+
 class AgentCheckInRequest(BaseModel):
     """Normalized passive report uploaded by a deployed agent."""
 
@@ -1229,6 +1276,16 @@ class AgentCheckInResponse(BaseModel):
     compatibility: AgentCompatibilityResponse
     checkin: AgentCheckInRecordResponse
     summary: Dict[str, Any]
+
+
+class AgentPollResponse(BaseModel):
+    """Response returned to an agent after polling for control-plane state."""
+
+    server_time: datetime
+    agent: AgentResponse
+    policy: Optional[AgentPolicyResponse] = None
+    compatibility: AgentCompatibilityResponse
+    collection_request: AgentCollectionRequestStatus
 
 
 # ═══════════════════════════════════════════════════════════════════════

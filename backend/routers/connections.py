@@ -19,6 +19,7 @@ async def list_connections(
     remote_ip: Optional[str] = Query(None),
     protocol: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
+    source_origin: Optional[str] = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -37,6 +38,9 @@ async def list_connections(
     if state:
         query = query.where(Connection.state == state)
         count_query = count_query.where(Connection.state == state)
+    if source_origin:
+        query = query.where(Connection.source_origin == source_origin)
+        count_query = count_query.where(Connection.source_origin == source_origin)
 
     count_result = await db.execute(count_query)
     total = count_result.scalar()

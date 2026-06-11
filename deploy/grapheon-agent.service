@@ -22,7 +22,7 @@ LockPersonality=true
 MemoryDenyWriteExecute=true
 RestrictSUIDSGID=true
 ReadWritePaths=/var/lib/grapheon-agent
-RuntimeMaxSec=10min
+TimeoutStartSec=10min
 
 [Install]
 WantedBy=multi-user.target

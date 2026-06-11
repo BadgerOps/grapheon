@@ -106,8 +106,38 @@ def _run_migrations(sync_conn) -> None:
         [
             ("source_host", "source_host VARCHAR(255)"),
             ("stored_file_path", "stored_file_path VARCHAR(1024)"),
+            ("source_origin", "source_origin VARCHAR(50) DEFAULT 'manual'"),
         ],
     )
+    _ensure_columns(
+        sync_conn,
+        "hosts",
+        [
+            ("source_origins", "source_origins JSON"),
+        ],
+    )
+    _ensure_columns(
+        sync_conn,
+        "ports",
+        [
+            ("source_origins", "source_origins JSON"),
+        ],
+    )
+    _ensure_columns(
+        sync_conn,
+        "arp_entries",
+        [
+            ("source_origin", "source_origin VARCHAR(50)"),
+        ],
+    )
+    _ensure_columns(
+        sync_conn,
+        "connections",
+        [
+            ("source_origin", "source_origin VARCHAR(50)"),
+        ],
+    )
+    _backfill_source_origins(sync_conn)
 
     # DeviceIdentity: link multi-homed hosts to the same physical device
     _ensure_columns(
@@ -136,6 +166,9 @@ def _run_migrations(sync_conn) -> None:
             ("last_registration_at", "last_registration_at DATETIME"),
             ("last_mac_addresses", "last_mac_addresses JSON"),
             ("last_registration_summary", "last_registration_summary JSON"),
+            ("collection_requested_at", "collection_requested_at DATETIME"),
+            ("collection_request_reason", "collection_request_reason VARCHAR(1000)"),
+            ("collection_request_fulfilled_at", "collection_request_fulfilled_at DATETIME"),
         ],
     )
     _ensure_columns(
@@ -153,6 +186,59 @@ def _run_migrations(sync_conn) -> None:
     _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_default_policy_id", "agent_enrollment_keys", "default_policy_id")
     _create_index_if_missing(sync_conn, "idx_agent_checkin_api_key_prefix", "agent_checkins", "api_key_prefix")
     _create_agent_observations_table(sync_conn)
+
+
+def _backfill_source_origins(sync_conn) -> None:
+    """Populate source-origin columns for databases created before the field existed."""
+    sync_conn.execute(
+        text(
+            """
+            UPDATE raw_imports
+            SET source_origin = CASE
+                WHEN source_type = 'agent' OR import_type = 'agent' THEN 'agent'
+                ELSE 'manual'
+            END
+            WHERE source_origin IS NULL
+            """
+        )
+    )
+    for table in ("hosts", "ports"):
+        rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        columns = {row[1] for row in rows}
+        if "source_origins" not in columns:
+            continue
+        sync_conn.execute(
+            text(
+                f"""
+                UPDATE {table}
+                SET source_origins = CASE
+                    WHEN source_types LIKE '%"agent"%' AND source_types != '["agent"]'
+                        THEN '["manual","agent"]'
+                    WHEN source_types LIKE '%"agent"%'
+                        THEN '["agent"]'
+                    ELSE '["manual"]'
+                END
+                WHERE source_origins IS NULL
+                """
+            )
+        )
+    for table in ("arp_entries", "connections"):
+        rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        columns = {row[1] for row in rows}
+        if "source_origin" not in columns:
+            continue
+        sync_conn.execute(
+            text(
+                f"""
+                UPDATE {table}
+                SET source_origin = CASE
+                    WHEN source_type = 'agent' THEN 'agent'
+                    ELSE 'manual'
+                END
+                WHERE source_origin IS NULL
+                """
+            )
+        )
 
 
 def _ensure_columns(sync_conn, table: str, columns: list[tuple[str, str]]) -> None:

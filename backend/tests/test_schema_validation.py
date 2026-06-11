@@ -899,6 +899,41 @@ class TestRawImportCreateImportType:
         assert "Invalid import type" in str(exc_info.value)
 
 
+class TestRawImportCreateSourceOrigin:
+    """Test source_origin validation for RawImportCreate."""
+
+    def test_valid_source_origins(self):
+        """All valid source origins should be accepted."""
+        for source_origin in ["manual", "agent", "api", "system"]:
+            raw = RawImportCreate(
+                source_type="nmap",
+                source_origin=source_origin,
+                import_type="xml",
+                raw_data="test data",
+            )
+            assert raw.source_origin == source_origin
+
+    def test_source_origin_default_is_manual(self):
+        """Source origin defaults to manual for user-created imports."""
+        raw = RawImportCreate(
+            source_type="nmap",
+            import_type="xml",
+            raw_data="test data",
+        )
+        assert raw.source_origin == "manual"
+
+    def test_invalid_source_origin(self):
+        """Invalid source origin should raise ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            RawImportCreate(
+                source_type="nmap",
+                source_origin="unknown_origin",
+                import_type="xml",
+                raw_data="test data",
+            )
+        assert "Invalid source origin" in str(exc_info.value)
+
+
 class TestRawImportCreateRawData:
     """Test raw_data validation for RawImportCreate."""
 

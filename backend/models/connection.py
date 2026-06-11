@@ -35,6 +35,7 @@ class Connection(Base):
 
     # Data provenance
     source_type = Column(String(50), nullable=True)  # e.g., "netstat", "ss"
+    source_origin = Column(String(50), nullable=True)  # e.g., "manual", "agent"
 
     # Indexes
     __table_args__ = (

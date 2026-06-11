@@ -56,7 +56,7 @@ python3 agent/grapheon_agent.py \
 ```
 
 ```bash
-/usr/bin/env python3 /opt/grapheon/agent/grapheon_agent.py \
+/usr/bin/env python3 /opt/grapheon/agent/current/grapheon_agent.py \
   --config /etc/grapheon-agent.env \
   --force
 ```
@@ -77,7 +77,10 @@ Useful flags:
 - `--check-in-only` requires an existing local API key and skips registration
 - `--force` bypasses cached cadence gating for an immediate run
 - `--state-dir` keeps manual runs isolated from the default `/var/lib/grapheon-agent`
+- `--user-agent` overrides the default `Grapheon-Agent/<version> python-urllib` HTTP User-Agent sent to Graphēon
 - `--log-level DEBUG` makes parsing, registration, and check-in troubleshooting easier
+
+During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot.
 
 Versioned install helpers:
 
@@ -96,7 +99,8 @@ usage: grapheon_agent.py [-h] [--config CONFIG] [--state-dir STATE_DIR]
                          [--hostname HOSTNAME]
                          [--request-timeout-seconds REQUEST_TIMEOUT_SECONDS]
                          [--timer-interval-seconds TIMER_INTERVAL_SECONDS]
-                         [--api-key-header API_KEY_HEADER] [--ca-file CA_FILE]
+                         [--api-key-header API_KEY_HEADER]
+                         [--user-agent USER_AGENT] [--ca-file CA_FILE]
                          [--insecure-skip-verify]
                          [--register-only | --check-in-only] [--force]
                          [--log-level LOG_LEVEL]
@@ -106,5 +110,19 @@ Low-impact one-shot passive collector for Graphēon.
 The agent can run from a systemd timer or be invoked directly with flags for
 manual registration, approval polling, and check-in.
 ```
+
+## Registration Troubleshooting
+
+The first-run log line `No agent API key found; registering agent <agent_uuid>` is normal. The local API key is the per-agent secret that Graphēon issues after registration or approval and stores at `/var/lib/grapheon-agent/api_key`; it is different from the enrollment key in `/etc/grapheon-agent.env`.
+
+If registration fails with `HTTP 403 calling api/agents/register: error code: 1010`, the request was rejected before the Graphēon backend handled the enrollment key. Check the edge proxy, bot protection, browser-integrity checks, or WAF policy in front of Graphēon. Allow the agent host/IP or bypass those checks for `/api/agents/*`.
+
+The agent sends a deterministic User-Agent header by default:
+
+```text
+Grapheon-Agent/<version> python-urllib
+```
+
+Override it when needed with `GRAPHEON_AGENT_USER_AGENT` in `/etc/grapheon-agent.env` or with `--user-agent` for direct runs.
 
 See `docs/agent_quickstart.md` for the deployment walkthrough and `deploy/grapheon-agent.*` for the shipped `systemd` units.

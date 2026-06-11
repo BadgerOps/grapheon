@@ -62,7 +62,7 @@ CLI_EPILOG = """Examples:
     python3 agent/grapheon_agent.py --server-url https://grapheon.example.com --state-dir ./agent-state --force --log-level DEBUG
 
   Run the installed host copy without systemd:
-    /usr/bin/env python3 /opt/grapheon/agent/grapheon_agent.py --config /etc/grapheon-agent.env --force
+    /usr/bin/env python3 /opt/grapheon/agent/current/grapheon_agent.py --config /etc/grapheon-agent.env --force
 """
 
 
@@ -75,6 +75,7 @@ def _load_agent_version() -> str:
 
 
 AGENT_VERSION = _load_agent_version()
+DEFAULT_USER_AGENT = f"Grapheon-Agent/{AGENT_VERSION} python-urllib"
 
 
 @dataclass
@@ -91,6 +92,7 @@ class AgentConfig:
     hostname: Optional[str]
     timer_interval_seconds: int
     api_key_header: str
+    user_agent: str
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -163,6 +165,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="HTTP header used to send the per-agent API key",
     )
     parser.add_argument(
+        "--user-agent",
+        default=os.environ.get("GRAPHEON_AGENT_USER_AGENT"),
+        help="HTTP User-Agent header sent to the Graphēon server",
+    )
+    parser.add_argument(
         "--ca-file",
         default=os.environ.get("GRAPHEON_AGENT_CA_FILE"),
         help="Optional CA bundle path for HTTPS validation",
@@ -225,6 +232,7 @@ def build_config(args: argparse.Namespace) -> AgentConfig:
     site_name = args.site_name or os.environ.get("GRAPHEON_AGENT_SITE_NAME")
     hostname = args.hostname or os.environ.get("GRAPHEON_AGENT_HOSTNAME")
     ca_file = args.ca_file or os.environ.get("GRAPHEON_AGENT_CA_FILE")
+    user_agent = args.user_agent or os.environ.get("GRAPHEON_AGENT_USER_AGENT") or DEFAULT_USER_AGENT
 
     if not server_url:
         raise SystemExit("GRAPHEON_AGENT_SERVER_URL is required")
@@ -242,6 +250,7 @@ def build_config(args: argparse.Namespace) -> AgentConfig:
         hostname=hostname,
         timer_interval_seconds=args.timer_interval_seconds,
         api_key_header=args.api_key_header,
+        user_agent=user_agent,
     )
 
 
@@ -685,7 +694,10 @@ def http_json(
     compress: bool = False,
 ) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    request_headers = {"Content-Type": "application/json"}
+    request_headers = {
+        "Content-Type": "application/json",
+        "User-Agent": config.user_agent,
+    }
     if headers:
         request_headers.update(headers)
     if compress:
@@ -723,6 +735,17 @@ def check_in_agent(
 ) -> dict[str, Any]:
     headers = {config.api_key_header: api_key}
     return http_json(config, "POST", "api/agents/check-in", payload, headers=headers, compress=True)
+
+
+def poll_agent_control(config: AgentConfig, api_key: str, agent_uuid_value: str) -> dict[str, Any]:
+    headers = {config.api_key_header: api_key}
+    return http_json(
+        config,
+        "POST",
+        "api/agents/poll",
+        {"agent_uuid": agent_uuid_value},
+        headers=headers,
+    )
 
 
 def merged_policy(state: dict[str, Any], response_policy: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -788,7 +811,21 @@ def run_agent(
         LOG.info("Register-only mode complete for %s", agent_uuid_value)
         return 0
 
+    if api_key:
+        poll_response = poll_agent_control(config, api_key, agent_uuid_value)
+        policy = merged_policy(state, poll_response.get("policy"))
+        state["policy"] = policy
+        collection_request = poll_response.get("collection_request") or {}
+        if collection_request.get("requested"):
+            force = True
+            state["last_collection_request_at"] = collection_request.get("requested_at")
+            LOG.info(
+                "On-demand collection requested at %s; bypassing local cadence",
+                collection_request.get("requested_at"),
+            )
+
     if not should_run_with_policy(state, policy, config.timer_interval_seconds, force):
+        write_json_file(state_file_path(config), state)
         LOG.info("Skipping collection; cached policy interval has not elapsed")
         return 0
 

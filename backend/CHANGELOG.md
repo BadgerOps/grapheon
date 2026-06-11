@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.14.0 - 2026-06-11
+### Added
+- **On-demand passive agent collection requests**: admins can request a collection from an active agent, agents poll for pending requests on each timer run, and successful check-ins mark requests fulfilled.
+- **Import origin provenance**: raw imports and imported host/port/ARP/connection records now track whether data entered through manual imports or passive agents.
+- **Origin filters**: import, host, ARP, and connection list APIs now support filtering by `source_origin`.
+
 ## 0.13.0 - 2026-06-11
 ### Added
 - **Passive agent report retention cleanup**: maintenance cleanup now prunes old `agent_checkins.report` bodies after a configurable `agent_checkin_report_max_age_days` window while preserving check-in metadata, summaries, raw import links, and agent-scoped observation state.

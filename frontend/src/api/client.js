@@ -371,11 +371,22 @@ export async function getDatabaseStats() {
 }
 
 export async function previewCleanup(daysOld = 90) {
-  return apiCall('GET', '/maintenance/cleanup/preview', null, { days_old: daysOld })
+  return apiCall('POST', '/maintenance/cleanup/preview', null, cleanupPolicyParams(daysOld))
 }
 
 export async function runCleanup(daysOld = 90) {
-  return apiCall('POST', '/maintenance/cleanup', null, { days_old: daysOld })
+  return apiCall('POST', '/maintenance/cleanup/run', null, cleanupPolicyParams(daysOld))
+}
+
+function cleanupPolicyParams(daysOld) {
+  return {
+    host_stale_days: daysOld,
+    host_archive_days: daysOld,
+    connection_max_age_days: daysOld,
+    arp_max_age_days: daysOld,
+    import_max_age_days: daysOld,
+    agent_checkin_report_max_age_days: daysOld,
+  }
 }
 
 // Vendor lookup
@@ -509,6 +520,10 @@ export async function reactivateAgent(id, data = {}) {
 
 export async function rotateAgentApiKey(id, data = {}) {
   return apiCall('POST', `/agents/${id}/rotate-api-key`, data)
+}
+
+export async function requestAgentCollection(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/request-collection`, data)
 }
 
 export async function getAgentCheckins(id, params = {}) {

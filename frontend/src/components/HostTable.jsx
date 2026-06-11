@@ -32,6 +32,7 @@ export default function HostTable({ hosts = [], onDelete }) {
             <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">OS Family</th>
             <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">Device Type</th>
             <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">Vendor</th>
+            <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">Origin</th>
             <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">Last Seen</th>
             <th className="px-6 py-3 text-left font-semibold text-gray-700 dark:text-gray-200">Actions</th>
           </tr>
@@ -74,6 +75,9 @@ export default function HostTable({ hosts = [], onDelete }) {
                 ) : '-'}
               </td>
               <td className="px-6 py-4 text-gray-700 dark:text-gray-300 text-sm">{host.vendor || '-'}</td>
+              <td className="px-6 py-4 text-gray-700 dark:text-gray-300 text-sm">
+                {(host.source_origins || host.source_types || []).join(', ') || '-'}
+              </td>
               <td className="px-6 py-4 text-gray-700 dark:text-gray-300 text-sm">
                 {host.last_seen ? new Date(host.last_seen).toLocaleString() : '-'}
               </td>

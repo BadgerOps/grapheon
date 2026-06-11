@@ -18,6 +18,7 @@ async def list_arp_entries(
     ip_address: Optional[str] = Query(None),
     mac_address: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
+    source_origin: Optional[str] = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -33,6 +34,9 @@ async def list_arp_entries(
     if source_type:
         query = query.where(ARPEntry.source_type == source_type)
         count_query = count_query.where(ARPEntry.source_type == source_type)
+    if source_origin:
+        query = query.where(ARPEntry.source_origin == source_origin)
+        count_query = count_query.where(ARPEntry.source_origin == source_origin)
 
     count_result = await db.execute(count_query)
     total = count_result.scalar()

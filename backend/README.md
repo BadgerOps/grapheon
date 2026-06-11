@@ -109,8 +109,12 @@ The API will be available at `http://localhost:8000`
 - `PATCH /api/agents/{id}` - Update passive agent metadata or policy
 - `POST /api/agents/{id}/approve` - Approve a pending passive agent
 - `POST /api/agents/{id}/reject` - Reject a pending passive agent
+- `POST /api/agents/{id}/revoke` - Revoke a passive agent and invalidate its API key
+- `POST /api/agents/{id}/reactivate` - Move a revoked or inactive agent back to pending approval
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue an agent API key
+- `POST /api/agents/{id}/request-collection` - Request collection on the agent's next timer run
 - `GET /api/agents/{id}/checkins` - List passive agent check-in history
+- `GET /api/agents/{id}/observations` - List current and removed agent-scoped observations
 - `GET /api/agents/policies` - List passive collection policies
 - `POST /api/agents/policies` - Create passive collection policy
 - `PATCH /api/agents/policies/{id}` - Update passive collection policy
@@ -118,6 +122,7 @@ The API will be available at `http://localhost:8000`
 - `POST /api/agents/enrollment-keys` - Create agent enrollment key
 - `PATCH /api/agents/enrollment-keys/{id}` - Update agent enrollment key
 - `POST /api/agents/register` - Register or re-poll an agent using an enrollment key
+- `POST /api/agents/poll` - Agent-authenticated policy and control-plane poll
 - `POST /api/agents/check-in` - Ingest passive agent report using the agent API key
 
 ## Database Models

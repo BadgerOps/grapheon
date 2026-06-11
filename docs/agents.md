@@ -31,7 +31,9 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `POST /api/agents/{id}/revoke` - Revoke an agent and invalidate its API key.
 - `POST /api/agents/{id}/reactivate` - Move a revoked or inactive agent back to pending approval.
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue a per-agent API key once.
+- `POST /api/agents/{id}/request-collection` - Request that an active agent collect on its next timer run.
 - `GET /api/agents/{id}/checkins` - List check-in history for one agent.
+- `POST /api/agents/poll` - Agent-authenticated control-plane poll for policy and pending collection requests.
 - `GET /api/agents/policies` - List passive collection policies.
 - `POST /api/agents/policies` - Create a passive collection policy.
 - `PATCH /api/agents/policies/{id}` - Update a passive collection policy.
@@ -124,6 +126,8 @@ Reports may be sent with `Content-Encoding: gzip`. The backend stores the normal
 - `agent_checkins` for operational history
 - `raw_imports` for auditability and future replay/converter work
 
+Agent check-ins are stored with `source_origin=agent`. Manual paste/file/bulk imports use `source_origin=manual`. Host, port, ARP, connection, and import list APIs can filter by this origin so operator views can separate passive-agent data from manually imported data.
+
 The ingest path upserts:
 
 - `hosts`
@@ -142,6 +146,7 @@ Current behavior:
 - registers with an enrollment key until approved
 - re-registers once approved to receive the per-agent API key
 - supports direct manual execution with CLI flags in addition to the shipped `systemd` units
+- polls Graphēon on each timer run before local cadence gating so admin-requested collections can run on the next outbound agent invocation
 - ships as both a GHCR container image and a GitHub release tarball for distribution
 - installs host releases under a versioned `releases/` directory with a stable `current` symlink for rollback
 - uses cached backend policy for:

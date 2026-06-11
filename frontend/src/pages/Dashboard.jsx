@@ -359,7 +359,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900 dark:text-gray-100">
-                        {imp.source_type}
+                        {imp.source_origin || 'manual'} / {imp.source_type}
                       </p>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
                         {imp.filename || 'Pasted data'}

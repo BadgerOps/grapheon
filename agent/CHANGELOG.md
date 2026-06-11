@@ -4,6 +4,16 @@ All notable changes to the Graphēon passive agent will be documented in this fi
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.13.0 - 2026-06-11
+### Added
+- **On-demand collection polling**: the passive agent now polls Graphēon for pending collection requests on each timer run and bypasses local cadence when an admin-requested collection is pending.
+
+## 0.12.1 - 2026-06-11
+### Fixed
+- **Edge registration compatibility**: the passive agent now sends a deterministic `User-Agent` header on JSON requests and supports `GRAPHEON_AGENT_USER_AGENT` / `--user-agent` overrides for stricter edge policies.
+- **Systemd oneshot timeout**: the shipped service now uses `TimeoutStartSec=10min` instead of ignored `RuntimeMaxSec=10min` for the oneshot collector.
+- **Agent registration troubleshooting docs**: documented Cloudflare/WAF-style `403` / `error code: 1010` registration failures, the `/api/agents/*` edge bypass recommendation, normal first-run API-key bootstrap logs, and installed host `current/` paths.
+
 ## 0.12.0 - 2026-06-11
 ### Changed
 - **Full-snapshot check-ins**: the passive agent now sends full passive snapshots on each check-in so the backend can mark missing agent-scoped observations stale/removed.

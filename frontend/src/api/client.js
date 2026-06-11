@@ -511,6 +511,10 @@ export async function rotateAgentApiKey(id, data = {}) {
   return apiCall('POST', `/agents/${id}/rotate-api-key`, data)
 }
 
+export async function requestAgentCollection(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/request-collection`, data)
+}
+
 export async function getAgentCheckins(id, params = {}) {
   return apiCall('GET', `/agents/${id}/checkins`, null, params)
 }

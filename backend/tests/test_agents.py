@@ -428,11 +428,127 @@ class TestAgentEnrollmentAndCheckIn:
         assert (await db.execute(select(func.count(RawImport.id)))).scalar_one() == 2
         assert (await db.execute(select(func.count(AgentCheckIn.id)))).scalar_one() == 2
 
+        raw_import = (
+            await db.execute(
+                select(RawImport).where(RawImport.source_type == "agent").limit(1)
+            )
+        ).scalar_one()
+        assert raw_import.source_origin == "agent"
+        host = (
+            await db.execute(select(Host).where(Host.ip_address == "10.0.0.5"))
+        ).scalar_one()
+        assert "agent" in host.source_origins
+        arp_entry = (await db.execute(select(ARPEntry))).scalar_one()
+        assert arp_entry.source_origin == "agent"
+        connection = (await db.execute(select(Connection))).scalar_one()
+        assert connection.source_origin == "agent"
+
+        import_filter = await async_client.get(
+            "/api/imports",
+            params={"source_origin": "agent"},
+            headers=admin_headers,
+        )
+        assert import_filter.status_code == 200
+        assert import_filter.json()["total"] == 2
+        host_filter = await async_client.get(
+            "/api/hosts",
+            params={"source_origin": "agent"},
+            headers=admin_headers,
+        )
+        assert host_filter.status_code == 200
+        assert host_filter.json()["total"] == 3
+        arp_filter = await async_client.get(
+            "/api/arp",
+            params={"source_origin": "agent"},
+            headers=admin_headers,
+        )
+        assert arp_filter.status_code == 200
+        assert arp_filter.json()["total"] == 1
+        connection_filter = await async_client.get(
+            "/api/connections",
+            params={"source_origin": "agent"},
+            headers=admin_headers,
+        )
+        assert connection_filter.status_code == 200
+        assert connection_filter.json()["total"] == 1
+
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one()
         assert agent.last_seen_at is not None
         assert agent.api_key_hash is not None
         assert agent.last_ip_addresses == ["10.0.0.1", "10.0.0.10", "10.0.0.5"]
+
+    @pytest.mark.asyncio
+    async def test_on_demand_collection_request_is_polled_and_fulfilled(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_collect_now_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "agent-collect-now")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "agent-collect-now-key",
+            policy_id,
+            auto_approve=True,
+        )
+
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-collect-now-001",
+            ip_address="10.80.0.5",
+            mac_address="AA:BB:CC:80:00:05",
+        )
+        assert register_response.status_code == 200
+        register_data = register_response.json()
+        agent_id = register_data["agent"]["id"]
+        api_key = register_data["api_key"]
+
+        request_response = await async_client.post(
+            f"/api/agents/{agent_id}/request-collection",
+            json={"reason": "operator requested refresh"},
+            headers=admin_headers,
+        )
+        assert request_response.status_code == 200
+        request_data = request_response.json()
+        assert request_data["collection_requested_at"]
+        assert request_data["collection_request_reason"] == "operator requested refresh"
+        assert request_data["collection_request_fulfilled_at"] is None
+
+        poll_response = await async_client.post(
+            "/api/agents/poll",
+            json={"agent_uuid": "agent-collect-now-001"},
+            headers={settings.AGENT_API_KEY_HEADER: api_key},
+        )
+        assert poll_response.status_code == 200
+        poll_data = poll_response.json()
+        assert poll_data["collection_request"]["requested"] is True
+        assert poll_data["collection_request"]["reason"] == "operator requested refresh"
+        assert poll_data["policy"]["id"] == policy_id
+
+        checkin_response = await _post_checkin(
+            async_client,
+            api_key,
+            _checkin_payload("agent-collect-now-001"),
+        )
+        assert checkin_response.status_code == 200
+
+        fulfilled_poll_response = await async_client.post(
+            "/api/agents/poll",
+            json={"agent_uuid": "agent-collect-now-001"},
+            headers={settings.AGENT_API_KEY_HEADER: api_key},
+        )
+        assert fulfilled_poll_response.status_code == 200
+        assert fulfilled_poll_response.json()["collection_request"]["requested"] is False
+
+        agent_response = await async_client.get(
+            f"/api/agents/{agent_id}",
+            headers=admin_headers,
+        )
+        assert agent_response.status_code == 200
+        assert agent_response.json()["collection_request_fulfilled_at"] is not None
 
     @pytest.mark.asyncio
     async def test_rotate_agent_api_key_invalidates_previous_key(

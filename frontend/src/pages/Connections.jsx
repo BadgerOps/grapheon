@@ -6,16 +6,17 @@ export default function Connections() {
   const [connections, setConnections] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [sourceOrigin, setSourceOrigin] = useState('')
 
   useEffect(() => {
     fetchConnections()
-  }, [])
+  }, [sourceOrigin])
 
   const fetchConnections = async () => {
     try {
       setLoading(true)
       setError('')
-      const data = await api.getConnections()
+      const data = await api.getConnections({ source_origin: sourceOrigin || null })
       setConnections(data.items || [])
     } catch (err) {
       setError(err.message)
@@ -28,12 +29,23 @@ export default function Connections() {
     <div className="p-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Connections</h1>
-        <Link
-          to="/"
-          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-        >
-          Back to Dashboard
-        </Link>
+        <div className="flex items-center gap-3">
+          <select
+            value={sourceOrigin}
+            onChange={(event) => setSourceOrigin(event.target.value)}
+            className="select"
+          >
+            <option value="">All origins</option>
+            <option value="manual">Manual imports</option>
+            <option value="agent">Agent imports</option>
+          </select>
+          <Link
+            to="/"
+            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+          >
+            Back to Dashboard
+          </Link>
+        </div>
       </div>
 
       {error && (
@@ -61,6 +73,7 @@ export default function Connections() {
                     <th className="px-6 py-3 text-left font-semibold text-gray-700">State</th>
                     <th className="px-6 py-3 text-left font-semibold text-gray-700">PID</th>
                     <th className="px-6 py-3 text-left font-semibold text-gray-700">Process</th>
+                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Origin</th>
                     <th className="px-6 py-3 text-left font-semibold text-gray-700">Last Seen</th>
                   </tr>
                 </thead>
@@ -77,6 +90,7 @@ export default function Connections() {
                       <td className="px-6 py-4 text-gray-900">{conn.state || '-'}</td>
                       <td className="px-6 py-4 text-gray-900">{conn.pid ?? '-'}</td>
                       <td className="px-6 py-4 text-gray-900">{conn.process_name || '-'}</td>
+                      <td className="px-6 py-4 text-gray-900">{conn.source_origin || '-'}</td>
                       <td className="px-6 py-4 text-gray-900">
                         {conn.last_seen ? new Date(conn.last_seen).toLocaleString() : '-'}
                       </td>

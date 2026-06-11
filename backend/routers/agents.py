@@ -36,6 +36,8 @@ from schemas import (
     AgentCheckInRecordResponse,
     AgentCheckInRequest,
     AgentCheckInResponse,
+    AgentCollectionRequestCreate,
+    AgentCollectionRequestStatus,
     AgentCompatibilityResponse,
     AgentCreate,
     AgentEnrollmentKeyCreate,
@@ -47,6 +49,8 @@ from schemas import (
     AgentPolicyCreate,
     AgentPolicyResponse,
     AgentPolicyUpdate,
+    AgentPollRequest,
+    AgentPollResponse,
     AgentRegistrationRequest,
     AgentRegistrationResponse,
     AgentReactivateRequest,
@@ -70,6 +74,7 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 AGENT_SOURCE_TYPE = "agent"
 AGENT_IMPORT_TYPE = "agent"
+AGENT_SOURCE_ORIGIN = "agent"
 ENROLLMENT_KEY_PREFIX = "gaek"
 AGENT_API_KEY_PREFIX = "gpak"
 MIN_SUPPORTED_AGENT_VERSION = "0.1.0"
@@ -295,6 +300,26 @@ def _extract_registration_summary(payload: AgentRegistrationRequest) -> tuple[li
     return ips, macs, summary
 
 
+def _merge_unique(values: Optional[list[str]], value: str) -> list[str]:
+    current = list(values or [])
+    if value not in current:
+        current.append(value)
+    return current
+
+
+def _pending_collection_request(agent: Agent) -> AgentCollectionRequestStatus:
+    requested_at = agent.collection_requested_at
+    fulfilled_at = agent.collection_request_fulfilled_at
+    requested = bool(
+        requested_at and (fulfilled_at is None or requested_at > fulfilled_at)
+    )
+    return AgentCollectionRequestStatus(
+        requested=requested,
+        requested_at=requested_at if requested else None,
+        reason=agent.collection_request_reason if requested else None,
+    )
+
+
 async def _get_policy_or_404(db: AsyncSession, policy_id: int) -> AgentPolicy:
     result = await db.execute(select(AgentPolicy).where(AgentPolicy.id == policy_id))
     policy = result.scalar_one_or_none()
@@ -458,6 +483,7 @@ async def _upsert_host(
         current_sources = host.source_types or []
         if AGENT_SOURCE_TYPE not in current_sources:
             host.source_types = current_sources + [AGENT_SOURCE_TYPE]
+        host.source_origins = _merge_unique(host.source_origins, AGENT_SOURCE_ORIGIN)
         host.tags = merge_tags(
             host.tags,
             build_host_tags(
@@ -478,6 +504,7 @@ async def _upsert_host(
         hostname=hostname,
         mac_address=mac_address,
         source_types=[AGENT_SOURCE_TYPE],
+        source_origins=[AGENT_SOURCE_ORIGIN],
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -511,6 +538,7 @@ async def _upsert_arp_entry(
     if arp_entry:
         arp_entry.interface = interface or arp_entry.interface
         arp_entry.entry_type = state_value or arp_entry.entry_type
+        arp_entry.source_origin = AGENT_SOURCE_ORIGIN
         arp_entry.last_seen = _utcnow()
         arp_entry.tags = merge_tags(
             arp_entry.tags,
@@ -530,6 +558,7 @@ async def _upsert_arp_entry(
         interface=interface,
         entry_type=state_value,
         source_type=AGENT_SOURCE_TYPE,
+        source_origin=AGENT_SOURCE_ORIGIN,
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -573,6 +602,7 @@ async def _upsert_connection(
     result = await db.execute(select(Connection).where(*filters))
     connection = result.scalar_one_or_none()
     if connection:
+        connection.source_origin = AGENT_SOURCE_ORIGIN
         connection.last_seen = _utcnow()
         connection.tags = merge_tags(
             connection.tags,
@@ -598,6 +628,7 @@ async def _upsert_connection(
         pid=pid,
         process_name=process_name,
         source_type=AGENT_SOURCE_TYPE,
+        source_origin=AGENT_SOURCE_ORIGIN,
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -946,6 +977,7 @@ async def _ingest_agent_payload(
 
     raw_import = RawImport(
         source_type=AGENT_SOURCE_TYPE,
+        source_origin=AGENT_SOURCE_ORIGIN,
         import_type=AGENT_IMPORT_TYPE,
         filename=f"{agent.agent_uuid}-{payload.observed_at.isoformat()}.json",
         source_host=_source_host_from_payload(payload),
@@ -1049,6 +1081,14 @@ async def _ingest_agent_payload(
     agent.last_mac_addresses = sorted(seen_macs)
     agent.last_checkin_summary = summary
     agent.last_seen_at = now
+    if (
+        agent.collection_requested_at
+        and (
+            agent.collection_request_fulfilled_at is None
+            or agent.collection_requested_at > agent.collection_request_fulfilled_at
+        )
+    ):
+        agent.collection_request_fulfilled_at = now
 
     await db.flush()
 
@@ -1815,6 +1855,62 @@ async def rotate_agent_api_key(
     )
 
 
+@router.post("/{agent_id}/request-collection", response_model=AgentResponse)
+async def request_agent_collection(
+    agent_id: int,
+    collection_request: AgentCollectionRequestCreate,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await _get_agent_or_404(db, agent_id)
+    if not agent.is_active or agent.enrollment_state != "active":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only active agents can receive collection requests ({agent.enrollment_state})",
+        )
+    if not agent.api_key_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="Agent does not have an API key yet; approve and let it register first",
+        )
+
+    now = _utcnow()
+    agent.collection_requested_at = now
+    agent.collection_request_reason = collection_request.reason
+    agent.collection_request_fulfilled_at = None
+
+    await db.commit()
+    await db.refresh(agent)
+    policy_map = await _load_policy_map(
+        db,
+        [agent.policy_id] if agent.policy_id else [],
+    )
+    enrollment_key_map = await _load_enrollment_key_map(
+        db,
+        [agent.enrollment_key_id] if agent.enrollment_key_id else [],
+    )
+    default_policy_map = await _load_policy_map(
+        db,
+        [
+            enrollment_key.default_policy_id
+            for enrollment_key in enrollment_key_map.values()
+            if enrollment_key.default_policy_id
+        ],
+    )
+    policy_map.update(default_policy_map)
+    await _attach_key_and_policy(agent, policy_map, enrollment_key_map)
+
+    audit.log(
+        action="REQUEST_COLLECTION",
+        actor="user",
+        resource="Agent",
+        resource_id=str(agent.id),
+        status="success",
+        details={"agent_uuid": agent.agent_uuid, "reason": collection_request.reason},
+    )
+    return _agent_response(agent)
+
+
 @router.get("/{agent_id}/checkins", response_model=PaginatedResponse)
 async def list_agent_checkins(
     agent_id: int,
@@ -1895,6 +1991,59 @@ async def list_agent_observations(
             for observation in observations
         ],
     }
+
+
+@router.post("/poll", response_model=AgentPollResponse)
+async def poll_agent_control(
+    poll: AgentPollRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    raw_api_key = request.headers.get(settings.AGENT_API_KEY_HEADER)
+    if not raw_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing agent API key",
+        )
+
+    agent = await _lookup_agent_by_api_key(db, raw_api_key)
+    if poll.agent_uuid != agent.agent_uuid:
+        raise HTTPException(
+            status_code=409,
+            detail="Payload agent_uuid does not match the authenticated agent",
+        )
+
+    policy = None
+    if agent.policy_id:
+        result = await db.execute(select(AgentPolicy).where(AgentPolicy.id == agent.policy_id))
+        policy = result.scalar_one_or_none()
+
+    policy_map = await _load_policy_map(
+        db,
+        [agent.policy_id] if agent.policy_id else [],
+    )
+    enrollment_key_map = await _load_enrollment_key_map(
+        db,
+        [agent.enrollment_key_id] if agent.enrollment_key_id else [],
+    )
+    default_policy_map = await _load_policy_map(
+        db,
+        [
+            enrollment_key.default_policy_id
+            for enrollment_key in enrollment_key_map.values()
+            if enrollment_key.default_policy_id
+        ],
+    )
+    policy_map.update(default_policy_map)
+    await _attach_key_and_policy(agent, policy_map, enrollment_key_map)
+
+    return AgentPollResponse(
+        server_time=_utcnow(),
+        agent=_agent_response(agent),
+        policy=AgentPolicyResponse.model_validate(policy) if policy else None,
+        compatibility=_agent_compatibility(agent.agent_version),
+        collection_request=_pending_collection_request(agent),
+    )
 
 
 @router.post("/check-in", response_model=AgentCheckInResponse)

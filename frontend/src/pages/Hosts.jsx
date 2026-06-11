@@ -8,16 +8,17 @@ export default function Hosts() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [sourceOrigin, setSourceOrigin] = useState('')
 
   useEffect(() => {
     fetchHosts()
-  }, [])
+  }, [sourceOrigin])
 
   const fetchHosts = async () => {
     try {
       setLoading(true)
       setError('')
-      const data = await api.getHosts()
+      const data = await api.getHosts({ source_origin: sourceOrigin || null })
       // API returns {total, items, skip, limit}
       setHosts(data.items || [])
     } catch (err) {
@@ -42,12 +43,23 @@ export default function Hosts() {
     <div className="p-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Hosts</h1>
-        <Link
-          to="/"
-          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-        >
-          Back to Dashboard
-        </Link>
+        <div className="flex items-center gap-3">
+          <select
+            value={sourceOrigin}
+            onChange={(event) => setSourceOrigin(event.target.value)}
+            className="select"
+          >
+            <option value="">All origins</option>
+            <option value="manual">Manual imports</option>
+            <option value="agent">Agent imports</option>
+          </select>
+          <Link
+            to="/"
+            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+          >
+            Back to Dashboard
+          </Link>
+        </div>
       </div>
 
       {error && (

@@ -13,6 +13,7 @@ class RawImport(Base):
 
     # Import metadata
     source_type = Column(String(100), nullable=False)  # e.g., "nmap", "netstat", "arp_scan"
+    source_origin = Column(String(50), nullable=False, default="manual")  # "manual", "agent", etc.
     import_type = Column(String(50), nullable=False)  # "paste" or "file"
     filename = Column(String(255), nullable=True)
     source_host = Column(String(255), nullable=True)

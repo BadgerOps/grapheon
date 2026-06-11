@@ -1,10 +1,11 @@
 import gzip
 import hashlib
+import json
 import logging
 import secrets
 from datetime import datetime, timezone
 from ipaddress import ip_address as parse_ip
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +22,7 @@ from models import (
     Agent,
     AgentCheckIn,
     AgentEnrollmentKey,
+    AgentObservation,
     AgentPolicy,
     Connection,
     Host,
@@ -34,11 +36,14 @@ from schemas import (
     AgentCheckInRecordResponse,
     AgentCheckInRequest,
     AgentCheckInResponse,
+    AgentCompatibilityResponse,
     AgentCreate,
     AgentEnrollmentKeyCreate,
     AgentEnrollmentKeyCreateResponse,
     AgentEnrollmentKeyResponse,
     AgentEnrollmentKeyUpdate,
+    AgentHealthResponse,
+    AgentObservationResponse,
     AgentPolicyCreate,
     AgentPolicyResponse,
     AgentPolicyUpdate,
@@ -67,6 +72,17 @@ AGENT_SOURCE_TYPE = "agent"
 AGENT_IMPORT_TYPE = "agent"
 ENROLLMENT_KEY_PREFIX = "gaek"
 AGENT_API_KEY_PREFIX = "gpak"
+MIN_SUPPORTED_AGENT_VERSION = "0.1.0"
+
+AGENT_SECTION_POLICY = {
+    "addresses": ("ip_addr", "address"),
+    "neighbors": ("ip_neigh", "neighbor"),
+    "connections": ("ss_tunap", "connection"),
+    "routes": ("ip_route", "route"),
+}
+
+DEFAULT_HEALTH_INTERVAL_SECONDS = 3600
+DEFAULT_HEALTH_JITTER_SECONDS = 300
 
 
 def _utcnow() -> datetime:
@@ -94,6 +110,149 @@ def _clear_agent_api_key(agent: Agent) -> None:
     agent.api_key_hash = None
     agent.api_key_prefix = None
     agent.api_key_issued_at = None
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _semver_tuple(value: Optional[str]) -> Optional[tuple[int, int, int]]:
+    if not value:
+        return None
+    raw = value.strip()
+    if raw.startswith("v"):
+        raw = raw[1:]
+    core = raw.split("-", 1)[0].split("+", 1)[0]
+    parts = core.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError:
+        return None
+
+
+def _agent_compatibility(reported_version: Optional[str]) -> AgentCompatibilityResponse:
+    backend_version = settings.APP_VERSION
+    backend_semver = _semver_tuple(backend_version)
+    minimum_semver = _semver_tuple(MIN_SUPPORTED_AGENT_VERSION)
+    reported_semver = _semver_tuple(reported_version)
+
+    status_value = "unsupported"
+    warning = None
+    if reported_semver is None:
+        warning = (
+            "Agent version was not reported or is not semantic; accepting with "
+            "limited compatibility guarantees"
+        )
+    elif minimum_semver and reported_semver < minimum_semver:
+        warning = (
+            f"Agent version {reported_version} is older than the minimum "
+            f"supported version {MIN_SUPPORTED_AGENT_VERSION}; accepting with warning"
+        )
+    elif backend_semver and reported_semver > backend_semver:
+        status_value = "newer_untested"
+        warning = (
+            f"Agent version {reported_version} is newer than backend "
+            f"{backend_version}; accepting as untested"
+        )
+    elif backend_semver and reported_semver < backend_semver:
+        status_value = "older_supported"
+        warning = (
+            f"Agent version {reported_version} is older than preferred backend "
+            f"version {backend_version}; accepting for compatibility"
+        )
+    else:
+        status_value = "supported"
+
+    return AgentCompatibilityResponse(
+        backend_version=backend_version,
+        supported_agent_version_range=f">={MIN_SUPPORTED_AGENT_VERSION}",
+        recommended_agent_version=backend_version,
+        reported_agent_version=reported_version,
+        status=status_value,
+        warning=warning,
+    )
+
+
+def _policy_interval(policy: Any) -> tuple[int, int]:
+    if not policy:
+        return DEFAULT_HEALTH_INTERVAL_SECONDS, DEFAULT_HEALTH_JITTER_SECONDS
+    interval = getattr(policy, "checkin_interval_seconds", DEFAULT_HEALTH_INTERVAL_SECONDS)
+    jitter = getattr(policy, "jitter_seconds", DEFAULT_HEALTH_JITTER_SECONDS)
+    return int(interval or DEFAULT_HEALTH_INTERVAL_SECONDS), int(jitter or 0)
+
+
+def _agent_health(agent: Agent) -> dict[str, Any]:
+    policy = getattr(agent, "policy", None)
+    interval, jitter = _policy_interval(policy)
+    healthy_after = interval * 2 + jitter
+    offline_after = healthy_after * 4
+    checked_at = _utcnow()
+
+    if not agent.last_seen_at:
+        return {
+            "state": "never_seen",
+            "last_seen_at": None,
+            "expected_checkin_interval_seconds": interval,
+            "healthy_after_seconds": healthy_after,
+            "offline_after_seconds": offline_after,
+            "checked_at": checked_at,
+            "message": "Agent has not checked in yet",
+        }
+
+    if not agent.is_active or agent.enrollment_state in {"revoked", "rejected"}:
+        return {
+            "state": "offline",
+            "last_seen_at": agent.last_seen_at,
+            "expected_checkin_interval_seconds": interval,
+            "healthy_after_seconds": healthy_after,
+            "offline_after_seconds": offline_after,
+            "checked_at": checked_at,
+            "message": f"Agent record is {agent.enrollment_state}",
+        }
+
+    age_seconds = max(0, int((checked_at - agent.last_seen_at).total_seconds()))
+    if age_seconds <= healthy_after:
+        state_value = "healthy"
+        message = "Agent checked in within expected policy window"
+    elif age_seconds <= offline_after:
+        state_value = "stale"
+        message = "Agent missed the expected policy window"
+    else:
+        state_value = "offline"
+        message = "Agent has not checked in for multiple policy windows"
+
+    return {
+        "state": state_value,
+        "last_seen_at": agent.last_seen_at,
+        "expected_checkin_interval_seconds": interval,
+        "healthy_after_seconds": healthy_after,
+        "offline_after_seconds": offline_after,
+        "checked_at": checked_at,
+        "message": message,
+    }
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _identity_hash(observation_type: str, identity: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        _canonical_json({"type": observation_type, "identity": identity}).encode("utf-8")
+    ).hexdigest()
+
+
+def _enabled_commands(policy: Optional[AgentPolicy]) -> dict[str, bool]:
+    if not policy or not policy.enabled_commands:
+        return {command: True for command, _ in AGENT_SECTION_POLICY.values()}
+    return {
+        command: bool(policy.enabled_commands.get(command, True))
+        for command, _ in AGENT_SECTION_POLICY.values()
+    }
 
 
 def _decode_request_body(body: bytes, content_encoding: Optional[str]) -> bytes:
@@ -338,9 +497,9 @@ async def _upsert_arp_entry(
     mac_address: Optional[str],
     interface: Optional[str],
     state_value: Optional[str],
-) -> bool:
+) -> tuple[Optional[ARPEntry], bool]:
     if not mac_address:
-        return False
+        return None, False
 
     result = await db.execute(
         select(ARPEntry).where(
@@ -363,7 +522,7 @@ async def _upsert_arp_entry(
                 vendor=arp_entry.vendor,
             ),
         )
-        return False
+        return arp_entry, False
 
     arp_entry = ARPEntry(
         ip_address=ip_address,
@@ -382,7 +541,8 @@ async def _upsert_arp_entry(
         vendor=arp_entry.vendor,
     )
     db.add(arp_entry)
-    return True
+    await db.flush()
+    return arp_entry, True
 
 
 async def _upsert_connection(
@@ -395,7 +555,7 @@ async def _upsert_connection(
     state_value: Optional[str],
     pid: Optional[int],
     process_name: Optional[str],
-) -> bool:
+) -> tuple[Connection, bool]:
     filters = [
         Connection.local_ip == local_ip,
         Connection.local_port == local_port,
@@ -426,7 +586,7 @@ async def _upsert_connection(
                 process_name=connection.process_name,
             ),
         )
-        return False
+        return connection, False
 
     connection = Connection(
         local_ip=local_ip,
@@ -451,7 +611,171 @@ async def _upsert_connection(
         process_name=connection.process_name,
     )
     db.add(connection)
-    return True
+    await db.flush()
+    return connection, True
+
+
+def _policy_violation_sections(
+    policy: Optional[AgentPolicy],
+    payload: AgentCheckInRequest,
+) -> list[tuple[str, str, int]]:
+    if not policy:
+        return []
+    commands = _enabled_commands(policy)
+    violations = []
+    for section_name, (command_name, _) in AGENT_SECTION_POLICY.items():
+        count = len(getattr(payload, section_name))
+        if count and not commands.get(command_name, True):
+            violations.append((section_name, command_name, count))
+    return violations
+
+
+def _raise_policy_violations(
+    agent: Agent,
+    policy: Optional[AgentPolicy],
+    payload: AgentCheckInRequest,
+) -> None:
+    violations = _policy_violation_sections(policy, payload)
+    if not violations:
+        return
+
+    for section_name, command_name, count in violations:
+        logger.warning(
+            "Rejected agent policy violation: agent_id=%s agent_uuid=%s "
+            "policy_id=%s section=%s command=%s records=%s sequence=%s",
+            agent.id,
+            agent.agent_uuid,
+            policy.id if policy else None,
+            section_name,
+            command_name,
+            count,
+            payload.sequence_number,
+        )
+    detail = "; ".join(
+        f"{section_name} disabled by policy command {command_name} ({count} records)"
+        for section_name, command_name, count in violations
+    )
+    raise HTTPException(status_code=403, detail=f"Agent report violates assigned policy: {detail}")
+
+
+def _observation_identity(observation_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if observation_type == "address":
+        return {
+            "ip_address": payload.get("ip_address"),
+            "interface": payload.get("interface"),
+            "mac_address": payload.get("mac_address"),
+        }
+    if observation_type == "neighbor":
+        return {
+            "ip_address": payload.get("ip_address"),
+            "mac_address": payload.get("mac_address"),
+            "interface": payload.get("interface"),
+        }
+    if observation_type == "connection":
+        return {
+            "local_ip": payload.get("local_ip"),
+            "local_port": payload.get("local_port"),
+            "remote_ip": payload.get("remote_ip"),
+            "remote_port": payload.get("remote_port"),
+            "protocol": payload.get("protocol"),
+            "state": payload.get("state"),
+            "pid": payload.get("pid"),
+            "process_name": payload.get("process_name"),
+        }
+    if observation_type == "route":
+        return {
+            "destination": payload.get("destination"),
+            "gateway": payload.get("gateway"),
+            "interface": payload.get("interface"),
+            "source_ip": payload.get("source_ip"),
+        }
+    return payload
+
+
+async def _upsert_agent_observation(
+    db: AsyncSession,
+    agent: Agent,
+    observation_type: str,
+    payload: dict[str, Any],
+    observed_at: datetime,
+    raw_import_id: int,
+    checkin_id: int,
+    host_id: Optional[int] = None,
+    arp_entry_id: Optional[int] = None,
+    connection_id: Optional[int] = None,
+) -> tuple[AgentObservation, bool, bool]:
+    identity = _observation_identity(observation_type, payload)
+    identity_hash = _identity_hash(observation_type, identity)
+    observed_at = _naive_utc(observed_at)
+    now = _utcnow()
+
+    result = await db.execute(
+        select(AgentObservation).where(
+            AgentObservation.agent_id == agent.id,
+            AgentObservation.observation_type == observation_type,
+            AgentObservation.identity_hash == identity_hash,
+        )
+    )
+    observation = result.scalar_one_or_none()
+    if observation:
+        was_removed = not observation.is_current
+        observation.payload = payload
+        observation.last_seen_at = observed_at
+        observation.raw_import_id = raw_import_id
+        observation.last_seen_checkin_id = checkin_id
+        observation.host_id = host_id
+        observation.arp_entry_id = arp_entry_id
+        observation.connection_id = connection_id
+        observation.is_current = True
+        observation.stale_at = None
+        observation.removed_at = None
+        observation.updated_at = now
+        return observation, False, was_removed
+
+    observation = AgentObservation(
+        agent_id=agent.id,
+        raw_import_id=raw_import_id,
+        last_seen_checkin_id=checkin_id,
+        observation_type=observation_type,
+        identity_hash=identity_hash,
+        payload=payload,
+        host_id=host_id,
+        arp_entry_id=arp_entry_id,
+        connection_id=connection_id,
+        first_seen_at=observed_at,
+        last_seen_at=observed_at,
+        is_current=True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(observation)
+    return observation, True, False
+
+
+async def _mark_removed_observations(
+    db: AsyncSession,
+    agent: Agent,
+    observation_type: str,
+    current_hashes: set[str],
+    removed_at: datetime,
+) -> int:
+    result = await db.execute(
+        select(AgentObservation).where(
+            AgentObservation.agent_id == agent.id,
+            AgentObservation.observation_type == observation_type,
+            AgentObservation.is_current.is_(True),
+        )
+    )
+    removed_count = 0
+    for observation in result.scalars().all():
+        if observation.identity_hash in current_hashes:
+            continue
+        observation.is_current = False
+        observation.stale_at = removed_at
+        observation.removed_at = removed_at
+        observation.updated_at = _utcnow()
+        removed_count += 1
+    return removed_count
 
 
 async def _ingest_agent_payload(
@@ -461,17 +785,40 @@ async def _ingest_agent_payload(
     decoded_body: bytes,
     content_encoding: Optional[str],
     source_ip: Optional[str],
+    policy: Optional[AgentPolicy],
 ) -> tuple[AgentCheckIn, RawImport, AgentPolicyResponse | None, dict]:
     now = _utcnow()
+    observed_at = _naive_utc(payload.observed_at)
+    effective_full_snapshot = payload.full_snapshot
+    if not effective_full_snapshot:
+        logger.warning(
+            "Accepted legacy partial agent report without stale/removal marking: "
+            "agent_id=%s agent_uuid=%s sequence=%s reported_version=%s",
+            agent.id,
+            agent.agent_uuid,
+            payload.sequence_number,
+            payload.agent_version,
+        )
     host_creates = 0
     arp_creates = 0
     connection_creates = 0
+    observation_creates = 0
+    observation_refreshes = 0
+    observation_reactivations = 0
+    observation_removals = 0
 
     seen_ips: set[str] = set()
     seen_macs: set[str] = set()
+    observation_inputs: list[dict[str, Any]] = []
+    current_hashes: dict[str, set[str]] = {
+        "address": set(),
+        "neighbor": set(),
+        "connection": set(),
+        "route": set(),
+    }
 
     for address in payload.addresses:
-        _, created = await _upsert_host(
+        host, created = await _upsert_host(
             db,
             address.ip_address,
             hostname=payload.hostname,
@@ -481,16 +828,27 @@ async def _ingest_agent_payload(
         seen_ips.add(address.ip_address)
         if address.mac_address:
             seen_macs.add(address.mac_address)
+        address_payload = address.model_dump(mode="json")
+        current_hashes["address"].add(
+            _identity_hash("address", _observation_identity("address", address_payload))
+        )
+        observation_inputs.append(
+            {
+                "type": "address",
+                "payload": address_payload,
+                "host_id": host.id,
+            }
+        )
 
     for neighbor in payload.neighbors:
-        _, created = await _upsert_host(
+        host, created = await _upsert_host(
             db,
             neighbor.ip_address,
             hostname=neighbor.hostname,
             mac_address=neighbor.mac_address,
         )
         host_creates += int(created)
-        arp_created = await _upsert_arp_entry(
+        arp_entry, arp_created = await _upsert_arp_entry(
             db,
             neighbor.ip_address,
             neighbor.mac_address,
@@ -501,34 +859,64 @@ async def _ingest_agent_payload(
         seen_ips.add(neighbor.ip_address)
         if neighbor.mac_address:
             seen_macs.add(neighbor.mac_address)
+        neighbor_payload = neighbor.model_dump(mode="json")
+        current_hashes["neighbor"].add(
+            _identity_hash("neighbor", _observation_identity("neighbor", neighbor_payload))
+        )
+        observation_inputs.append(
+            {
+                "type": "neighbor",
+                "payload": neighbor_payload,
+                "host_id": host.id,
+                "arp_entry_id": arp_entry.id if arp_entry else None,
+            }
+        )
 
     for route in payload.routes:
+        route_host_id = None
         if route.source_ip:
-            _, created = await _upsert_host(
-                db,
-                route.source_ip,
-                hostname=payload.hostname,
-            )
-            host_creates += int(created)
-            seen_ips.add(route.source_ip)
+            if not parse_ip(route.source_ip).is_unspecified:
+                host, created = await _upsert_host(
+                    db,
+                    route.source_ip,
+                    hostname=payload.hostname,
+                )
+                route_host_id = host.id
+                host_creates += int(created)
+                seen_ips.add(route.source_ip)
         if route.gateway:
-            _, created = await _upsert_host(db, route.gateway)
-            host_creates += int(created)
-            seen_ips.add(route.gateway)
+            if not parse_ip(route.gateway).is_unspecified:
+                _, created = await _upsert_host(db, route.gateway)
+                host_creates += int(created)
+                seen_ips.add(route.gateway)
+        route_payload = route.model_dump(mode="json")
+        current_hashes["route"].add(
+            _identity_hash("route", _observation_identity("route", route_payload))
+        )
+        observation_inputs.append(
+            {
+                "type": "route",
+                "payload": route_payload,
+                "host_id": route_host_id,
+            }
+        )
 
     for connection in payload.connections:
-        _, created = await _upsert_host(
-            db,
-            connection.local_ip,
-            hostname=payload.hostname,
-        )
-        host_creates += int(created)
-        seen_ips.add(connection.local_ip)
+        connection_host_id = None
+        if not parse_ip(connection.local_ip).is_unspecified:
+            host, created = await _upsert_host(
+                db,
+                connection.local_ip,
+                hostname=payload.hostname,
+            )
+            connection_host_id = host.id
+            host_creates += int(created)
+            seen_ips.add(connection.local_ip)
         if not parse_ip(connection.remote_ip).is_unspecified:
             _, remote_created = await _upsert_host(db, connection.remote_ip)
             host_creates += int(remote_created)
             seen_ips.add(connection.remote_ip)
-        connection_created = await _upsert_connection(
+        db_connection, connection_created = await _upsert_connection(
             db,
             local_ip=connection.local_ip,
             local_port=connection.local_port,
@@ -540,6 +928,21 @@ async def _ingest_agent_payload(
             process_name=connection.process_name,
         )
         connection_creates += int(connection_created)
+        connection_payload = connection.model_dump(mode="json")
+        current_hashes["connection"].add(
+            _identity_hash(
+                "connection",
+                _observation_identity("connection", connection_payload),
+            )
+        )
+        observation_inputs.append(
+            {
+                "type": "connection",
+                "payload": connection_payload,
+                "host_id": connection_host_id,
+                "connection_id": db_connection.id,
+            }
+        )
 
     raw_import = RawImport(
         source_type=AGENT_SOURCE_TYPE,
@@ -550,57 +953,93 @@ async def _ingest_agent_payload(
         tags=["agent", f"agent_uuid:{agent.agent_uuid}"],
         notes="Passive agent check-in",
         parse_status="success",
-        parsed_count=host_creates + arp_creates + connection_creates,
-        parse_results={
-            "observed_at": payload.observed_at.isoformat(),
-            "sequence_number": payload.sequence_number,
-            "full_snapshot": payload.full_snapshot,
-            "counts": {
-                "hosts_created": host_creates,
-                "arp_entries_created": arp_creates,
-                "connections_created": connection_creates,
-                "addresses_seen": len(payload.addresses),
-                "neighbors_seen": len(payload.neighbors),
-                "routes_seen": len(payload.routes),
-            },
-            "content_encoding": content_encoding or "identity",
-            "auth_method": "api_key",
-        },
+        parsed_count=0,
+        parse_results={},
         created_at=now,
         processed_at=now,
     )
     db.add(raw_import)
     await db.flush()
 
-    summary = {
-        "hosts_created": host_creates,
-        "arp_entries_created": arp_creates,
-        "connections_created": connection_creates,
-        "ip_addresses_seen": sorted(seen_ips),
-        "mac_addresses_seen": sorted(seen_macs),
-        "neighbor_count": len(payload.neighbors),
-        "connection_count": len(payload.connections),
-        "route_count": len(payload.routes),
-        "raw_import_id": raw_import.id,
-    }
-
     checkin = AgentCheckIn(
         agent_id=agent.id,
         raw_import_id=raw_import.id,
-        observed_at=payload.observed_at,
+        observed_at=observed_at,
         received_at=now,
         sequence_number=payload.sequence_number,
-        full_snapshot=payload.full_snapshot,
+        full_snapshot=effective_full_snapshot,
         content_encoding=content_encoding or "identity",
         source_ip=source_ip,
         auth_method="api_key",
         api_key_prefix=agent.api_key_prefix,
         report=payload.model_dump(mode="json"),
-        summary=summary,
+        summary={},
         status="accepted",
-        records_created=host_creates + arp_creates + connection_creates,
+        records_created=0,
     )
     db.add(checkin)
+    await db.flush()
+
+    for observation_input in observation_inputs:
+        observation, created, reactivated = await _upsert_agent_observation(
+            db=db,
+            agent=agent,
+            observation_type=observation_input["type"],
+            payload=observation_input["payload"],
+            observed_at=observed_at,
+            raw_import_id=raw_import.id,
+            checkin_id=checkin.id,
+            host_id=observation_input.get("host_id"),
+            arp_entry_id=observation_input.get("arp_entry_id"),
+            connection_id=observation_input.get("connection_id"),
+        )
+        current_hashes[observation.observation_type].add(observation.identity_hash)
+        observation_creates += int(created)
+        observation_refreshes += int(not created)
+        observation_reactivations += int(reactivated)
+
+    commands = _enabled_commands(policy)
+    if effective_full_snapshot:
+        for _, (command_name, observation_type) in AGENT_SECTION_POLICY.items():
+            if commands.get(command_name, True):
+                observation_removals += await _mark_removed_observations(
+                    db,
+                    agent,
+                    observation_type,
+                    current_hashes[observation_type],
+                    now,
+                )
+
+    summary = {
+        "hosts_created": host_creates,
+        "arp_entries_created": arp_creates,
+        "connections_created": connection_creates,
+        "observations_created": observation_creates,
+        "observations_refreshed": observation_refreshes,
+        "observations_reactivated": observation_reactivations,
+        "observations_removed": observation_removals,
+        "ip_addresses_seen": sorted(seen_ips),
+        "mac_addresses_seen": sorted(seen_macs),
+        "address_count": len(payload.addresses),
+        "neighbor_count": len(payload.neighbors),
+        "connection_count": len(payload.connections),
+        "route_count": len(payload.routes),
+        "raw_import_id": raw_import.id,
+        "full_snapshot": effective_full_snapshot,
+        "reported_full_snapshot": payload.full_snapshot,
+    }
+    raw_import.parsed_count = host_creates + arp_creates + connection_creates
+    raw_import.parse_results = {
+        "observed_at": observed_at.isoformat(),
+        "sequence_number": payload.sequence_number,
+        "full_snapshot": effective_full_snapshot,
+        "reported_full_snapshot": payload.full_snapshot,
+        "counts": summary,
+        "content_encoding": content_encoding or "identity",
+        "auth_method": "api_key",
+    }
+    checkin.summary = summary
+    checkin.records_created = host_creates + arp_creates + connection_creates
 
     agent.hostname = payload.hostname or agent.hostname
     agent.agent_version = payload.agent_version or agent.agent_version
@@ -613,11 +1052,6 @@ async def _ingest_agent_payload(
 
     await db.flush()
 
-    policy = None
-    if agent.policy_id:
-        result = await db.execute(select(AgentPolicy).where(AgentPolicy.id == agent.policy_id))
-        policy = result.scalar_one_or_none()
-
     return (
         checkin,
         raw_import,
@@ -627,7 +1061,10 @@ async def _ingest_agent_payload(
 
 
 def _agent_response(agent: Agent) -> AgentResponse:
-    return AgentResponse.model_validate(agent)
+    response = AgentResponse.model_validate(agent)
+    response.health = AgentHealthResponse(**_agent_health(agent))
+    response.compatibility = _agent_compatibility(agent.agent_version)
+    return response
 
 
 @router.get("/policies", response_model=PaginatedResponse)
@@ -1078,6 +1515,7 @@ async def register_agent(
             server_time=_utcnow(),
             agent=_agent_response(agent),
             policy=AgentPolicyResponse.model_validate(policy_map[agent.policy_id]) if agent.policy_id else None,
+            compatibility=_agent_compatibility(agent.agent_version),
         )
 
     return AgentRegistrationResponse(
@@ -1092,6 +1530,7 @@ async def register_agent(
         server_time=_utcnow(),
         agent=_agent_response(agent),
         policy=AgentPolicyResponse.model_validate(policy_map[agent.policy_id]) if agent.policy_id else None,
+        compatibility=_agent_compatibility(agent.agent_version),
     )
 
 
@@ -1410,6 +1849,54 @@ async def list_agent_checkins(
     }
 
 
+@router.get("/{agent_id}/observations", response_model=PaginatedResponse)
+async def list_agent_observations(
+    agent_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=1000),
+    observation_type: Optional[str] = Query(None),
+    is_current: Optional[bool] = Query(None),
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_agent_or_404(db, agent_id)
+
+    query = select(AgentObservation).where(AgentObservation.agent_id == agent_id)
+    count_query = select(func.count(AgentObservation.id)).where(
+        AgentObservation.agent_id == agent_id
+    )
+    if observation_type:
+        query = query.where(AgentObservation.observation_type == observation_type)
+        count_query = count_query.where(
+            AgentObservation.observation_type == observation_type
+        )
+    if is_current is not None:
+        query = query.where(AgentObservation.is_current == is_current)
+        count_query = count_query.where(AgentObservation.is_current == is_current)
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(
+        query.order_by(
+            AgentObservation.is_current.desc(),
+            AgentObservation.last_seen_at.desc(),
+            AgentObservation.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+    observations = result.scalars().all()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": [
+            AgentObservationResponse.model_validate(observation)
+            for observation in observations
+        ],
+    }
+
+
 @router.post("/check-in", response_model=AgentCheckInResponse)
 async def agent_check_in(
     request: Request,
@@ -1450,6 +1937,8 @@ async def agent_check_in(
             detail="Payload agent_uuid does not match the authenticated agent",
         )
 
+    _raise_policy_violations(agent, policy, payload)
+
     checkin, raw_import, policy_response, summary = await _ingest_agent_payload(
         db=db,
         agent=agent,
@@ -1457,6 +1946,7 @@ async def agent_check_in(
         decoded_body=decoded_body,
         content_encoding=request.headers.get("content-encoding"),
         source_ip=request.client.host if request.client else None,
+        policy=policy,
     )
     await db.commit()
     await db.refresh(agent)
@@ -1498,6 +1988,7 @@ async def agent_check_in(
         server_time=_utcnow(),
         agent=_agent_response(agent),
         policy=policy_response,
+        compatibility=_agent_compatibility(agent.agent_version),
         checkin=AgentCheckInRecordResponse.model_validate(checkin),
         summary=summary,
     )
@@ -1584,3 +2075,4 @@ async def update_agent(
         details={"agent_uuid": agent.agent_uuid},
     )
     return _agent_response(agent)
+    AgentObservationResponse,

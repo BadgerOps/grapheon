@@ -5,7 +5,7 @@ This directory contains the current host-side runtime for issue `#48`.
 Contents:
 
 - `grapheon_agent.py` - stdlib-only one-shot collector and check-in client
-- `tests/test_grapheon_agent.py` - unit tests for parsing and delta logic
+- `tests/test_grapheon_agent.py` - unit tests for parsing and snapshot logic
 
 ## Design Notes
 
@@ -19,7 +19,7 @@ Contents:
   - `ip -json route show`
   - `ss -tunapH` with `netstat -tunap` fallback
 - Transport: gzip-compressed JSON to `POST /api/agents/check-in`
-- Delta mode: set-diff against the last successful local snapshot
+- Snapshot mode: sends full passive snapshots so the backend can mark missing agent-scoped observations stale/removed
 
 The runtime keeps local state under `/var/lib/grapheon-agent` by default:
 

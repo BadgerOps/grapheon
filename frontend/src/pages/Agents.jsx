@@ -63,22 +63,20 @@ function normalizeNumber(value) {
 }
 
 function freshnessForAgent(agent) {
-  if (!agent.last_seen_at) {
-    return { label: 'Never seen', tone: 'slate' }
+  const state = agent.health?.state || 'never_seen'
+  const labels = {
+    healthy: 'Healthy',
+    stale: 'Stale',
+    offline: 'Offline',
+    never_seen: 'Never seen',
   }
-
-  const policyInterval = agent.policy?.checkin_interval_seconds || 3600
-  const jitter = agent.policy?.jitter_seconds || 0
-  const staleAfterMs = (policyInterval * 2 + jitter) * 1000
-  const ageMs = Date.now() - new Date(agent.last_seen_at).getTime()
-
-  if (ageMs <= staleAfterMs) {
-    return { label: 'Healthy', tone: 'green' }
+  const tones = {
+    healthy: 'green',
+    stale: 'amber',
+    offline: 'red',
+    never_seen: 'slate',
   }
-  if (ageMs <= staleAfterMs * 4) {
-    return { label: 'Stale', tone: 'amber' }
-  }
-  return { label: 'Offline', tone: 'red' }
+  return { label: labels[state] || state, tone: tones[state] || 'slate' }
 }
 
 function stateBadge(state) {
@@ -455,7 +453,7 @@ export default function Agents() {
   const totalAgents = agents.length
   const activeAgents = agents.filter((agent) => agent.enrollment_state === 'active').length
   const pendingAgents = agents.filter((agent) => agent.enrollment_state === 'pending').length
-  const healthyAgents = agents.filter((agent) => freshnessForAgent(agent).tone === 'green').length
+  const healthyAgents = agents.filter((agent) => agent.health?.state === 'healthy').length
 
   const handleAgentDraftChange = (field, value) => {
     setAgentDraft((current) => ({ ...current, [field]: value }))
@@ -944,6 +942,11 @@ export default function Agents() {
                   <div className="grid gap-3 text-sm text-gray-600 dark:text-gray-300">
                     <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-900/40">
                       <span className="font-medium text-gray-900 dark:text-gray-100">Last Seen:</span> {formatDate(selectedAgent.last_seen_at)}
+                    </div>
+                    <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-900/40">
+                      <span className="font-medium text-gray-900 dark:text-gray-100">Backend Health:</span>{' '}
+                      {selectedAgent.health?.state || 'never_seen'}
+                      {selectedAgent.health?.message ? ` - ${selectedAgent.health.message}` : ''}
                     </div>
                     <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-900/40">
                       <span className="font-medium text-gray-900 dark:text-gray-100">Last Registration:</span> {formatDate(selectedAgent.last_registration_at)}

@@ -7,7 +7,7 @@ import pytest
 
 from agent.grapheon_agent import (
     AgentConfig,
-    build_delta,
+    build_snapshot_payload,
     parse_ip_addr_json,
     parse_ip_neigh_json,
     parse_netstat_output,
@@ -147,7 +147,7 @@ def test_parse_netstat_output_supports_udp_without_state():
     ]
 
 
-def test_build_delta_returns_full_snapshot_first_then_incremental():
+def test_build_snapshot_payload_returns_full_snapshot_every_time():
     current = {
         "addresses": [{"ip_address": "10.20.0.5"}],
         "neighbors": [{"ip_address": "10.20.0.1"}],
@@ -161,14 +161,13 @@ def test_build_delta_returns_full_snapshot_first_then_incremental():
         "routes": [],
     }
 
-    full_delta, full_snapshot = build_delta(current, {})
-    incremental_delta, incremental_snapshot = build_delta(current, previous)
+    first_payload, first_snapshot = build_snapshot_payload(current, {})
+    repeated_payload, repeated_snapshot = build_snapshot_payload(current, previous)
 
-    assert full_snapshot is True
-    assert full_delta == current
-    assert incremental_snapshot is False
-    assert incremental_delta["addresses"] == []
-    assert incremental_delta["neighbors"] == [{"ip_address": "10.20.0.1"}]
+    assert first_snapshot is True
+    assert first_payload == current
+    assert repeated_snapshot is True
+    assert repeated_payload == current
 
 
 def test_should_run_with_policy_respects_interval():

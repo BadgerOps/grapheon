@@ -4,6 +4,11 @@ All notable changes to the Graphēon passive agent will be documented in this fi
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.12.0 - 2026-06-11
+### Changed
+- **Full-snapshot check-ins**: the passive agent now sends full passive snapshots on each check-in so the backend can mark missing agent-scoped observations stale/removed.
+- **Backend-aligned versioning**: the passive agent version is aligned with the backend API version for compatibility reporting.
+
 ## 0.3.0 - 2026-03-22
 ### Added
 - **Versioned install layout**: host installs now land under `/opt/grapheon/agent/releases/<version>/` with `/opt/grapheon/agent/current` as the active symlink target

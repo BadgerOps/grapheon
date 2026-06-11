@@ -14,6 +14,7 @@ from models import (
     Agent,
     AgentCheckIn,
     AgentEnrollmentKey,
+    AgentObservation,
     Connection,
     Host,
     RawImport,
@@ -108,7 +109,7 @@ def _checkin_payload(agent_uuid: str, *, observed_at: str = "2026-03-22T20:00:00
         "agent_uuid": agent_uuid,
         "observed_at": observed_at,
         "sequence_number": 1,
-        "full_snapshot": False,
+        "full_snapshot": True,
         "hostname": f"{agent_uuid}.test.local",
         "agent_version": "0.1.0",
         "platform": "linux",
@@ -137,6 +138,21 @@ async def _post_checkin(async_client: AsyncClient, api_key: str, payload: dict):
             "Content-Type": "application/json",
         },
     )
+
+
+async def _get_observations(
+    async_client: AsyncClient,
+    headers,
+    agent_id: int,
+    observation_type: str,
+):
+    response = await async_client.get(
+        f"/api/agents/{agent_id}/observations",
+        params={"observation_type": observation_type, "limit": 100},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    return response.json()["items"]
 
 
 class TestAgentEnrollmentAndCheckIn:
@@ -324,7 +340,7 @@ class TestAgentEnrollmentAndCheckIn:
             "agent_uuid": "agent-002",
             "observed_at": "2026-03-22T18:00:00Z",
             "sequence_number": 1,
-            "full_snapshot": False,
+            "full_snapshot": True,
             "hostname": "collector-01",
             "agent_version": "0.1.0",
             "platform": "linux",
@@ -505,7 +521,7 @@ class TestAgentEnrollmentAndCheckIn:
             "agent_uuid": "agent-rotate-001",
             "observed_at": "2026-03-22T19:00:00Z",
             "sequence_number": 1,
-            "full_snapshot": False,
+            "full_snapshot": True,
             "hostname": "rotate-host-01",
             "agent_version": "0.1.0",
             "platform": "linux",
@@ -887,3 +903,393 @@ class TestAgentEnrollmentAndCheckIn:
             },
         )
         assert decoded_too_large_response.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_policy_disabled_sections_are_rejected_before_ingest(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_policy_enforce_admin")
+        response = await async_client.post(
+            "/api/agents/policies",
+            json={
+                "name": "no-neighbors",
+                "description": "Neighbor collection disabled",
+                "checkin_interval_seconds": 1800,
+                "jitter_seconds": 60,
+                "command_timeout_seconds": 15,
+                "enabled_commands": {
+                    "ip_neigh": False,
+                    "ss_tunap": True,
+                    "ip_addr": True,
+                    "ip_route": True,
+                },
+                "max_report_bytes": 262144,
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 201
+        policy_id = response.json()["id"]
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "no-neighbors-enrollment",
+            policy_id,
+            auto_approve=True,
+        )
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-policy-reject",
+        )
+        assert register_response.status_code == 200
+        api_key = register_response.json()["api_key"]
+
+        payload = _checkin_payload("agent-policy-reject")
+        payload["neighbors"] = [
+            {
+                "ip_address": "10.70.0.1",
+                "mac_address": "11:22:33:44:55:66",
+                "interface": "eth0",
+                "state": "reachable",
+            }
+        ]
+
+        checkin_response = await _post_checkin(async_client, api_key, payload)
+
+        assert checkin_response.status_code == 403
+        assert "ip_neigh" in checkin_response.json()["detail"]
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        assert (await db.execute(select(func.count(AgentCheckIn.id)))).scalar_one() == 0
+        assert (await db.execute(select(func.count(AgentObservation.id)))).scalar_one() == 0
+
+    @pytest.mark.asyncio
+    async def test_full_snapshot_observations_mark_removed_per_agent(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_snapshot_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "snapshot-policy")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "snapshot-enrollment",
+            policy_id,
+            auto_approve=True,
+        )
+
+        agent_a_registration = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-snapshot-a",
+            ip_address="10.80.0.5",
+            mac_address="AA:BB:CC:80:00:05",
+        )
+        agent_b_registration = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-snapshot-b",
+            ip_address="10.80.0.6",
+            mac_address="AA:BB:CC:80:00:06",
+        )
+        assert agent_a_registration.status_code == 200
+        assert agent_b_registration.status_code == 200
+        agent_a_id = agent_a_registration.json()["agent"]["id"]
+        agent_b_id = agent_b_registration.json()["agent"]["id"]
+        assert agent_a_registration.json()["compatibility"]["status"] == "older_supported"
+        assert agent_a_registration.json()["agent"]["health"]["state"] == "never_seen"
+
+        first_a = _checkin_payload("agent-snapshot-a", observed_at="2026-03-22T21:00:00Z")
+        first_a["addresses"][0]["ip_address"] = "10.80.0.5"
+        first_a["addresses"][0]["mac_address"] = "AA:BB:CC:80:00:05"
+        first_a["neighbors"] = [
+            {
+                "ip_address": "10.80.0.1",
+                "mac_address": "11:22:33:44:80:01",
+                "interface": "eth0",
+                "state": "reachable",
+            }
+        ]
+        first_b = _checkin_payload("agent-snapshot-b", observed_at="2026-03-22T21:00:00Z")
+        first_b["addresses"][0]["ip_address"] = "10.80.0.6"
+        first_b["addresses"][0]["mac_address"] = "AA:BB:CC:80:00:06"
+        first_b["neighbors"] = [
+            {
+                "ip_address": "10.80.0.1",
+                "mac_address": "11:22:33:44:80:01",
+                "interface": "eth0",
+                "state": "reachable",
+            }
+        ]
+
+        first_a_response = await _post_checkin(
+            async_client,
+            agent_a_registration.json()["api_key"],
+            first_a,
+        )
+        first_b_response = await _post_checkin(
+            async_client,
+            agent_b_registration.json()["api_key"],
+            first_b,
+        )
+        assert first_a_response.status_code == 200
+        assert first_b_response.status_code == 200
+        assert first_a_response.json()["summary"]["observations_removed"] == 0
+        assert first_a_response.json()["agent"]["health"]["state"] == "healthy"
+        assert first_a_response.json()["compatibility"]["status"] == "older_supported"
+
+        second_a = _checkin_payload("agent-snapshot-a", observed_at="2026-03-22T21:30:00Z")
+        second_a["sequence_number"] = 2
+        second_a["addresses"][0]["ip_address"] = "10.80.0.5"
+        second_a["addresses"][0]["mac_address"] = "AA:BB:CC:80:00:05"
+        second_a["neighbors"] = []
+        second_a_response = await _post_checkin(
+            async_client,
+            agent_a_registration.json()["api_key"],
+            second_a,
+        )
+        assert second_a_response.status_code == 200
+        assert second_a_response.json()["summary"]["observations_removed"] == 1
+
+        agent_a_observations = await async_client.get(
+            f"/api/agents/{agent_a_id}/observations",
+            params={"observation_type": "neighbor"},
+            headers=admin_headers,
+        )
+        agent_b_observations = await async_client.get(
+            f"/api/agents/{agent_b_id}/observations",
+            params={"observation_type": "neighbor"},
+            headers=admin_headers,
+        )
+        assert agent_a_observations.status_code == 200
+        assert agent_b_observations.status_code == 200
+        assert agent_a_observations.json()["total"] == 1
+        assert agent_b_observations.json()["total"] == 1
+        removed_observation = agent_a_observations.json()["items"][0]
+        current_observation = agent_b_observations.json()["items"][0]
+        assert removed_observation["is_current"] is False
+        assert removed_observation["removed_at"] is not None
+        assert current_observation["is_current"] is True
+        assert current_observation["removed_at"] is None
+
+        legacy_partial_b = _checkin_payload(
+            "agent-snapshot-b",
+            observed_at="2026-03-22T21:45:00Z",
+        )
+        legacy_partial_b["sequence_number"] = 2
+        legacy_partial_b["full_snapshot"] = False
+        legacy_partial_b["addresses"][0]["ip_address"] = "10.80.0.6"
+        legacy_partial_b["addresses"][0]["mac_address"] = "AA:BB:CC:80:00:06"
+        legacy_partial_b["neighbors"] = []
+        legacy_response = await _post_checkin(
+            async_client,
+            agent_b_registration.json()["api_key"],
+            legacy_partial_b,
+        )
+        assert legacy_response.status_code == 200
+        assert legacy_response.json()["summary"]["full_snapshot"] is False
+        assert legacy_response.json()["summary"]["observations_removed"] == 0
+
+        agent_b_after_legacy = await async_client.get(
+            f"/api/agents/{agent_b_id}/observations",
+            params={"observation_type": "neighbor"},
+            headers=admin_headers,
+        )
+        assert agent_b_after_legacy.status_code == 200
+        assert agent_b_after_legacy.json()["items"][0]["is_current"] is True
+
+        db_gen = app.dependency_overrides[get_db]()
+        db = await db_gen.__anext__()
+        assert (await db.execute(select(func.count(ARPEntry.id)))).scalar_one() == 1
+
+    @pytest.mark.asyncio
+    async def test_full_snapshot_observation_identity_for_address_route_and_connection(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_observation_identity_admin")
+        policy_id = await _create_policy(
+            async_client,
+            admin_headers,
+            "observation-identity-policy",
+        )
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "observation-identity-enrollment",
+            policy_id,
+            auto_approve=True,
+        )
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-observation-identity",
+            ip_address="10.90.0.5",
+            mac_address="AA:BB:CC:90:00:05",
+        )
+        assert register_response.status_code == 200
+        agent_id = register_response.json()["agent"]["id"]
+        api_key = register_response.json()["api_key"]
+
+        first_payload = _checkin_payload(
+            "agent-observation-identity",
+            observed_at="2026-03-22T22:00:00Z",
+        )
+        first_payload["addresses"] = [
+            {
+                "ip_address": "10.90.0.5",
+                "interface": "eth0",
+                "prefix_length": 24,
+                "mac_address": "AA:BB:CC:90:00:05",
+            }
+        ]
+        first_payload["routes"] = [
+            {
+                "destination": "default",
+                "gateway": "10.90.0.1",
+                "interface": "eth0",
+                "source_ip": "10.90.0.5",
+            }
+        ]
+        first_payload["connections"] = [
+            {
+                "local_ip": "10.90.0.5",
+                "local_port": 443,
+                "remote_ip": "10.90.0.10",
+                "remote_port": 51514,
+                "protocol": "tcp",
+                "state": "established",
+                "pid": 777,
+                "process_name": "python",
+            }
+        ]
+
+        first_response = await _post_checkin(async_client, api_key, first_payload)
+        assert first_response.status_code == 200
+        assert first_response.json()["summary"]["observations_created"] == 3
+
+        address_items = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "address",
+        )
+        route_items = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "route",
+        )
+        connection_items = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "connection",
+        )
+        assert len(address_items) == 1
+        assert len(route_items) == 1
+        assert len(connection_items) == 1
+        original_address_hash = address_items[0]["identity_hash"]
+        original_route_hash = route_items[0]["identity_hash"]
+        original_connection_hash = connection_items[0]["identity_hash"]
+
+        repeat_payload = dict(first_payload)
+        repeat_payload["sequence_number"] = 2
+        repeat_payload["observed_at"] = "2026-03-22T22:05:00Z"
+        repeat_payload["addresses"] = [
+            {
+                **first_payload["addresses"][0],
+                "prefix_length": 25,
+            }
+        ]
+        repeat_response = await _post_checkin(async_client, api_key, repeat_payload)
+        assert repeat_response.status_code == 200
+        assert repeat_response.json()["summary"]["observations_created"] == 0
+        assert repeat_response.json()["summary"]["observations_refreshed"] == 3
+
+        refreshed_addresses = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "address",
+        )
+        assert len(refreshed_addresses) == 1
+        assert refreshed_addresses[0]["identity_hash"] == original_address_hash
+        assert refreshed_addresses[0]["payload"]["prefix_length"] == 25
+        assert refreshed_addresses[0]["first_seen_at"] != refreshed_addresses[0]["last_seen_at"]
+
+        changed_connection_payload = dict(repeat_payload)
+        changed_connection_payload["sequence_number"] = 3
+        changed_connection_payload["observed_at"] = "2026-03-22T22:10:00Z"
+        changed_connection_payload["connections"] = [
+            {
+                **first_payload["connections"][0],
+                "pid": 778,
+            }
+        ]
+        changed_connection_response = await _post_checkin(
+            async_client,
+            api_key,
+            changed_connection_payload,
+        )
+        assert changed_connection_response.status_code == 200
+        assert changed_connection_response.json()["summary"]["observations_created"] == 1
+        assert changed_connection_response.json()["summary"]["observations_removed"] == 1
+
+        changed_connections = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "connection",
+        )
+        assert len(changed_connections) == 2
+        current_connections = [item for item in changed_connections if item["is_current"]]
+        removed_connections = [item for item in changed_connections if not item["is_current"]]
+        assert len(current_connections) == 1
+        assert len(removed_connections) == 1
+        assert removed_connections[0]["identity_hash"] == original_connection_hash
+        assert current_connections[0]["identity_hash"] != original_connection_hash
+        assert current_connections[0]["payload"]["pid"] == 778
+
+        removal_payload = dict(changed_connection_payload)
+        removal_payload["sequence_number"] = 4
+        removal_payload["observed_at"] = "2026-03-22T22:15:00Z"
+        removal_payload["addresses"] = []
+        removal_payload["routes"] = []
+        removal_payload["connections"] = []
+        removal_response = await _post_checkin(async_client, api_key, removal_payload)
+        assert removal_response.status_code == 200
+        assert removal_response.json()["summary"]["observations_removed"] == 3
+
+        removed_addresses = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "address",
+        )
+        removed_routes = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "route",
+        )
+        removed_connections_after_empty = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "connection",
+        )
+        assert len(removed_addresses) == 1
+        assert len(removed_routes) == 1
+        assert len(removed_connections_after_empty) == 2
+        assert removed_addresses[0]["identity_hash"] == original_address_hash
+        assert removed_routes[0]["identity_hash"] == original_route_hash
+        assert all(not item["is_current"] for item in removed_addresses)
+        assert all(not item["is_current"] for item in removed_routes)
+        assert all(not item["is_current"] for item in removed_connections_after_empty)

@@ -35,7 +35,7 @@ Behavior:
   - `ip -json neigh show`
   - `ip -json route show`
   - `ss -tunapH` with `netstat -tunap` fallback
-- sends gzip-compressed JSON deltas over HTTPS
+- sends gzip-compressed full-snapshot JSON reports over HTTPS
 
 The passive agent is also published as:
 
@@ -390,7 +390,7 @@ If the cached policy interval has not elapsed yet, the runtime exits quickly.
 - Treat the enrollment key as bootstrap-only.
 - Treat `/var/lib/grapheon-agent/api_key` as a secret.
 - Prefer `auto_approve=false` for real deployments.
-- The current delta mode only sends additive/update observations; removals are not represented yet.
+- Check-ins send full snapshots. The backend tracks missing observations as stale/removed for that agent without deleting shared topology rows from other sources.
 - No active scanning is performed in the MVP.
 - Upgrade by extracting a newer release artifact and running `sudo bash scripts/upgrade-passive-agent.sh`.
 - Roll back by repointing the `current` symlink with `sudo bash scripts/rollback-passive-agent.sh <version>`.

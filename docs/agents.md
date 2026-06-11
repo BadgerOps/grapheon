@@ -149,12 +149,12 @@ Current behavior:
   - `jitter_seconds`
   - `command_timeout_seconds`
   - `enabled_commands`
-- computes deltas as set differences against the last successful local snapshot
-- still sends a heartbeat check-in even when there are no new entries, using empty delta arrays
+- sends full passive snapshots after local collection
+- still sends a heartbeat check-in even when no entries are observed, using empty snapshot arrays
 
-Current limitation:
+Backend snapshot handling:
 
-- removals are not represented in the delta payload because the backend MVP only ingests additive/update observations
+- missing entries in a later full snapshot are marked stale/removed in backend agent-scoped observation state
 
 ## Authentication Notes
 

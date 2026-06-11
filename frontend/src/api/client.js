@@ -515,6 +515,10 @@ export async function getAgentCheckins(id, params = {}) {
   return apiCall('GET', `/agents/${id}/checkins`, null, params)
 }
 
+export async function getAgentObservations(id, params = {}) {
+  return apiCall('GET', `/agents/${id}/observations`, null, params)
+}
+
 export async function getAgentPolicies(params = {}) {
   return apiCall('GET', '/agents/policies', null, params)
 }

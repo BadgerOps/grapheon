@@ -152,6 +152,7 @@ def _run_migrations(sync_conn) -> None:
     _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_is_active", "agent_enrollment_keys", "is_active")
     _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_default_policy_id", "agent_enrollment_keys", "default_policy_id")
     _create_index_if_missing(sync_conn, "idx_agent_checkin_api_key_prefix", "agent_checkins", "api_key_prefix")
+    _create_agent_observations_table(sync_conn)
 
 
 def _ensure_columns(sync_conn, table: str, columns: list[tuple[str, str]]) -> None:
@@ -171,6 +172,55 @@ def _create_index_if_missing(sync_conn, index_name: str, table: str, column: str
     sync_conn.execute(
         text(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table} ("{column}")')
     )
+
+
+def _create_agent_observations_table(sync_conn) -> None:
+    sync_conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS agent_observations (
+                id INTEGER PRIMARY KEY,
+                agent_id INTEGER NOT NULL,
+                raw_import_id INTEGER,
+                last_seen_checkin_id INTEGER,
+                observation_type VARCHAR(32) NOT NULL,
+                identity_hash VARCHAR(64) NOT NULL,
+                payload JSON NOT NULL,
+                host_id INTEGER,
+                arp_entry_id INTEGER,
+                connection_id INTEGER,
+                first_seen_at DATETIME NOT NULL,
+                last_seen_at DATETIME NOT NULL,
+                stale_at DATETIME,
+                removed_at DATETIME,
+                is_current BOOLEAN NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (agent_id, observation_type, identity_hash),
+                FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+                FOREIGN KEY(raw_import_id) REFERENCES raw_imports(id) ON DELETE SET NULL,
+                FOREIGN KEY(last_seen_checkin_id) REFERENCES agent_checkins(id) ON DELETE SET NULL,
+                FOREIGN KEY(host_id) REFERENCES hosts(id) ON DELETE SET NULL,
+                FOREIGN KEY(arp_entry_id) REFERENCES arp_entries(id) ON DELETE SET NULL,
+                FOREIGN KEY(connection_id) REFERENCES connections(id) ON DELETE SET NULL
+            )
+            """
+        )
+    )
+    for index_name, column in [
+        ("idx_agent_observations_agent_id", "agent_id"),
+        ("idx_agent_observations_raw_import_id", "raw_import_id"),
+        ("idx_agent_observations_checkin_id", "last_seen_checkin_id"),
+        ("idx_agent_observations_type", "observation_type"),
+        ("idx_agent_observations_identity", "identity_hash"),
+        ("idx_agent_observations_host_id", "host_id"),
+        ("idx_agent_observations_arp_entry_id", "arp_entry_id"),
+        ("idx_agent_observations_connection_id", "connection_id"),
+        ("idx_agent_observations_current", "is_current"),
+    ]:
+        sync_conn.execute(
+            text(f'CREATE INDEX IF NOT EXISTS {index_name} ON agent_observations ("{column}")')
+        )
 
 
 def _make_column_nullable(sync_conn, table: str, column: str) -> None:

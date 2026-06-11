@@ -341,19 +341,11 @@ def canonicalize_entries(entries: Iterable[dict[str, Any]]) -> list[dict[str, An
     return normalized
 
 
-def build_delta(current: dict[str, list[dict[str, Any]]], previous: dict[str, list[dict[str, Any]]]) -> tuple[dict[str, list[dict[str, Any]]], bool]:
-    if not previous:
-        return current, True
-
-    delta: dict[str, list[dict[str, Any]]] = {}
-    for key, current_entries in current.items():
-        previous_set = {canonical_json(entry) for entry in previous.get(key, [])}
-        delta[key] = [
-            entry
-            for entry in current_entries
-            if canonical_json(entry) not in previous_set
-        ]
-    return delta, False
+def build_snapshot_payload(
+    current: dict[str, list[dict[str, Any]]],
+    previous: dict[str, list[dict[str, Any]]],
+) -> tuple[dict[str, list[dict[str, Any]]], bool]:
+    return current, True
 
 
 def normalize_ip(value: str) -> Optional[str]:
@@ -804,8 +796,10 @@ def run_agent(
     state["last_jitter_seconds"] = sleep_delay
 
     current_snapshot = build_current_snapshot(policy)
-    previous_snapshot = state.get("last_snapshot") or {}
-    delta_snapshot, full_snapshot = build_delta(current_snapshot, previous_snapshot)
+    snapshot_payload, full_snapshot = build_snapshot_payload(
+        current_snapshot,
+        state.get("last_snapshot") or {},
+    )
     state["sequence_number"] = int(state.get("sequence_number", 0)) + 1
 
     payload = {
@@ -819,12 +813,12 @@ def run_agent(
         "platform_release": platform.release(),
         "metadata": {
             "runtime": "python-stdlib",
-            "delta_mode": "set-diff",
+            "snapshot_mode": "full",
         },
-        "addresses": delta_snapshot["addresses"],
-        "neighbors": delta_snapshot["neighbors"],
-        "connections": delta_snapshot["connections"],
-        "routes": delta_snapshot["routes"],
+        "addresses": snapshot_payload["addresses"],
+        "neighbors": snapshot_payload["neighbors"],
+        "connections": snapshot_payload["connections"],
+        "routes": snapshot_payload["routes"],
     }
 
     response = check_in_agent(config, api_key, payload)

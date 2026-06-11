@@ -88,6 +88,20 @@ VALID_AGENT_CHECKIN_STATUSES = frozenset({
     "rejected",
 })
 
+VALID_AGENT_HEALTH_STATES = frozenset({
+    "healthy",
+    "stale",
+    "offline",
+    "never_seen",
+})
+
+VALID_AGENT_COMPATIBILITY_STATUSES = frozenset({
+    "supported",
+    "older_supported",
+    "newer_untested",
+    "unsupported",
+})
+
 # ── Reusable validators ──────────────────────────────────────────────
 
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$")
@@ -863,6 +877,29 @@ class AgentEnrollmentKeyCreateResponse(BaseModel):
     key: AgentEnrollmentKeyResponse
 
 
+class AgentHealthResponse(BaseModel):
+    """Backend-computed operational health for an agent."""
+
+    state: str
+    last_seen_at: Optional[datetime] = None
+    expected_checkin_interval_seconds: int
+    healthy_after_seconds: int
+    offline_after_seconds: int
+    checked_at: datetime
+    message: Optional[str] = None
+
+
+class AgentCompatibilityResponse(BaseModel):
+    """Agent/backend protocol compatibility metadata."""
+
+    backend_version: str
+    supported_agent_version_range: str
+    recommended_agent_version: str
+    reported_agent_version: Optional[str] = None
+    status: str
+    warning: Optional[str] = None
+
+
 class AgentFields(BaseModel):
     """Registry metadata for a passive agent."""
 
@@ -930,6 +967,8 @@ class AgentResponse(AgentFields):
     last_seen_at: Optional[datetime] = None
     policy: Optional[AgentPolicyResponse] = None
     enrollment_key: Optional[AgentEnrollmentKeyResponse] = None
+    health: Optional[AgentHealthResponse] = None
+    compatibility: Optional[AgentCompatibilityResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1072,6 +1111,7 @@ class AgentRegistrationResponse(BaseModel):
     server_time: datetime
     agent: AgentResponse
     policy: Optional[AgentPolicyResponse] = None
+    compatibility: AgentCompatibilityResponse
 
 
 class AgentApprovalRequest(BaseModel):
@@ -1155,6 +1195,30 @@ class AgentCheckInRecordResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AgentObservationResponse(BaseModel):
+    """Agent-scoped observation state from full-snapshot ingest."""
+
+    id: int
+    agent_id: int
+    raw_import_id: Optional[int] = None
+    last_seen_checkin_id: Optional[int] = None
+    observation_type: str
+    identity_hash: str
+    payload: Dict[str, Any]
+    host_id: Optional[int] = None
+    arp_entry_id: Optional[int] = None
+    connection_id: Optional[int] = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    stale_at: Optional[datetime] = None
+    removed_at: Optional[datetime] = None
+    is_current: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AgentCheckInResponse(BaseModel):
     """Response returned to an agent after a successful check-in."""
 
@@ -1162,6 +1226,7 @@ class AgentCheckInResponse(BaseModel):
     server_time: datetime
     agent: AgentResponse
     policy: Optional[AgentPolicyResponse] = None
+    compatibility: AgentCompatibilityResponse
     checkin: AgentCheckInRecordResponse
     summary: Dict[str, Any]
 

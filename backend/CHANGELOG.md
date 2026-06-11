@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.12.0 - 2026-06-11
+### Added
+- **Agent-scoped full-snapshot observations**: passive check-ins now maintain per-agent observation state with first-seen, last-seen, current, stale, and removed timestamps without deleting shared topology rows.
+- **Backend-computed fleet health**: agent responses now include backend health state, check-in interval expectations, and stale/offline thresholds for frontend rendering.
+- **Agent compatibility metadata**: registration and check-in responses now report backend version, supported agent version range, reported agent version, compatibility status, and warnings.
+- **Agent observation inspection API**: admins can list current and removed observations via `GET /api/agents/{id}/observations`.
+- **Full-snapshot ingest coverage**: tests now cover stale/removed observation marking, agent-scoped removal isolation, policy enforcement, health responses, and compatibility metadata.
+
+### Changed
+- **Policy enforcement on ingest**: check-ins containing records for policy-disabled passive sections are rejected before persistence and logged with agent, policy, section, and sequence context.
+
 ## 0.11.0 - 2026-06-11
 ### Added
 - **Passive agent lifecycle controls**: admins can now explicitly revoke agents, which invalidates stored API credentials, and reactivate revoked or inactive agents back to pending approval.

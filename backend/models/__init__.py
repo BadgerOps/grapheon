@@ -1,6 +1,7 @@
 from .agent import Agent
 from .agent_checkin import AgentCheckIn
 from .agent_enrollment_key import AgentEnrollmentKey
+from .agent_observation import AgentObservation
 from .agent_policy import AgentPolicy
 from .host import Host
 from .port import Port
@@ -22,6 +23,7 @@ __all__ = [
     "Agent",
     "AgentCheckIn",
     "AgentEnrollmentKey",
+    "AgentObservation",
     "AgentPolicy",
     "ARPEntry",
     "RawImport",

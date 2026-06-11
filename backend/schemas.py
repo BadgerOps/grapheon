@@ -187,6 +187,7 @@ class HostFields(BaseModel):
     is_active: bool = True
     source_types: Optional[List[str]] = None
     source_origins: Optional[List[str]] = None
+    observed_by_agent_ids: Optional[List[int]] = None
 
 
 class _HostValidators:
@@ -503,6 +504,7 @@ class ConnectionResponse(ConnectionFields):
     """Schema for connection responses — no validators, just serialization."""
 
     id: int
+    observer_agent_id: Optional[int] = None
     first_seen: datetime
     last_seen: datetime
 
@@ -559,6 +561,7 @@ class ARPEntryResponse(ARPEntryFields):
     """Schema for ARP entry responses — no validators, just serialization."""
 
     id: int
+    observer_agent_id: Optional[int] = None
     first_seen: datetime
     last_seen: datetime
 
@@ -1250,6 +1253,10 @@ class AgentObservationResponse(BaseModel):
     raw_import_id: Optional[int] = None
     last_seen_checkin_id: Optional[int] = None
     observation_type: str
+    observation_role: Optional[str] = None
+    confidence: int = 50
+    relationship_type: Optional[str] = None
+    relationship_key: Optional[str] = None
     identity_hash: str
     payload: Dict[str, Any]
     host_id: Optional[int] = None

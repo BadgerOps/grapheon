@@ -216,6 +216,64 @@ export function getLightStyles() {
       }
     },
 
+    // ── Agent collector node ─────────────────────────────────
+    {
+      selector: 'node[type="agent_collector"]',
+      style: {
+        'background-color': '#14b8a6',
+        'border-color': '#0f766e',
+        'border-width': 3,
+        'shape': 'hexagon',
+        'width': 'data(node_size)',
+        'height': 'data(node_size)',
+        'font-weight': 'bold',
+      }
+    },
+
+    // ── Agent topology edges ─────────────────────────────────
+    {
+      selector: 'edge[connection_type="collector_interface"]',
+      style: {
+        'line-color': '#14b8a6',
+        'width': 2,
+        'line-style': 'solid',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#14b8a6',
+        'arrow-scale': 0.7,
+      }
+    },
+    {
+      selector: 'edge[connection_type="arp_neighbor"]',
+      style: {
+        'line-color': '#8b5cf6',
+        'width': 2,
+        'line-style': 'dashed',
+        'line-dash-pattern': [6, 4],
+      }
+    },
+    {
+      selector: 'edge[connection_type="connection_remote"]',
+      style: {
+        'line-color': '#0ea5e9',
+        'width': 1.8,
+        'line-style': 'solid',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#0ea5e9',
+        'arrow-scale': 0.6,
+      }
+    },
+    {
+      selector: 'edge[connection_type="route_gateway"]',
+      style: {
+        'line-color': '#f59e0b',
+        'width': 2,
+        'line-style': 'dotted',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#f59e0b',
+        'arrow-scale': 0.6,
+      }
+    },
+
     // ── Internet cloud node ────────────────────────────────
     {
       selector: 'node[type="internet"]',
@@ -509,6 +567,64 @@ export function getDarkStyles() {
         'line-opacity': 0.7,
         'target-arrow-shape': 'triangle',
         'target-arrow-color': '#4ade80',
+        'arrow-scale': 0.6,
+      }
+    },
+
+    // ── Agent collector node ─────────────────────────────────
+    {
+      selector: 'node[type="agent_collector"]',
+      style: {
+        'background-color': '#2dd4bf',
+        'border-color': '#5eead4',
+        'border-width': 3,
+        'shape': 'hexagon',
+        'width': 'data(node_size)',
+        'height': 'data(node_size)',
+        'font-weight': 'bold',
+      }
+    },
+
+    // ── Agent topology edges ─────────────────────────────────
+    {
+      selector: 'edge[connection_type="collector_interface"]',
+      style: {
+        'line-color': '#2dd4bf',
+        'width': 2,
+        'line-style': 'solid',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#2dd4bf',
+        'arrow-scale': 0.7,
+      }
+    },
+    {
+      selector: 'edge[connection_type="arp_neighbor"]',
+      style: {
+        'line-color': '#a78bfa',
+        'width': 2,
+        'line-style': 'dashed',
+        'line-dash-pattern': [6, 4],
+      }
+    },
+    {
+      selector: 'edge[connection_type="connection_remote"]',
+      style: {
+        'line-color': '#38bdf8',
+        'width': 1.8,
+        'line-style': 'solid',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#38bdf8',
+        'arrow-scale': 0.6,
+      }
+    },
+    {
+      selector: 'edge[connection_type="route_gateway"]',
+      style: {
+        'line-color': '#fbbf24',
+        'width': 2,
+        'line-style': 'dotted',
+        'target-arrow-shape': 'triangle',
+        'target-arrow-color': '#fbbf24',
         'arrow-scale': 0.6,
       }
     },

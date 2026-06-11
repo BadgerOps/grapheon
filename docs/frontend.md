@@ -112,6 +112,17 @@ The Map page offers an alternative **Isometric View** powered by [isoflow](https
 
 Frontend unit tests for the data transformer are in `src/services/__tests__/isoflowTransformer.test.js` (35 tests covering node extraction, tile layout, connector building, and full pipeline). Run with `npm test`.
 
+## Agent Topology Map Controls
+
+The Network Map filter panel includes agent topology controls when passive-agent data exists:
+
+- observed-by agent selector
+- collector, ARP, connection, and route relationship layer toggles
+- confidence threshold input
+- collector node toggle
+
+These controls pass through to `/api/network/map` and add typed Cytoscape edges from current agent observations. Default map behavior is unchanged until an agent topology filter or layer is selected.
+
 ## Changelog
 
 - Version is sourced from `frontend/package.json`.

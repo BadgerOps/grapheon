@@ -114,6 +114,7 @@ def _run_migrations(sync_conn) -> None:
         "hosts",
         [
             ("source_origins", "source_origins JSON"),
+            ("observed_by_agent_ids", "observed_by_agent_ids JSON"),
         ],
     )
     _ensure_columns(
@@ -128,6 +129,7 @@ def _run_migrations(sync_conn) -> None:
         "arp_entries",
         [
             ("source_origin", "source_origin VARCHAR(50)"),
+            ("observer_agent_id", "observer_agent_id INTEGER"),
         ],
     )
     _ensure_columns(
@@ -135,6 +137,7 @@ def _run_migrations(sync_conn) -> None:
         "connections",
         [
             ("source_origin", "source_origin VARCHAR(50)"),
+            ("observer_agent_id", "observer_agent_id INTEGER"),
         ],
     )
     _backfill_source_origins(sync_conn)
@@ -186,6 +189,23 @@ def _run_migrations(sync_conn) -> None:
     _create_index_if_missing(sync_conn, "idx_agent_enrollment_key_default_policy_id", "agent_enrollment_keys", "default_policy_id")
     _create_index_if_missing(sync_conn, "idx_agent_checkin_api_key_prefix", "agent_checkins", "api_key_prefix")
     _create_agent_observations_table(sync_conn)
+    _ensure_columns(
+        sync_conn,
+        "agent_observations",
+        [
+            ("observation_role", "observation_role VARCHAR(64)"),
+            ("confidence", "confidence INTEGER DEFAULT 50"),
+            ("relationship_type", "relationship_type VARCHAR(64)"),
+            ("relationship_key", "relationship_key VARCHAR(255)"),
+        ],
+    )
+    _create_index_if_missing(sync_conn, "idx_arp_entries_observer_agent_id", "arp_entries", "observer_agent_id")
+    _create_index_if_missing(sync_conn, "idx_connections_observer_agent_id", "connections", "observer_agent_id")
+    _create_index_if_missing(sync_conn, "idx_agent_observations_role", "agent_observations", "observation_role")
+    _create_index_if_missing(sync_conn, "idx_agent_observations_confidence", "agent_observations", "confidence")
+    _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_type", "agent_observations", "relationship_type")
+    _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_key", "agent_observations", "relationship_key")
+    _backfill_agent_observer_metadata(sync_conn)
 
 
 def _backfill_source_origins(sync_conn) -> None:
@@ -199,6 +219,10 @@ def _backfill_source_origins(sync_conn) -> None:
                 ELSE 'manual'
             END
             WHERE source_origin IS NULL
+               OR (
+                   source_origin = 'manual'
+                   AND (source_type = 'agent' OR import_type = 'agent')
+               )
             """
         )
     )
@@ -241,6 +265,121 @@ def _backfill_source_origins(sync_conn) -> None:
         )
 
 
+def _backfill_agent_observer_metadata(sync_conn) -> None:
+    """Populate observer/vantage metadata for databases created before the fields existed."""
+    rows = sync_conn.execute(text("PRAGMA table_info(agent_observations)")).fetchall()
+    columns = {row[1] for row in rows}
+    if {
+        "observation_role",
+        "confidence",
+        "relationship_type",
+        "relationship_key",
+    }.issubset(columns):
+        sync_conn.execute(
+            text(
+                """
+                UPDATE agent_observations
+                SET
+                    observation_role = CASE observation_type
+                        WHEN 'address' THEN 'agent_self_interface'
+                        WHEN 'neighbor' THEN 'arp_neighbor'
+                        WHEN 'connection' THEN 'connection_remote'
+                        WHEN 'route' THEN 'route_gateway'
+                        ELSE observation_type
+                    END,
+                    confidence = CASE observation_type
+                        WHEN 'address' THEN 95
+                        WHEN 'neighbor' THEN 80
+                        WHEN 'connection' THEN 35
+                        WHEN 'route' THEN 70
+                        ELSE 50
+                    END,
+                    relationship_type = CASE observation_type
+                        WHEN 'address' THEN 'collector_interface'
+                        WHEN 'neighbor' THEN 'arp_neighbor'
+                        WHEN 'connection' THEN 'connection_remote'
+                        WHEN 'route' THEN 'route_gateway'
+                        ELSE NULL
+                    END,
+                    relationship_key = COALESCE(relationship_key, identity_hash)
+                WHERE observation_role IS NULL
+                   OR confidence IS NULL
+                   OR relationship_key IS NULL
+                """
+            )
+        )
+
+    rows = sync_conn.execute(text("PRAGMA table_info(hosts)")).fetchall()
+    columns = {row[1] for row in rows}
+    if "observed_by_agent_ids" in columns:
+        sync_conn.execute(
+            text(
+                """
+                UPDATE hosts
+                SET observed_by_agent_ids = (
+                    SELECT '[' || group_concat(DISTINCT agent_id) || ']'
+                    FROM agent_observations
+                    WHERE agent_observations.host_id = hosts.id
+                )
+                WHERE observed_by_agent_ids IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM agent_observations
+                    WHERE agent_observations.host_id = hosts.id
+                  )
+                """
+            )
+        )
+
+    rows = sync_conn.execute(text("PRAGMA table_info(arp_entries)")).fetchall()
+    columns = {row[1] for row in rows}
+    if "observer_agent_id" in columns:
+        sync_conn.execute(
+            text(
+                """
+                UPDATE arp_entries
+                SET observer_agent_id = (
+                    SELECT agent_id
+                    FROM agent_observations
+                    WHERE agent_observations.arp_entry_id = arp_entries.id
+                    ORDER BY last_seen_at DESC
+                    LIMIT 1
+                )
+                WHERE observer_agent_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM agent_observations
+                    WHERE agent_observations.arp_entry_id = arp_entries.id
+                  )
+                """
+            )
+        )
+
+    rows = sync_conn.execute(text("PRAGMA table_info(connections)")).fetchall()
+    columns = {row[1] for row in rows}
+    if "observer_agent_id" in columns:
+        sync_conn.execute(
+            text(
+                """
+                UPDATE connections
+                SET observer_agent_id = (
+                    SELECT agent_id
+                    FROM agent_observations
+                    WHERE agent_observations.connection_id = connections.id
+                    ORDER BY last_seen_at DESC
+                    LIMIT 1
+                )
+                WHERE observer_agent_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM agent_observations
+                    WHERE agent_observations.connection_id = connections.id
+                  )
+                """
+            )
+        )
+
+
 def _ensure_columns(sync_conn, table: str, columns: list[tuple[str, str]]) -> None:
     rows = sync_conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
     if not rows:
@@ -270,6 +409,10 @@ def _create_agent_observations_table(sync_conn) -> None:
                 raw_import_id INTEGER,
                 last_seen_checkin_id INTEGER,
                 observation_type VARCHAR(32) NOT NULL,
+                observation_role VARCHAR(64),
+                confidence INTEGER NOT NULL DEFAULT 50,
+                relationship_type VARCHAR(64),
+                relationship_key VARCHAR(255),
                 identity_hash VARCHAR(64) NOT NULL,
                 payload JSON NOT NULL,
                 host_id INTEGER,
@@ -293,11 +436,25 @@ def _create_agent_observations_table(sync_conn) -> None:
             """
         )
     )
+    _ensure_columns(
+        sync_conn,
+        "agent_observations",
+        [
+            ("observation_role", "observation_role VARCHAR(64)"),
+            ("confidence", "confidence INTEGER DEFAULT 50"),
+            ("relationship_type", "relationship_type VARCHAR(64)"),
+            ("relationship_key", "relationship_key VARCHAR(255)"),
+        ],
+    )
     for index_name, column in [
         ("idx_agent_observations_agent_id", "agent_id"),
         ("idx_agent_observations_raw_import_id", "raw_import_id"),
         ("idx_agent_observations_checkin_id", "last_seen_checkin_id"),
         ("idx_agent_observations_type", "observation_type"),
+        ("idx_agent_observations_role", "observation_role"),
+        ("idx_agent_observations_confidence", "confidence"),
+        ("idx_agent_observations_relationship_type", "relationship_type"),
+        ("idx_agent_observations_relationship_key", "relationship_key"),
         ("idx_agent_observations_identity", "identity_hash"),
         ("idx_agent_observations_host_id", "host_id"),
         ("idx_agent_observations_arp_entry_id", "arp_entry_id"),

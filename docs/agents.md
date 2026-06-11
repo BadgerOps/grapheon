@@ -33,6 +33,7 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue a per-agent API key once.
 - `POST /api/agents/{id}/request-collection` - Request that an active agent collect on its next timer run.
 - `GET /api/agents/{id}/checkins` - List check-in history for one agent.
+- `GET /api/agents/{id}/observations` - List current or historical observations for one agent, with optional `observation_type`, `observation_role`, `min_confidence`, and `is_current` filters.
 - `POST /api/agents/poll` - Agent-authenticated control-plane poll for policy and pending collection requests.
 - `GET /api/agents/policies` - List passive collection policies.
 - `POST /api/agents/policies` - Create a passive collection policy.
@@ -128,6 +129,15 @@ Reports may be sent with `Content-Encoding: gzip`. The backend stores the normal
 
 Agent check-ins are stored with `source_origin=agent`. Manual paste/file/bulk imports use `source_origin=manual`. Host, port, ARP, connection, and import list APIs can filter by this origin so operator views can separate passive-agent data from manually imported data.
 
+Agent ingest also tracks the collector separately from what it observed:
+
+- `source_origin=agent` answers how the row entered Graphēon.
+- `observed_by_agent_ids` / `observer_agent_id` answer which collector saw the row.
+- `observation_role` answers what the row meant from that collector's vantage point, such as `agent_self_interface`, `arp_neighbor`, `connection_local`, `connection_remote`, or `route_gateway`.
+- `confidence` is a 0-100 score used by APIs and map filters to distinguish strong self-interface evidence from weaker remote-only observations.
+
+Agent-local interface addresses are high-confidence self observations and may carry the agent hostname. ARP neighbors, route gateways, and connection-only remote IPs are observed entities and are not labeled as the collector just because the collector saw them.
+
 The ingest path upserts:
 
 - `hosts`
@@ -135,6 +145,15 @@ The ingest path upserts:
 - `connections`
 
 No automatic correlation run is triggered on every check-in in the MVP. That keeps steady-state ingest cheap. Operators can still run the existing correlation workflow separately.
+
+The network map can derive optional agent topology layers from current observations:
+
+- collector to local interface
+- local interface to ARP neighbor
+- local interface to connection remote
+- route source to gateway
+
+`GET /api/network/map` supports `observed_by_agent_id`, repeated `relationship_types`, `min_confidence`, and `include_collector_nodes` for these layers.
 
 ## Runtime Notes
 

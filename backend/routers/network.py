@@ -26,13 +26,15 @@ from network.queries import (
     fetch_vlan_configs,
     fetch_arp_segments,
     fetch_connections,
+    fetch_current_agent_observations,
+    fetch_agents_by_ids,
     fetch_port_counts,
     fetch_device_identities,
     fetch_route_hops,
     build_device_id_to_hosts,
 )
 from network.nodes import build_all_nodes
-from network.edges import build_all_edges
+from network.edges import build_all_edges, add_agent_topology_edges
 from network.legacy_format import build_legacy_response
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,11 @@ async def get_network_map(
     format: str = Query("cytoscape", description="Response format: 'cytoscape' or 'legacy'"),
     show_internet: str = Query("cloud", description="Public IP handling: 'cloud', 'hide', or 'show'"),
     route_through_gateway: bool = Query(False, description="Route cross-subnet edges through gateway nodes"),
+    source_origin: Optional[str] = Query(None, description="Filter map data by source origin"),
+    observed_by_agent_id: Optional[int] = Query(None, description="Filter agent-observed data by collector agent ID"),
+    relationship_types: Optional[list[str]] = Query(None, description="Agent relationship edge types to include"),
+    min_confidence: Optional[int] = Query(None, ge=0, le=100, description="Minimum agent relationship confidence"),
+    include_collector_nodes: bool = Query(False, description="Include passive-agent collector/vantage nodes"),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -72,7 +79,13 @@ async def get_network_map(
 
     # ── Step 1: Fetch hosts ──────────────────────────────────────
     step_start = time.perf_counter()
-    hosts = await fetch_hosts(db, vlan_filter, include_inactive)
+    hosts = await fetch_hosts(
+        db,
+        vlan_filter,
+        include_inactive,
+        source_origin=source_origin,
+        observed_by_agent_id=observed_by_agent_id,
+    )
     logger.debug(f"[1/7] Fetched {len(hosts)} hosts in {_ms(step_start)}")
 
     # ── Step 2: Fetch VLAN configs + subnet→VLAN lookup ──────────
@@ -88,7 +101,11 @@ async def get_network_map(
 
     # ── Step 4: Fetch connections ────────────────────────────────
     step_start = time.perf_counter()
-    connections = await fetch_connections(db)
+    connections = await fetch_connections(
+        db,
+        source_origin=source_origin,
+        observed_by_agent_id=observed_by_agent_id,
+    )
     logger.debug(f"[4/7] Fetched {len(connections)} connections in {_ms(step_start)}")
 
     # ── Step 5: Batch port counts (single GROUP BY query) ────────
@@ -145,6 +162,39 @@ async def get_network_map(
     # Prepend gateway-to-subnet edges (created during node building)
     edges = gateway_subnet_edges + edges
 
+    agent_edge_stats = {
+        "collector_interface": 0,
+        "arp_neighbor": 0,
+        "connection_remote": 0,
+        "route_gateway": 0,
+    }
+    should_build_agent_topology = (
+        include_collector_nodes
+        or bool(relationship_types)
+    )
+    if should_build_agent_topology:
+        active_relationship_types = set(relationship_types or [])
+        if active_relationship_types or include_collector_nodes:
+            active_relationship_types.add("collector_interface")
+        agent_observations = await fetch_current_agent_observations(
+            db,
+            observed_by_agent_id=observed_by_agent_id,
+            relationship_types=sorted(active_relationship_types),
+            min_confidence=min_confidence,
+        )
+        agents_by_id = await fetch_agents_by_ids(
+            db,
+            [observation.agent_id for observation in agent_observations],
+        )
+        agent_edge_stats = add_agent_topology_edges(
+            nodes=nodes,
+            edges=edges,
+            observations=agent_observations,
+            agents_by_id=agents_by_id,
+            ip_to_host_id=ip_to_host_id,
+            include_collector_nodes=include_collector_nodes,
+        )
+
     logger.debug(
         f"[6-7/7] Built {len(nodes)} nodes, {len(edges)} edges "
         f"({edge_stats['internet_conn_count']} internet-routed) in {_ms(step_start)}"
@@ -168,6 +218,8 @@ async def get_network_map(
         "internet_connections": edge_stats["internet_conn_count"],
         "public_ip_hosts": public_ip_count,
         "shared_gateways": len(shared_gateway_nodes),
+        "agent_topology_edges": sum(agent_edge_stats.values()),
+        "agent_edge_counts": agent_edge_stats,
         "show_internet": show_internet,
         "group_mode": group_by,
         "layout_mode": layout_mode,

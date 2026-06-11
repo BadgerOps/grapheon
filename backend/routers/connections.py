@@ -20,6 +20,7 @@ async def list_connections(
     protocol: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     source_origin: Optional[str] = Query(None),
+    observed_by_agent_id: Optional[int] = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -41,6 +42,9 @@ async def list_connections(
     if source_origin:
         query = query.where(Connection.source_origin == source_origin)
         count_query = count_query.where(Connection.source_origin == source_origin)
+    if observed_by_agent_id is not None:
+        query = query.where(Connection.observer_agent_id == observed_by_agent_id)
+        count_query = count_query.where(Connection.observer_agent_id == observed_by_agent_id)
 
     count_result = await db.execute(count_query)
     total = count_result.scalar()

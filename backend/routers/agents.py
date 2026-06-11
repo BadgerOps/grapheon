@@ -307,6 +307,13 @@ def _merge_unique(values: Optional[list[str]], value: str) -> list[str]:
     return current
 
 
+def _merge_unique_int(values: Optional[list[int]], value: int) -> list[int]:
+    current = list(values or [])
+    if value not in current:
+        current.append(value)
+    return current
+
+
 def _pending_collection_request(agent: Agent) -> AgentCollectionRequestStatus:
     requested_at = agent.collection_requested_at
     fulfilled_at = agent.collection_request_fulfilled_at
@@ -464,6 +471,7 @@ async def _upsert_host(
     ip_address: str,
     hostname: Optional[str] = None,
     mac_address: Optional[str] = None,
+    observed_by_agent_id: Optional[int] = None,
 ) -> tuple[Host, bool]:
     try:
         if parse_ip(ip_address).is_unspecified:
@@ -476,7 +484,12 @@ async def _upsert_host(
     created = False
 
     if host:
-        if hostname:
+        current_origins = host.source_origins or []
+        can_update_hostname = (
+            not host.hostname
+            or (AGENT_SOURCE_ORIGIN in current_origins and len(current_origins) == 1)
+        )
+        if hostname and can_update_hostname:
             host.hostname = hostname
         if mac_address and not host.mac_address:
             host.mac_address = mac_address
@@ -484,6 +497,11 @@ async def _upsert_host(
         if AGENT_SOURCE_TYPE not in current_sources:
             host.source_types = current_sources + [AGENT_SOURCE_TYPE]
         host.source_origins = _merge_unique(host.source_origins, AGENT_SOURCE_ORIGIN)
+        if observed_by_agent_id is not None:
+            host.observed_by_agent_ids = _merge_unique_int(
+                host.observed_by_agent_ids,
+                observed_by_agent_id,
+            )
         host.tags = merge_tags(
             host.tags,
             build_host_tags(
@@ -505,6 +523,7 @@ async def _upsert_host(
         mac_address=mac_address,
         source_types=[AGENT_SOURCE_TYPE],
         source_origins=[AGENT_SOURCE_ORIGIN],
+        observed_by_agent_ids=[observed_by_agent_id] if observed_by_agent_id is not None else None,
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -524,6 +543,7 @@ async def _upsert_arp_entry(
     mac_address: Optional[str],
     interface: Optional[str],
     state_value: Optional[str],
+    observer_agent_id: Optional[int] = None,
 ) -> tuple[Optional[ARPEntry], bool]:
     if not mac_address:
         return None, False
@@ -539,6 +559,7 @@ async def _upsert_arp_entry(
         arp_entry.interface = interface or arp_entry.interface
         arp_entry.entry_type = state_value or arp_entry.entry_type
         arp_entry.source_origin = AGENT_SOURCE_ORIGIN
+        arp_entry.observer_agent_id = observer_agent_id or arp_entry.observer_agent_id
         arp_entry.last_seen = _utcnow()
         arp_entry.tags = merge_tags(
             arp_entry.tags,
@@ -559,6 +580,7 @@ async def _upsert_arp_entry(
         entry_type=state_value,
         source_type=AGENT_SOURCE_TYPE,
         source_origin=AGENT_SOURCE_ORIGIN,
+        observer_agent_id=observer_agent_id,
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -584,6 +606,7 @@ async def _upsert_connection(
     state_value: Optional[str],
     pid: Optional[int],
     process_name: Optional[str],
+    observer_agent_id: Optional[int] = None,
 ) -> tuple[Connection, bool]:
     filters = [
         Connection.local_ip == local_ip,
@@ -603,6 +626,7 @@ async def _upsert_connection(
     connection = result.scalar_one_or_none()
     if connection:
         connection.source_origin = AGENT_SOURCE_ORIGIN
+        connection.observer_agent_id = observer_agent_id or connection.observer_agent_id
         connection.last_seen = _utcnow()
         connection.tags = merge_tags(
             connection.tags,
@@ -629,6 +653,7 @@ async def _upsert_connection(
         process_name=process_name,
         source_type=AGENT_SOURCE_TYPE,
         source_origin=AGENT_SOURCE_ORIGIN,
+        observer_agent_id=observer_agent_id,
         first_seen=_utcnow(),
         last_seen=_utcnow(),
     )
@@ -723,6 +748,43 @@ def _observation_identity(observation_type: str, payload: dict[str, Any]) -> dic
     return payload
 
 
+def _relationship_key(agent_id: int, relationship_type: Optional[str], payload: dict[str, Any]) -> Optional[str]:
+    if not relationship_type:
+        return None
+    if relationship_type == "collector_interface":
+        identity = {
+            "agent_id": agent_id,
+            "ip_address": payload.get("ip_address"),
+            "interface": payload.get("interface"),
+            "mac_address": payload.get("mac_address"),
+        }
+    elif relationship_type == "arp_neighbor":
+        identity = {
+            "agent_id": agent_id,
+            "interface": payload.get("interface"),
+            "ip_address": payload.get("ip_address"),
+            "mac_address": payload.get("mac_address"),
+        }
+    elif relationship_type == "connection_remote":
+        identity = {
+            "agent_id": agent_id,
+            "local_ip": payload.get("local_ip"),
+            "remote_ip": payload.get("remote_ip"),
+            "remote_port": payload.get("remote_port"),
+            "protocol": payload.get("protocol"),
+        }
+    elif relationship_type == "route_gateway":
+        identity = {
+            "agent_id": agent_id,
+            "source_ip": payload.get("source_ip"),
+            "gateway": payload.get("gateway"),
+            "destination": payload.get("destination"),
+        }
+    else:
+        identity = {"agent_id": agent_id, "payload": payload}
+    return _identity_hash(relationship_type, identity)
+
+
 async def _upsert_agent_observation(
     db: AsyncSession,
     agent: Agent,
@@ -731,6 +793,10 @@ async def _upsert_agent_observation(
     observed_at: datetime,
     raw_import_id: int,
     checkin_id: int,
+    observation_role: Optional[str] = None,
+    confidence: int = 50,
+    relationship_type: Optional[str] = None,
+    relationship_key: Optional[str] = None,
     host_id: Optional[int] = None,
     arp_entry_id: Optional[int] = None,
     connection_id: Optional[int] = None,
@@ -751,6 +817,10 @@ async def _upsert_agent_observation(
     if observation:
         was_removed = not observation.is_current
         observation.payload = payload
+        observation.observation_role = observation_role
+        observation.confidence = confidence
+        observation.relationship_type = relationship_type
+        observation.relationship_key = relationship_key
         observation.last_seen_at = observed_at
         observation.raw_import_id = raw_import_id
         observation.last_seen_checkin_id = checkin_id
@@ -768,6 +838,10 @@ async def _upsert_agent_observation(
         raw_import_id=raw_import_id,
         last_seen_checkin_id=checkin_id,
         observation_type=observation_type,
+        observation_role=observation_role,
+        confidence=confidence,
+        relationship_type=relationship_type,
+        relationship_key=relationship_key,
         identity_hash=identity_hash,
         payload=payload,
         host_id=host_id,
@@ -847,6 +921,11 @@ async def _ingest_agent_payload(
         "connection": set(),
         "route": set(),
     }
+    agent_self_ips = {
+        address.ip_address
+        for address in payload.addresses
+        if not parse_ip(address.ip_address).is_unspecified
+    }
 
     for address in payload.addresses:
         host, created = await _upsert_host(
@@ -854,6 +933,7 @@ async def _ingest_agent_payload(
             address.ip_address,
             hostname=payload.hostname,
             mac_address=address.mac_address,
+            observed_by_agent_id=agent.id,
         )
         host_creates += int(created)
         seen_ips.add(address.ip_address)
@@ -867,6 +947,9 @@ async def _ingest_agent_payload(
             {
                 "type": "address",
                 "payload": address_payload,
+                "observation_role": "agent_self_interface",
+                "confidence": 95,
+                "relationship_type": "collector_interface",
                 "host_id": host.id,
             }
         )
@@ -877,6 +960,7 @@ async def _ingest_agent_payload(
             neighbor.ip_address,
             hostname=neighbor.hostname,
             mac_address=neighbor.mac_address,
+            observed_by_agent_id=agent.id,
         )
         host_creates += int(created)
         arp_entry, arp_created = await _upsert_arp_entry(
@@ -885,6 +969,7 @@ async def _ingest_agent_payload(
             neighbor.mac_address,
             neighbor.interface,
             neighbor.state,
+            observer_agent_id=agent.id,
         )
         arp_creates += int(arp_created)
         seen_ips.add(neighbor.ip_address)
@@ -898,6 +983,9 @@ async def _ingest_agent_payload(
             {
                 "type": "neighbor",
                 "payload": neighbor_payload,
+                "observation_role": "arp_neighbor",
+                "confidence": 80,
+                "relationship_type": "arp_neighbor",
                 "host_id": host.id,
                 "arp_entry_id": arp_entry.id if arp_entry else None,
             }
@@ -910,14 +998,19 @@ async def _ingest_agent_payload(
                 host, created = await _upsert_host(
                     db,
                     route.source_ip,
-                    hostname=payload.hostname,
+                    hostname=payload.hostname if route.source_ip in agent_self_ips else None,
+                    observed_by_agent_id=agent.id,
                 )
                 route_host_id = host.id
                 host_creates += int(created)
                 seen_ips.add(route.source_ip)
         if route.gateway:
             if not parse_ip(route.gateway).is_unspecified:
-                _, created = await _upsert_host(db, route.gateway)
+                _, created = await _upsert_host(
+                    db,
+                    route.gateway,
+                    observed_by_agent_id=agent.id,
+                )
                 host_creates += int(created)
                 seen_ips.add(route.gateway)
         route_payload = route.model_dump(mode="json")
@@ -928,6 +1021,9 @@ async def _ingest_agent_payload(
             {
                 "type": "route",
                 "payload": route_payload,
+                "observation_role": "route_gateway" if route.gateway else "route_source",
+                "confidence": 70 if route.gateway else 55,
+                "relationship_type": "route_gateway" if route.gateway else None,
                 "host_id": route_host_id,
             }
         )
@@ -938,13 +1034,18 @@ async def _ingest_agent_payload(
             host, created = await _upsert_host(
                 db,
                 connection.local_ip,
-                hostname=payload.hostname,
+                hostname=payload.hostname if connection.local_ip in agent_self_ips else None,
+                observed_by_agent_id=agent.id,
             )
             connection_host_id = host.id
             host_creates += int(created)
             seen_ips.add(connection.local_ip)
         if not parse_ip(connection.remote_ip).is_unspecified:
-            _, remote_created = await _upsert_host(db, connection.remote_ip)
+            _, remote_created = await _upsert_host(
+                db,
+                connection.remote_ip,
+                observed_by_agent_id=agent.id,
+            )
             host_creates += int(remote_created)
             seen_ips.add(connection.remote_ip)
         db_connection, connection_created = await _upsert_connection(
@@ -957,6 +1058,7 @@ async def _ingest_agent_payload(
             state_value=connection.state,
             pid=connection.pid,
             process_name=connection.process_name,
+            observer_agent_id=agent.id,
         )
         connection_creates += int(connection_created)
         connection_payload = connection.model_dump(mode="json")
@@ -970,6 +1072,13 @@ async def _ingest_agent_payload(
             {
                 "type": "connection",
                 "payload": connection_payload,
+                "observation_role": (
+                    "connection_local"
+                    if connection.local_ip in agent_self_ips
+                    else "connection_remote"
+                ),
+                "confidence": 60 if connection.local_ip in agent_self_ips else 35,
+                "relationship_type": "connection_remote",
                 "host_id": connection_host_id,
                 "connection_id": db_connection.id,
             }
@@ -1021,6 +1130,14 @@ async def _ingest_agent_payload(
             observed_at=observed_at,
             raw_import_id=raw_import.id,
             checkin_id=checkin.id,
+            observation_role=observation_input.get("observation_role"),
+            confidence=observation_input.get("confidence", 50),
+            relationship_type=observation_input.get("relationship_type"),
+            relationship_key=_relationship_key(
+                agent.id,
+                observation_input.get("relationship_type"),
+                observation_input["payload"],
+            ),
             host_id=observation_input.get("host_id"),
             arp_entry_id=observation_input.get("arp_entry_id"),
             connection_id=observation_input.get("connection_id"),
@@ -1951,6 +2068,8 @@ async def list_agent_observations(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     observation_type: Optional[str] = Query(None),
+    observation_role: Optional[str] = Query(None),
+    min_confidence: Optional[int] = Query(None, ge=0, le=100),
     is_current: Optional[bool] = Query(None),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -1966,6 +2085,14 @@ async def list_agent_observations(
         count_query = count_query.where(
             AgentObservation.observation_type == observation_type
         )
+    if observation_role:
+        query = query.where(AgentObservation.observation_role == observation_role)
+        count_query = count_query.where(
+            AgentObservation.observation_role == observation_role
+        )
+    if min_confidence is not None:
+        query = query.where(AgentObservation.confidence >= min_confidence)
+        count_query = count_query.where(AgentObservation.confidence >= min_confidence)
     if is_current is not None:
         query = query.where(AgentObservation.is_current == is_current)
         count_query = count_query.where(AgentObservation.is_current == is_current)

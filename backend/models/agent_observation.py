@@ -41,6 +41,10 @@ class AgentObservation(Base):
     )
 
     observation_type = Column(String(32), nullable=False, index=True)
+    observation_role = Column(String(64), nullable=True, index=True)
+    confidence = Column(Integer, default=50, nullable=False, index=True)
+    relationship_type = Column(String(64), nullable=True, index=True)
+    relationship_key = Column(String(255), nullable=True, index=True)
     identity_hash = Column(String(64), nullable=False, index=True)
     payload = Column(JSON, nullable=False)
 

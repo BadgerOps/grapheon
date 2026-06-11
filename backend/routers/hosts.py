@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import String, select, func
+from sqlalchemy import String, select, func, or_
 from datetime import datetime
 
 from database import get_db
@@ -22,12 +22,25 @@ def _json_list_contains(column, value: str):
     return column.cast(String).contains(f'"{value}"')
 
 
+def _json_int_list_contains(column, value: int):
+    serialized = column.cast(String)
+    return or_(
+        serialized.contains(f"[{value}]"),
+        serialized.contains(f"[{value},"),
+        serialized.contains(f", {value},"),
+        serialized.contains(f",{value},"),
+        serialized.contains(f", {value}]"),
+        serialized.contains(f",{value}]"),
+    )
+
+
 @router.get("", response_model=PaginatedResponse)
 async def list_hosts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: bool = Query(True),
     source_origin: str | None = Query(None),
+    observed_by_agent_id: int | None = Query(None),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -42,6 +55,8 @@ async def list_hosts(
     filters = [Host.is_active == is_active]
     if source_origin:
         filters.append(_json_list_contains(Host.source_origins, source_origin))
+    if observed_by_agent_id is not None:
+        filters.append(_json_int_list_contains(Host.observed_by_agent_ids, observed_by_agent_id))
 
     # Get total count
     count_result = await db.execute(select(func.count(Host.id)).where(*filters))

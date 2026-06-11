@@ -58,6 +58,7 @@ class Host(Base):
     # Data provenance
     source_types = Column(JSON, nullable=True)  # e.g., ["nmap", "arp", "netstat"]
     source_origins = Column(JSON, nullable=True)  # e.g., ["manual", "agent"]
+    observed_by_agent_ids = Column(JSON, nullable=True)  # e.g., [1, 2]
 
     # Indexes
     __table_args__ = (

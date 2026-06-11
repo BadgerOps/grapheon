@@ -438,3 +438,193 @@ def build_all_edges(
     }
 
     return edges, edge_stats
+
+
+def add_agent_topology_edges(
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    observations: List[Any],
+    agents_by_id: Dict[int, Any],
+    ip_to_host_id: Dict[str, str],
+    include_collector_nodes: bool,
+) -> Dict[str, int]:
+    """
+    Add agent-vantage relationship edges derived from current observations.
+
+    Existing connection edges answer "what endpoints communicated"; these edges
+    answer "which collector observed what, and from which local vantage point".
+    """
+    edge_ids = {edge["data"]["id"] for edge in edges}
+    added_counts = {
+        "collector_interface": 0,
+        "arp_neighbor": 0,
+        "connection_remote": 0,
+        "route_gateway": 0,
+    }
+
+    address_by_agent_interface: Dict[tuple[int, str], str] = {}
+    first_address_by_agent: Dict[int, str] = {}
+    for observation in observations:
+        if observation.observation_type != "address" or not observation.is_current:
+            continue
+        payload = observation.payload or {}
+        ip_address = payload.get("ip_address")
+        interface = payload.get("interface")
+        if not ip_address:
+            continue
+        if observation.agent_id not in first_address_by_agent:
+            first_address_by_agent[observation.agent_id] = ip_address
+        if interface:
+            address_by_agent_interface[(observation.agent_id, interface)] = ip_address
+
+    collector_node_ids: set[str] = set()
+    if include_collector_nodes:
+        for agent_id in sorted({observation.agent_id for observation in observations}):
+            agent = agents_by_id.get(agent_id)
+            if not agent:
+                continue
+            node_id = f"agent_{agent_id}"
+            collector_node_ids.add(node_id)
+            if any(node["data"].get("id") == node_id for node in nodes):
+                continue
+            label = agent.display_name or agent.hostname or agent.agent_uuid
+            nodes.append(
+                {
+                    "data": {
+                        "id": node_id,
+                        "label": f"Collector\n{label}",
+                        "type": "agent_collector",
+                        "device_type": "collector",
+                        "agent_id": agent_id,
+                        "agent_uuid": agent.agent_uuid,
+                        "hostname": agent.hostname,
+                        "node_shape": "hexagon",
+                        "node_size": 58,
+                        "color": "#14b8a6",
+                        "tooltip": (
+                            f"<b>Agent Collector</b><br>{label}"
+                            f"<br>agent_id={agent_id}"
+                        ),
+                    }
+                }
+            )
+
+    def add_edge(
+        source: str,
+        target: str,
+        observation: Any,
+        connection_type: str,
+        tooltip: str,
+    ) -> None:
+        if not source or not target or source == target:
+            return
+        edge_id = f"agent_{observation.id}_{connection_type}_{source}_{target}"
+        if edge_id in edge_ids:
+            return
+        edge_ids.add(edge_id)
+        edges.append(
+            {
+                "data": {
+                    "id": edge_id,
+                    "source": str(source),
+                    "target": str(target),
+                    "connection_type": connection_type,
+                    "relationship_type": observation.relationship_type,
+                    "observation_role": observation.observation_role,
+                    "confidence": observation.confidence,
+                    "source_origin": "agent",
+                    "observer_agent_id": observation.agent_id,
+                    "agent_id": observation.agent_id,
+                    "agent_observation_id": observation.id,
+                    "raw_import_id": observation.raw_import_id,
+                    "first_seen_at": observation.first_seen_at.isoformat()
+                    if observation.first_seen_at
+                    else None,
+                    "last_seen_at": observation.last_seen_at.isoformat()
+                    if observation.last_seen_at
+                    else None,
+                    "relationship_key": observation.relationship_key,
+                    "tooltip": tooltip,
+                }
+            }
+        )
+        if connection_type in added_counts:
+            added_counts[connection_type] += 1
+
+    for observation in observations:
+        payload = observation.payload or {}
+        relationship_type = observation.relationship_type
+        if relationship_type == "collector_interface":
+            collector_id = f"agent_{observation.agent_id}"
+            host_id = ip_to_host_id.get(payload.get("ip_address"))
+            if include_collector_nodes and collector_id in collector_node_ids and host_id:
+                add_edge(
+                    collector_id,
+                    str(host_id),
+                    observation,
+                    "collector_interface",
+                    (
+                        f"Collector observed local interface "
+                        f"{payload.get('ip_address')} ({observation.confidence}% confidence)"
+                    ),
+                )
+            continue
+
+        if relationship_type == "arp_neighbor":
+            interface = payload.get("interface")
+            local_ip = address_by_agent_interface.get((observation.agent_id, interface))
+            source_id = ip_to_host_id.get(local_ip) if local_ip else None
+            target_id = ip_to_host_id.get(payload.get("ip_address"))
+            if source_id and target_id:
+                add_edge(
+                    str(source_id),
+                    str(target_id),
+                    observation,
+                    "arp_neighbor",
+                    (
+                        f"ARP neighbor via {interface or 'unknown interface'}: "
+                        f"{local_ip or '?'} -> {payload.get('ip_address')}"
+                    ),
+                )
+            continue
+
+        if relationship_type == "connection_remote":
+            source_id = ip_to_host_id.get(payload.get("local_ip"))
+            target_id = ip_to_host_id.get(payload.get("remote_ip"))
+            if source_id and target_id:
+                add_edge(
+                    str(source_id),
+                    str(target_id),
+                    observation,
+                    "connection_remote",
+                    (
+                        f"Observed connection {payload.get('local_ip')}:"
+                        f"{payload.get('local_port')} -> {payload.get('remote_ip')}:"
+                        f"{payload.get('remote_port') or '?'}"
+                    ),
+                )
+            continue
+
+        if relationship_type == "route_gateway":
+            source_ip = payload.get("source_ip")
+            if not source_ip and payload.get("interface"):
+                source_ip = address_by_agent_interface.get(
+                    (observation.agent_id, payload.get("interface"))
+                )
+            if not source_ip:
+                source_ip = first_address_by_agent.get(observation.agent_id)
+            source_id = ip_to_host_id.get(source_ip)
+            target_id = ip_to_host_id.get(payload.get("gateway"))
+            if source_id and target_id:
+                add_edge(
+                    str(source_id),
+                    str(target_id),
+                    observation,
+                    "route_gateway",
+                    (
+                        f"Route to {payload.get('destination')} via "
+                        f"{payload.get('gateway')} ({observation.confidence}% confidence)"
+                    ),
+                )
+
+    return added_counts

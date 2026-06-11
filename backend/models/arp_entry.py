@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Index
+from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Index, ForeignKey
 from database import Base
 
 
@@ -32,6 +32,7 @@ class ARPEntry(Base):
     # Data provenance
     source_type = Column(String(50), nullable=True)  # e.g., "arp_scan", "arp_table"
     source_origin = Column(String(50), nullable=True)  # e.g., "manual", "agent"
+    observer_agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Indexes
     __table_args__ = (

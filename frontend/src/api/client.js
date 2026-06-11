@@ -499,6 +499,14 @@ export async function rejectAgent(id, data = {}) {
   return apiCall('POST', `/agents/${id}/reject`, data)
 }
 
+export async function revokeAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/revoke`, data)
+}
+
+export async function reactivateAgent(id, data = {}) {
+  return apiCall('POST', `/agents/${id}/reactivate`, data)
+}
+
 export async function rotateAgentApiKey(id, data = {}) {
   return apiCall('POST', `/agents/${id}/rotate-api-key`, data)
 }

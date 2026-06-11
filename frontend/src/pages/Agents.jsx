@@ -322,7 +322,6 @@ export default function Agents() {
     display_name: '',
     site_name: '',
     policy_id: '',
-    is_active: true,
   })
   const [savingAgent, setSavingAgent] = useState(false)
 
@@ -440,7 +439,6 @@ export default function Agents() {
         display_name: '',
         site_name: '',
         policy_id: '',
-        is_active: true,
       })
       setAgentCheckins([])
       return
@@ -450,7 +448,6 @@ export default function Agents() {
       display_name: selectedAgent.display_name || '',
       site_name: selectedAgent.site_name || '',
       policy_id: selectedAgent.policy_id ? String(selectedAgent.policy_id) : '',
-      is_active: selectedAgent.is_active,
     })
     fetchCheckins(selectedAgent.id)
   }, [fetchCheckins, selectedAgent])
@@ -474,7 +471,6 @@ export default function Agents() {
         display_name: agentDraft.display_name || null,
         site_name: agentDraft.site_name || null,
         policy_id: normalizeNumber(agentDraft.policy_id),
-        is_active: agentDraft.is_active,
       })
       showSuccess('Agent record updated')
       await fetchAgents()
@@ -517,6 +513,46 @@ export default function Agents() {
       setError('')
       await api.rejectAgent(selectedAgent.id, { reason: reason || null })
       showSuccess('Agent rejected')
+      await fetchAgents()
+      await fetchCheckins(selectedAgent.id)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingAgent(false)
+    }
+  }
+
+  const handleRevokeAgent = async () => {
+    if (!selectedAgent) return
+
+    const reason = window.prompt('Reason for revoking this agent:', 'decommissioned or compromised')
+    if (reason === null) return
+
+    try {
+      setSavingAgent(true)
+      setError('')
+      await api.revokeAgent(selectedAgent.id, { reason: reason || null })
+      showSuccess('Agent revoked and API key invalidated')
+      await fetchAgents()
+      await fetchCheckins(selectedAgent.id)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingAgent(false)
+    }
+  }
+
+  const handleReactivateAgent = async () => {
+    if (!selectedAgent) return
+
+    const reason = window.prompt('Reason for reactivating this agent:', 'returning to service')
+    if (reason === null) return
+
+    try {
+      setSavingAgent(true)
+      setError('')
+      await api.reactivateAgent(selectedAgent.id, { reason: reason || null })
+      showSuccess('Agent reactivated and moved to pending approval')
       await fetchAgents()
       await fetchCheckins(selectedAgent.id)
     } catch (err) {
@@ -897,11 +933,11 @@ export default function Agents() {
                         ))}
                       </select>
                     </div>
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 pb-2 text-sm text-gray-700 dark:text-gray-300">
-                        <input type="checkbox" checked={agentDraft.is_active} onChange={(event) => handleAgentDraftChange('is_active', event.target.checked)} />
-                        Active record
-                      </label>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Record Status</label>
+                      <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                        {selectedAgent.is_active ? 'Active record' : 'Inactive record'}
+                      </div>
                     </div>
                   </div>
 
@@ -927,14 +963,24 @@ export default function Agents() {
                         Approve Agent
                       </button>
                     )}
-                    {selectedAgent.enrollment_state !== 'rejected' && (
+                    {selectedAgent.enrollment_state === 'pending' && (
                       <button type="button" className="btn btn-danger" onClick={handleRejectAgent} disabled={savingAgent}>
                         Reject Agent
                       </button>
                     )}
                     {selectedAgent.enrollment_state === 'active' && selectedAgent.is_active && (
-                      <button type="button" className="btn btn-secondary" onClick={handleRotateApiKey} disabled={savingAgent}>
-                        Rotate API Key
+                      <>
+                        <button type="button" className="btn btn-secondary" onClick={handleRotateApiKey} disabled={savingAgent}>
+                          Rotate API Key
+                        </button>
+                        <button type="button" className="btn btn-danger" onClick={handleRevokeAgent} disabled={savingAgent}>
+                          Revoke Agent
+                        </button>
+                      </>
+                    )}
+                    {(selectedAgent.enrollment_state === 'revoked' || selectedAgent.enrollment_state === 'rejected' || !selectedAgent.is_active) && (
+                      <button type="button" className="btn btn-secondary" onClick={handleReactivateAgent} disabled={savingAgent}>
+                        Reactivate Agent
                       </button>
                     )}
                   </div>

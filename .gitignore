@@ -5,6 +5,7 @@ backend/.env
 
 # Planning
 .planning/
+.pipeline/
 
 # Python
 .venv/

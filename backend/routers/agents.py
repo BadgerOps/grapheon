@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth.dependencies import require_admin, require_any_authenticated
+from auth.dependencies import require_admin
 from config import settings
 from database import get_db
 from models import (
@@ -44,7 +44,9 @@ from schemas import (
     AgentPolicyUpdate,
     AgentRegistrationRequest,
     AgentRegistrationResponse,
+    AgentReactivateRequest,
     AgentRejectRequest,
+    AgentRevokeRequest,
     AgentResponse,
     AgentUpdate,
     PaginatedResponse,
@@ -86,6 +88,12 @@ def _issue_agent_api_key(agent: Agent, issued_at: datetime) -> str:
     agent.api_key_prefix = api_key_prefix
     agent.api_key_issued_at = issued_at
     return raw_api_key
+
+
+def _clear_agent_api_key(agent: Agent) -> None:
+    agent.api_key_hash = None
+    agent.api_key_prefix = None
+    agent.api_key_issued_at = None
 
 
 def _decode_request_body(body: bytes, content_encoding: Optional[str]) -> bytes:
@@ -627,7 +635,7 @@ async def list_policies(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: Optional[bool] = Query(None),
-    user: User = Depends(require_any_authenticated),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(AgentPolicy)
@@ -850,7 +858,7 @@ async def list_agents(
     limit: int = Query(50, ge=1, le=1000),
     enrollment_state: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
-    user: User = Depends(require_any_authenticated),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Agent)
@@ -1095,11 +1103,17 @@ async def approve_agent(
     db: AsyncSession = Depends(get_db),
 ):
     agent = await _get_agent_or_404(db, agent_id)
+    if agent.enrollment_state != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only pending agents can be approved ({agent.enrollment_state})",
+        )
     if approval.policy_id is not None:
         await _get_policy_or_404(db, approval.policy_id)
 
     agent.enrollment_state = "active"
     agent.approval_required = False
+    agent.is_active = True
     agent.approved_at = _utcnow()
     agent.rejected_at = None
     if approval.policy_id is not None:
@@ -1147,6 +1161,11 @@ async def reject_agent(
     db: AsyncSession = Depends(get_db),
 ):
     agent = await _get_agent_or_404(db, agent_id)
+    if agent.enrollment_state != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only pending agents can be rejected ({agent.enrollment_state})",
+        )
     agent.enrollment_state = "rejected"
     agent.approval_required = True
     agent.rejected_at = _utcnow()
@@ -1183,6 +1202,114 @@ async def reject_agent(
         resource_id=str(agent.id),
         status="success",
         details={"agent_uuid": agent.agent_uuid},
+    )
+    return _agent_response(agent)
+
+
+@router.post("/{agent_id}/revoke", response_model=AgentResponse)
+async def revoke_agent(
+    agent_id: int,
+    revocation: AgentRevokeRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await _get_agent_or_404(db, agent_id)
+    if agent.enrollment_state == "revoked":
+        raise HTTPException(status_code=409, detail="Agent is already revoked")
+
+    agent.enrollment_state = "revoked"
+    agent.approval_required = True
+    agent.is_active = False
+    _clear_agent_api_key(agent)
+    if revocation.reason:
+        summary = agent.last_registration_summary or {}
+        summary["revocation_reason"] = revocation.reason
+        agent.last_registration_summary = summary
+
+    await db.commit()
+    await db.refresh(agent)
+    policy_map = await _load_policy_map(
+        db,
+        [agent.policy_id] if agent.policy_id else [],
+    )
+    enrollment_key_map = await _load_enrollment_key_map(
+        db,
+        [agent.enrollment_key_id] if agent.enrollment_key_id else [],
+    )
+    default_policy_map = await _load_policy_map(
+        db,
+        [
+            enrollment_key.default_policy_id
+            for enrollment_key in enrollment_key_map.values()
+            if enrollment_key.default_policy_id
+        ],
+    )
+    policy_map.update(default_policy_map)
+    await _attach_key_and_policy(agent, policy_map, enrollment_key_map)
+
+    audit.log(
+        action="REVOKE",
+        actor="user",
+        resource="Agent",
+        resource_id=str(agent.id),
+        status="success",
+        details={"agent_uuid": agent.agent_uuid, "reason": revocation.reason},
+    )
+    return _agent_response(agent)
+
+
+@router.post("/{agent_id}/reactivate", response_model=AgentResponse)
+async def reactivate_agent(
+    agent_id: int,
+    reactivation: AgentReactivateRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    agent = await _get_agent_or_404(db, agent_id)
+    if agent.enrollment_state == "active" and agent.is_active:
+        raise HTTPException(status_code=409, detail="Active agents do not need reactivation")
+    if agent.enrollment_state == "pending" and agent.is_active:
+        raise HTTPException(status_code=409, detail="Agent is already pending approval")
+
+    agent.enrollment_state = "pending"
+    agent.approval_required = True
+    agent.is_active = True
+    agent.approved_at = None
+    agent.rejected_at = None
+    _clear_agent_api_key(agent)
+    if reactivation.reason:
+        summary = agent.last_registration_summary or {}
+        summary["reactivation_reason"] = reactivation.reason
+        agent.last_registration_summary = summary
+
+    await db.commit()
+    await db.refresh(agent)
+    policy_map = await _load_policy_map(
+        db,
+        [agent.policy_id] if agent.policy_id else [],
+    )
+    enrollment_key_map = await _load_enrollment_key_map(
+        db,
+        [agent.enrollment_key_id] if agent.enrollment_key_id else [],
+    )
+    default_policy_map = await _load_policy_map(
+        db,
+        [
+            enrollment_key.default_policy_id
+            for enrollment_key in enrollment_key_map.values()
+            if enrollment_key.default_policy_id
+        ],
+    )
+    policy_map.update(default_policy_map)
+    await _attach_key_and_policy(agent, policy_map, enrollment_key_map)
+
+    audit.log(
+        action="REACTIVATE",
+        actor="user",
+        resource="Agent",
+        resource_id=str(agent.id),
+        status="success",
+        details={"agent_uuid": agent.agent_uuid, "reason": reactivation.reason},
     )
     return _agent_response(agent)
 
@@ -1254,7 +1381,7 @@ async def list_agent_checkins(
     agent_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
-    user: User = Depends(require_any_authenticated),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_agent_or_404(db, agent_id)
@@ -1379,7 +1506,7 @@ async def agent_check_in(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: int,
-    user: User = Depends(require_any_authenticated),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     agent = await _get_agent_or_404(db, agent_id)

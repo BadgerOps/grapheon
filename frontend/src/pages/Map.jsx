@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import CytoscapeNetworkMap from '../components/CytoscapeNetworkMap'
 import IsoflowNetworkMap from '../components/IsoflowNetworkMap'
 import MapErrorBoundary from '../components/MapErrorBoundary'
@@ -113,7 +113,7 @@ export default function Map() {
   }, [showRoutes])
 
   // ── Merge route edges into elements ─────────────────────────────
-  const mergedElements = (() => {
+  const mergedElements = useMemo(() => {
     if (!showRoutes || !routeData.path_edges || routeData.path_edges.length === 0) {
       return elements
     }
@@ -150,7 +150,7 @@ export default function Map() {
       nodes: elements.nodes,
       edges: [...(elements.edges || []), ...routeEdges],
     }
-  })()
+  }, [elements, routeData.path_edges, showRoutes])
 
   // ── Client-side filter handlers ─────────────────────────────────
   const handleSearch = (query) => {
@@ -184,9 +184,11 @@ export default function Map() {
     }
   }
 
-  const handleCyReady = (cy) => {
+  const handleNodeClick = useCallback(() => {}, [])
+
+  const handleCyReady = useCallback((cy) => {
     cyRef.current = cy
-  }
+  }, [])
 
   const handleRefresh = () => {
     fetchNetworkMap()
@@ -464,7 +466,7 @@ export default function Map() {
               <CytoscapeNetworkMap
                 elements={mergedElements}
                 layoutMode={layoutMode}
-                onNodeClick={() => {}}
+                onNodeClick={handleNodeClick}
                 onCyReady={handleCyReady}
                 loading={loading}
               />

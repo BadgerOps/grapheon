@@ -20,7 +20,7 @@ Use two separate values:
 
 Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are operational metadata and can change or be duplicated. `agent_uuid` should be stable independent of NIC replacement, VM cloning cleanup, or interface layout.
 
-## Current Backend Endpoints
+## Current API Endpoints
 
 - `GET /api/agents` - List enrolled agents and last-seen state.
 - `POST /api/agents` - Create an agent record manually as an admin.
@@ -40,6 +40,16 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `POST /api/agents/check-in` - Agent report ingest endpoint using the per-agent API key.
 
 Read endpoints use the existing viewer/editor/admin auth model. Enrollment-key and check-in endpoints are for machine-to-machine traffic.
+
+## Frontend Operations View
+
+Admins can now manage passive agents directly in the SPA at `/agents`. The page provides:
+
+- fleet status with approval state and last-seen health
+- per-agent detail and recent check-in history
+- policy profile creation and updates
+- enrollment-key creation and updates
+- approval, rejection, policy reassignment, and API-key rotation actions
 
 ## Enrollment Flow
 
@@ -162,5 +172,4 @@ The backend verifies:
 ## What This Slice Does Not Yet Do
 
 - Parse raw `ip neigh` or `ss` output on the server
-- Surface fleet views in the frontend
 - Issue client certificates or require mTLS for agents

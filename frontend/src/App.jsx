@@ -12,6 +12,7 @@ import Arp from './pages/Arp'
 import Changelog from './pages/Changelog'
 import Config from './pages/Config'
 import AuthAdmin from './pages/AuthAdmin'
+import Agents from './pages/Agents'
 import Login from './pages/Login'
 import ProtectedRoute from './components/ProtectedRoute'
 import UserMenu from './components/UserMenu'
@@ -223,6 +224,19 @@ export default function App() {
 
               {hasRole('admin') && (
                 <NavLink
+                  to="/agents"
+                  icon={
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5V4H2v16h5m10 0v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2m12 0H7m10-11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  }
+                >
+                  Agents
+                </NavLink>
+              )}
+
+              {hasRole('admin') && (
+                <NavLink
                   to="/auth-admin"
                   icon={
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -304,6 +318,7 @@ export default function App() {
           <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
           <Route path="/import" element={<ProtectedRoute requiredRole="editor"><Import /></ProtectedRoute>} />
           <Route path="/changelog" element={<ProtectedRoute><Changelog /></ProtectedRoute>} />
+          <Route path="/agents" element={<ProtectedRoute requiredRole="admin"><Agents /></ProtectedRoute>} />
           <Route path="/config" element={<ProtectedRoute requiredRole="admin"><Config /></ProtectedRoute>} />
           <Route path="/auth-admin" element={<ProtectedRoute requiredRole="admin"><AuthAdmin /></ProtectedRoute>} />
         </Routes>

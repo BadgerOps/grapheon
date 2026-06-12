@@ -440,10 +440,13 @@ async def _fetch_network_elements(
     from network.queries import (
         fetch_hosts,
         fetch_vlan_configs,
+        fetch_network_groups,
         fetch_connections,
         fetch_port_counts,
         fetch_device_identities,
         fetch_observed_networks,
+        filter_hosts_by_hidden_networks,
+        parse_network_group_networks,
         build_device_id_to_hosts,
     )
     from network.nodes import build_all_nodes
@@ -451,6 +454,14 @@ async def _fetch_network_elements(
 
     hosts = await fetch_hosts(db, include_inactive=False)
     vlan_configs = await fetch_vlan_configs(db)
+    network_groups = await fetch_network_groups(db, include_hidden=True)
+    hidden_networks, _ = parse_network_group_networks([
+        group for group in network_groups if group.is_hidden
+    ])
+    visible_network_group_networks, network_group_by_cidr = parse_network_group_networks([
+        group for group in network_groups if not group.is_hidden
+    ])
+    hosts, _ = filter_hosts_by_hidden_networks(hosts, hidden_networks)
     connections = await fetch_connections(db)
     port_counts = await fetch_port_counts(db, [h.id for h in hosts])
     device_id_to_hosts = build_device_id_to_hosts(hosts)
@@ -473,7 +484,10 @@ async def _fetch_network_elements(
         except ValueError:
             pass
     observed_networks = sorted(
-        set(subnet_to_vlan.keys()) | set(await fetch_observed_networks(db)) | filter_networks,
+        set(subnet_to_vlan.keys())
+        | set(visible_network_group_networks)
+        | set(await fetch_observed_networks(db))
+        | filter_networks,
         key=lambda network: (network.version, int(network.network_address), network.prefixlen),
     )
 
@@ -489,6 +503,7 @@ async def _fetch_network_elements(
             show_internet=show_internet,
             subnet_to_vlan=subnet_to_vlan,
             observed_networks=observed_networks,
+            network_group_by_cidr=network_group_by_cidr,
         )
     )
 

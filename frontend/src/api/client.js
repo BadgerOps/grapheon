@@ -159,12 +159,32 @@ export async function getNetworkMap(params = {}) {
   return apiCall('GET', '/network/map', null, params)
 }
 
+export async function getNetworkEvidence(params = {}) {
+  return apiCall('GET', '/network/evidence', null, params)
+}
+
 export async function getNetworkRoutes(params = {}) {
   return apiCall('GET', '/network/routes', null, params)
 }
 
 export async function getSubnets(params = {}) {
   return apiCall('GET', '/network/subnets', null, params)
+}
+
+export async function getNetworkGroups(params = {}) {
+  return apiCall('GET', '/network/groups', null, params)
+}
+
+export async function createNetworkGroup(data) {
+  return apiCall('POST', '/network/groups', data)
+}
+
+export async function updateNetworkGroup(id, data) {
+  return apiCall('PATCH', `/network/groups/${id}`, data)
+}
+
+export async function deleteNetworkGroup(id) {
+  return apiCall('DELETE', `/network/groups/${id}`)
 }
 
 // ============================================

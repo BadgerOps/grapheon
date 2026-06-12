@@ -6,6 +6,26 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.18.0 - 2026-06-11
+### Added
+- **Passive topology evidence ingest**: agent check-ins now accept normalized `topology_evidence` records for L2 neighbors, switch-port attachments, MAC/IP bindings, DHCP leases, DNS names, routes, flow relationships, and network segments.
+- **Network evidence API**: added `GET /api/network/evidence` with filters for entity, relationship type, source, observer, confidence, and current/historical state.
+- **Evidence-backed map layers**: `/api/network/map` can render requested passive topology relationship layers and filter them by evidence source while keeping default output focused.
+- **Topology evidence coverage**: added backend tests for check-in ingest, evidence filtering, and map layer rendering.
+- **Passive capture requests**: agent collection requests can include bounded passive tcpdump observation options, and poll responses deliver those options to the authenticated agent without changing the default collection request behavior.
+- **Passive protocol source labels**: topology evidence validation now accepts passive tcpdump sources such as mDNS, LLMNR, NBNS, DHCPv6, SSDP, WS-Discovery, STP, LACP, HSRP, VRRP, CARP, OSPF, RIP, EIGRP, and BGP.
+- **Agent check-in audit counts**: successful check-in audit entries now include observation created/refreshed/reactivated/stale/removed counts and evidence created/refreshed counts for change auditing.
+
+### Changed
+- **Non-destructive missing observation handling**: when a full agent snapshot omits previously current observations, Graphēon now marks those agent-scoped observations and linked evidence stale instead of treating the omission as a removal.
+
+## 0.17.0 - 2026-06-11
+### Added
+- **Persistent network groups**: added saved network grouping definitions with CIDR, label, source, confidence, expected state, hidden state, metadata, and timestamps.
+- **Network group CRUD API**: `/api/network/groups` now supports listing, creating, updating, and deleting manual network group overrides.
+- **Saved grouping integration**: `/api/network/map`, `/api/network/subnets`, and network graph exports now apply saved network group CIDRs automatically alongside VLAN, passive-agent, subnet-filter, and temporary query CIDR evidence.
+- **Hidden network filtering**: saved groups marked hidden suppress matching hosts from map/subnet/export responses and report hidden group/host counts in map and subnet stats.
+
 ## 0.16.0 - 2026-06-11
 ### Added
 - **Entity evidence trail**: added a generic `entity_evidence` table for field and relationship evidence with source, observer, confidence, timestamps, raw import, and agent observation references.

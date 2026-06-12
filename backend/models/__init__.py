@@ -13,6 +13,7 @@ from .route_hop import RouteHop
 from .vlan_config import VLANConfig
 from .device_identity import DeviceIdentity
 from .entity_evidence import EntityEvidence
+from .network_group import NetworkGroup
 from .user import User
 from .auth_provider import AuthProvider
 from .role_mapping import RoleMapping
@@ -33,6 +34,7 @@ __all__ = [
     "VLANConfig",
     "DeviceIdentity",
     "EntityEvidence",
+    "NetworkGroup",
     "User",
     "AuthProvider",
     "RoleMapping",

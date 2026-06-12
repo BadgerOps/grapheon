@@ -36,6 +36,7 @@ def build_all_nodes(
     ip_to_segment: dict = None,
     subnet_to_vlan: dict = None,
     observed_networks: list = None,
+    network_group_by_cidr: dict = None,
 ) -> tuple:
     """
     Build all Cytoscape node elements for the network map.
@@ -74,6 +75,8 @@ def build_all_nodes(
         subnet_to_vlan = {}
     if observed_networks is None:
         observed_networks = []
+    if network_group_by_cidr is None:
+        network_group_by_cidr = {}
 
     nodes = []
     ip_to_host_id = {}
@@ -179,6 +182,7 @@ def build_all_nodes(
             seen_subnets,
             subnet_cidr,
             vlan_node_id,
+            network_group_by_cidr,
         )
 
         seen_subnets[subnet_node_id]["host_count"] += 1
@@ -496,6 +500,7 @@ def _build_subnet_compound(
     seen_subnets: dict,
     subnet_cidr: str,
     vlan_node_id: str,
+    network_group_by_cidr: dict = None,
 ) -> str:
     """
     Create a Subnet compound node if it doesn't exist.
@@ -509,13 +514,17 @@ def _build_subnet_compound(
     Returns:
         Subnet node ID (always created or retrieved)
     """
+    if network_group_by_cidr is None:
+        network_group_by_cidr = {}
+
     subnet_node_id = f"subnet_{subnet_cidr}"
     if subnet_node_id not in seen_subnets:
         seen_subnets[subnet_node_id] = {
             "host_count": 0,
             "vlan_node_id": vlan_node_id,
         }
-        label = subnet_cidr
+        network_group = network_group_by_cidr.get(subnet_cidr)
+        label = network_group.label if network_group and network_group.label else subnet_cidr
         if subnet_cidr.startswith("unresolved-ipv"):
             ip_version = subnet_cidr.removeprefix("unresolved-ipv")
             label = f"Unresolved IPv{ip_version} network"
@@ -527,6 +536,15 @@ def _build_subnet_compound(
             "color": get_subnet_color(subnet_cidr),
             "is_inferred": subnet_cidr.startswith("unresolved-ipv"),
         }
+        if network_group:
+            subnet_data.update({
+                "network_group_id": network_group.id,
+                "network_group_label": network_group.label,
+                "network_group_source": network_group.source,
+                "network_group_confidence": network_group.confidence,
+                "network_group_expected": network_group.is_expected,
+                "network_group_hidden": network_group.is_hidden,
+            })
         # Nest subnet inside VLAN if it has one
         if vlan_node_id:
             subnet_data["parent"] = vlan_node_id

@@ -171,6 +171,7 @@ def _run_migrations(sync_conn) -> None:
             ("last_registration_summary", "last_registration_summary JSON"),
             ("collection_requested_at", "collection_requested_at DATETIME"),
             ("collection_request_reason", "collection_request_reason VARCHAR(1000)"),
+            ("collection_request_options", "collection_request_options JSON"),
             ("collection_request_fulfilled_at", "collection_request_fulfilled_at DATETIME"),
         ],
     )
@@ -206,6 +207,7 @@ def _run_migrations(sync_conn) -> None:
     _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_type", "agent_observations", "relationship_type")
     _create_index_if_missing(sync_conn, "idx_agent_observations_relationship_key", "agent_observations", "relationship_key")
     _create_entity_evidence_table(sync_conn)
+    _create_network_groups_table(sync_conn)
     _backfill_agent_observer_metadata(sync_conn)
 
 
@@ -525,6 +527,37 @@ def _create_entity_evidence_table(sync_conn) -> None:
             'ON entity_evidence ("entity_type", "entity_id", "field_name")'
         )
     )
+
+
+def _create_network_groups_table(sync_conn) -> None:
+    sync_conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS network_groups (
+                id INTEGER PRIMARY KEY,
+                cidr VARCHAR(64) NOT NULL UNIQUE,
+                label VARCHAR(255),
+                description TEXT,
+                source VARCHAR(50) NOT NULL DEFAULT 'manual',
+                confidence INTEGER NOT NULL DEFAULT 100,
+                is_expected BOOLEAN NOT NULL DEFAULT 1,
+                is_hidden BOOLEAN NOT NULL DEFAULT 0,
+                metadata JSON,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+    for index_name, column in [
+        ("idx_network_groups_cidr", "cidr"),
+        ("idx_network_groups_source", "source"),
+        ("idx_network_groups_expected", "is_expected"),
+        ("idx_network_groups_hidden", "is_hidden"),
+    ]:
+        sync_conn.execute(
+            text(f'CREATE INDEX IF NOT EXISTS {index_name} ON network_groups ("{column}")')
+        )
 
 
 def _make_column_nullable(sync_conn, table: str, column: str) -> None:

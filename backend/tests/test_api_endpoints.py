@@ -391,6 +391,167 @@ class TestNetworkMapEndpoint:
         }
         assert "192.168.224.0/23" in hinted_subnets
 
+    @pytest.mark.asyncio
+    async def test_network_groups_crud_normalizes_and_validates_cidr(self, async_client: AsyncClient, auth_headers):
+        """Network group CRUD persists manual grouping overrides with normalized CIDRs."""
+        headers = await auth_headers("editor", "network_group_crud")
+        create_response = await async_client.post(
+            "/api/network/groups",
+            json={
+                "cidr": "192.168.224.172/23",
+                "label": "Work LAN",
+                "is_expected": True,
+                "is_hidden": False,
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == 201
+        group = create_response.json()
+        assert group["cidr"] == "192.168.224.0/23"
+        assert group["label"] == "Work LAN"
+        assert group["source"] == "manual"
+
+        duplicate_response = await async_client.post(
+            "/api/network/groups",
+            json={"cidr": "192.168.224.1/23"},
+            headers=headers,
+        )
+        assert duplicate_response.status_code == 409
+
+        invalid_response = await async_client.post(
+            "/api/network/groups",
+            json={"cidr": "not-a-cidr"},
+            headers=headers,
+        )
+        assert invalid_response.status_code == 422
+
+        update_response = await async_client.patch(
+            f"/api/network/groups/{group['id']}",
+            json={"label": "Updated LAN", "is_hidden": True, "confidence": 80},
+            headers=headers,
+        )
+        assert update_response.status_code == 200
+        updated = update_response.json()
+        assert updated["label"] == "Updated LAN"
+        assert updated["is_hidden"] is True
+        assert updated["confidence"] == 80
+
+        list_response = await async_client.get(
+            "/api/network/groups",
+            params={"include_hidden": True},
+            headers=headers,
+        )
+        assert list_response.status_code == 200
+        assert any(item["id"] == group["id"] for item in list_response.json()["items"])
+
+        delete_response = await async_client.delete(
+            f"/api/network/groups/{group['id']}",
+            headers=headers,
+        )
+        assert delete_response.status_code == 200
+        assert delete_response.json()["status"] == "deleted"
+
+    @pytest.mark.asyncio
+    async def test_network_map_uses_saved_network_group_without_query_hint(self, async_client: AsyncClient, auth_headers):
+        """Saved network groups automatically participate in map grouping."""
+        headers = await auth_headers("editor", "network_map_saved_group")
+        for ip_address in ("10.44.0.10", "10.44.1.10"):
+            response = await async_client.post(
+                "/api/hosts",
+                json={"ip_address": ip_address, "device_type": "server"},
+                headers=headers,
+            )
+            assert response.status_code == 201
+        create_group = await async_client.post(
+            "/api/network/groups",
+            json={"cidr": "10.44.0.0/23", "label": "Saved Lab"},
+            headers=headers,
+        )
+        assert create_group.status_code == 201
+
+        response = await async_client.get(
+            "/api/network/map",
+            params={"format": "cytoscape"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        nodes = response.json()["elements"]["nodes"]
+        subnet_nodes = [
+            node["data"]
+            for node in nodes
+            if node["data"].get("type") == "subnet"
+        ]
+        saved_group_node = next(
+            node for node in subnet_nodes if node.get("subnet_cidr") == "10.44.0.0/23"
+        )
+        assert saved_group_node["label"] == "Saved Lab"
+        assert saved_group_node["network_group_label"] == "Saved Lab"
+
+    @pytest.mark.asyncio
+    async def test_network_map_hides_hosts_in_hidden_network_group(self, async_client: AsyncClient, auth_headers):
+        """Hidden saved network groups suppress matching hosts from map output."""
+        headers = await auth_headers("editor", "network_map_hidden_group")
+        hidden_host = await async_client.post(
+            "/api/hosts",
+            json={"ip_address": "172.20.50.10", "hostname": "hidden-host"},
+            headers=headers,
+        )
+        assert hidden_host.status_code == 201
+        visible_host = await async_client.post(
+            "/api/hosts",
+            json={"ip_address": "172.20.60.10", "hostname": "visible-host"},
+            headers=headers,
+        )
+        assert visible_host.status_code == 201
+        create_group = await async_client.post(
+            "/api/network/groups",
+            json={"cidr": "172.20.50.0/24", "label": "Hidden Lab", "is_hidden": True},
+            headers=headers,
+        )
+        assert create_group.status_code == 201
+
+        response = await async_client.get(
+            "/api/network/map",
+            params={"format": "cytoscape"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        host_ips = {
+            node["data"].get("ip")
+            for node in data["elements"]["nodes"]
+            if node["data"].get("ip")
+        }
+        assert "172.20.50.10" not in host_ips
+        assert "172.20.60.10" in host_ips
+        assert data["stats"]["hidden_network_groups"] == 1
+        assert data["stats"]["hidden_hosts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_subnets_use_saved_network_group_boundaries(self, async_client: AsyncClient, auth_headers):
+        """Subnet summaries use persisted network group CIDRs and labels."""
+        headers = await auth_headers("editor", "subnets_saved_group")
+        for ip_address in ("10.55.0.5", "10.55.1.5"):
+            response = await async_client.post(
+                "/api/hosts",
+                json={"ip_address": ip_address, "device_type": "server"},
+                headers=headers,
+            )
+            assert response.status_code == 201
+        create_group = await async_client.post(
+            "/api/network/groups",
+            json={"cidr": "10.55.0.0/23", "label": "Summary LAN"},
+            headers=headers,
+        )
+        assert create_group.status_code == 201
+
+        response = await async_client.get("/api/network/subnets", headers=headers)
+        assert response.status_code == 200
+        subnets = response.json()["subnets"]
+        subnet = next(item for item in subnets if item["subnet"] == "10.55.0.0/23")
+        assert subnet["label"] == "Summary LAN"
+        assert subnet["host_count"] == 2
+
 
 class TestRequestID:
     """Request ID header tests."""

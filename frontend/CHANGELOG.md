@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.17.0 - 2026-06-11
+### Added
+- **Topology evidence layers**: Network Map filters now include Physical/L2, Routes/Gateways, DHCP identity, DNS names, Flow relationships, Agent observer topology, and Manual/saved network group layer controls.
+- **Topology evidence panel**: selecting evidence-backed nodes or edges now shows source, observer, confidence, first/last seen, evidence type, and raw summary details.
+- **Passive observation request**: the Agents page can request a passive refresh with an optional bounded tcpdump observation window, duration, interface hints, and header-only flow summary toggle.
+- **Passive protocol source filters**: Network Map evidence filters now include tcpdump-derived sources such as mDNS, NBNS, DHCPv6, SSDP, WS-Discovery, STP, LACP, HSRP, VRRP, routing protocols, and BGP.
+
+## 0.16.0 - 2026-06-11
+### Added
+- **Saved network group management**: Network Map filters now let operators create, edit, delete, hide, and mark expected CIDR groups, and promote unresolved inferred groups into persisted map grouping overrides.
+
 ## 0.15.0 - 2026-06-11
 ### Added
 - **Host evidence panel**: Host Detail now shows evidence records with field value, confidence, source, observing agent, current state, and last-seen timestamp.

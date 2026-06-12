@@ -66,6 +66,7 @@ class Agent(Base):
     last_checkin_summary = Column(JSON, nullable=True)
     collection_requested_at = Column(DateTime, nullable=True)
     collection_request_reason = Column(String(1000), nullable=True)
+    collection_request_options = Column(JSON, nullable=True)
     collection_request_fulfilled_at = Column(DateTime, nullable=True)
 
     is_active = Column(Boolean, default=True, nullable=False, index=True)

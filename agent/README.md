@@ -18,8 +18,10 @@ Contents:
   - `ip -json neigh show`
   - `ip -json route show`
   - `ss -tunapH` with `netstat -tunap` fallback
+  - optional normalized topology evidence JSON files from external low-impact collectors
+  - optional bounded passive tcpdump observation windows for topology enrichment
 - Transport: gzip-compressed JSON to `POST /api/agents/check-in`
-- Snapshot mode: sends full passive snapshots so the backend can mark missing agent-scoped observations stale/removed
+- Snapshot mode: sends full passive snapshots so the backend can mark missing agent-scoped observations stale without deleting them
 
 The runtime keeps local state under `/var/lib/grapheon-agent` by default:
 
@@ -84,6 +86,26 @@ Useful flags:
 During normal timer execution, the agent performs a lightweight authenticated poll before local cadence gating. The shipped timer defaults to a 15-second control-plane poll cadence with `AccuracySec=1s` so admin-requested collections are picked up promptly. If an admin has requested an on-demand collection in Graphēon, the poll response causes that run to bypass the cached interval and send a fresh full snapshot. Starting `grapheon-agent.service` directly performs one invocation; ongoing polling requires `grapheon-agent.timer` to be enabled and active.
 
 Set `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true` in `/etc/grapheon-agent.env` on workstation, hypervisor, or lab hosts where loopback, link-local IPv6, and local virtualization bridge interfaces such as `vmnet*`, `vboxnet*`, `docker*`, or `virbr*` would otherwise add noisy host-local observations. Normal LAN/private addresses on physical or primary interfaces are still collected.
+
+Optional topology evidence configuration:
+
+- `GRAPHEON_AGENT_TOPOLOGY_EVIDENCE_PATHS=/path/a.json,/path/b.json` reads normalized evidence records from JSON files and forwards them in check-ins.
+- `GRAPHEON_AGENT_TOPOLOGY_EVIDENCE_MAX_RECORDS=1000` bounds forwarded evidence records per run.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_ENABLED=true` enables configured local tcpdump observation windows. The default is disabled; admin-requested observation windows can still enable it for one collection.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_DURATION_SECONDS=60` sets the default observation window and is capped at 300 seconds.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_MAX_BYTES=5242880` bounds the temporary pcap before parsing. Oversized captures are discarded.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_INTERFACES=eth0,wlan0` limits tcpdump to selected interfaces. If unset, the agent captures on the interface or interfaces that own default routes, excluding ignored/local-noise interfaces.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_INCLUDE_FLOWS=true` includes optional header-only flow relationship summaries. Payloads and raw pcaps are never uploaded.
+- `GRAPHEON_AGENT_PASSIVE_CAPTURE_PACKET_LIMIT=2000` caps packets per interface for each bounded observation window.
+- `GRAPHEON_AGENT_TOPOLOGY_IGNORE_FILTERS=lo,docker*` skips noisy/local interfaces for passive capture.
+
+Passive tcpdump observation uses a topology-focused capture filter for LLDP/CDP, ARP, DHCPv4/DHCPv6, DNS/mDNS/LLMNR/NBNS, SSDP, WS-Discovery, IPv6 ND/RA, STP, LACP, HSRP/VRRP/CARP, visible routing protocols, BGP, and optional sampled TCP/UDP headers. The agent parses the temporary pcap locally into `topology_evidence`, deletes the file in a `finally` block, and continues the check-in if tcpdump is missing or lacks permission.
+
+The parser preserves VLAN IDs, LLDP/CDP capabilities and platform details, DHCP options, IPv6 RA prefix/DNS/MTU hints, DNS PTR/CNAME/SRV/SVCB/HTTPS records, NetBIOS names, discovery-service labels, L2 control-plane hints, gateway redundancy hints, and aggregated optional flow counters. Privacy-sensitive application metadata such as TLS SNI, HTTP Host, QUIC SNI, Kerberos, LDAP, and SMB names is intentionally not parsed by this passive capture path.
+
+Service and discovery display names can contain characters that are not valid in Graphēon's hostname-like `name` field. The agent sends a schema-safe top-level label for those records and preserves the original value in `metadata.raw_name`.
+
+Topology evidence records support `l2_neighbor`, `switch_port_attachment`, `mac_ip_binding`, `dhcp_lease`, `dns_name`, `route`, `flow_relationship`, and `network_segment` evidence types. They are map enrichment data, not security alerts or active scans.
 
 Versioned install helpers:
 

@@ -14,6 +14,7 @@ const DEFAULT_POLICY_FORM = {
     ss_tunap: true,
     ip_addr: true,
     ip_route: true,
+    topology_evidence: true,
   },
   max_report_bytes: 262144,
   is_active: true,
@@ -595,14 +596,45 @@ export default function Agents() {
   const handleRequestCollection = async () => {
     if (!selectedAgent) return
 
-    const reason = window.prompt('Reason for requesting collection:', 'operator requested refresh')
+    const reason = window.prompt('Reason for requesting passive refresh:', 'operator requested passive refresh')
     if (reason === null) return
+    const runCapture = window.confirm('Run a bounded passive tcpdump observation window now?')
+    let passive_capture = null
+    if (runCapture) {
+      const durationValue = window.prompt('Passive observation duration in seconds (1-300):', '60')
+      if (durationValue === null) return
+      const parsedDuration = Number(durationValue)
+      const duration_seconds = Number.isFinite(parsedDuration)
+        ? Math.min(300, Math.max(1, Math.round(parsedDuration)))
+        : 60
+      const interfaceValue = window.prompt('Interfaces to observe, comma-separated. Leave blank for agent default:', '')
+      if (interfaceValue === null) return
+      const interfaces = interfaceValue
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      const include_flows = window.confirm('Include optional sampled flow header summaries? No payload is uploaded.')
+      passive_capture = {
+        enabled: true,
+        duration_seconds,
+        max_bytes: 5 * 1024 * 1024,
+        interfaces: interfaces.length > 0 ? interfaces : null,
+        include_flows,
+      }
+    }
 
     try {
       setSavingAgent(true)
       setError('')
-      await api.requestAgentCollection(selectedAgent.id, { reason: reason || null })
-      showSuccess('Collection requested; the agent will collect on its next timer run')
+      await api.requestAgentCollection(selectedAgent.id, {
+        reason: reason || null,
+        passive_capture,
+      })
+      showSuccess(
+        runCapture
+          ? 'Passive observation requested; the agent will bypass cadence and jitter on its next poll'
+          : 'Passive refresh requested; the agent will collect on its next poll'
+      )
       await fetchAgents()
       await fetchCheckins(selectedAgent.id)
     } catch (err) {
@@ -639,6 +671,7 @@ export default function Agents() {
         ss_tunap: !!policy.enabled_commands?.ss_tunap,
         ip_addr: !!policy.enabled_commands?.ip_addr,
         ip_route: !!policy.enabled_commands?.ip_route,
+        topology_evidence: policy.enabled_commands?.topology_evidence !== false,
       },
       max_report_bytes: policy.max_report_bytes,
       is_active: policy.is_active,
@@ -1010,7 +1043,7 @@ export default function Agents() {
                     {selectedAgent.enrollment_state === 'active' && selectedAgent.is_active && (
                       <>
                         <button type="button" className="btn btn-primary" onClick={handleRequestCollection} disabled={savingAgent}>
-                          Request Collection
+                          Request Passive Refresh
                         </button>
                         <button type="button" className="btn btn-secondary" onClick={handleRotateApiKey} disabled={savingAgent}>
                           Rotate API Key

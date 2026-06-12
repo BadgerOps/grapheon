@@ -16,7 +16,7 @@ nmap returns device_type="wireless_ap", netstat returns state="LISTEN").
 
 from datetime import datetime
 from typing import Any, Dict, Optional, List
-from ipaddress import ip_address as parse_ip
+from ipaddress import ip_address as parse_ip, ip_network
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -62,6 +62,7 @@ VALID_CONNECTION_STATES = frozenset({
 
 VALID_SOURCE_TYPES = frozenset({
     "nmap", "arp", "netstat", "ping", "traceroute", "pcap", "manual", "agent",
+    "snmp", "dhcp", "dns", "zeek", "lldp", "cdp",
 })
 
 VALID_IMPORT_TYPES = frozenset({
@@ -78,6 +79,24 @@ VALID_AGENT_COMMANDS = frozenset({
     "ss_tunap",
     "ip_addr",
     "ip_route",
+    "topology_evidence",
+})
+
+VALID_TOPOLOGY_EVIDENCE_TYPES = frozenset({
+    "l2_neighbor",
+    "switch_port_attachment",
+    "mac_ip_binding",
+    "dhcp_lease",
+    "dns_name",
+    "route",
+    "flow_relationship",
+    "network_segment",
+})
+
+VALID_TOPOLOGY_SOURCES = frozenset({
+    "agent", "snmp", "dhcp", "dhcpv6", "dns", "mdns", "llmnr", "nbns",
+    "zeek", "lldp", "cdp", "manual", "ssdp", "wsd", "stp", "lacp",
+    "hsrp", "vrrp", "carp", "ospf", "rip", "eigrp", "bgp",
 })
 
 VALID_AGENT_ENROLLMENT_STATES = frozenset({
@@ -1017,6 +1036,7 @@ class AgentResponse(AgentFields):
     last_checkin_summary: Optional[Dict[str, Any]] = None
     collection_requested_at: Optional[datetime] = None
     collection_request_reason: Optional[str] = None
+    collection_request_options: Optional[Dict[str, Any]] = None
     collection_request_fulfilled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -1142,6 +1162,125 @@ class AgentRouteObservation(BaseModel):
         return _validate_ip(value, "route source IP")
 
 
+class AgentTopologyEvidenceObservation(BaseModel):
+    """Normalized passive topology evidence from optional collectors."""
+
+    evidence_type: str = Field(..., min_length=1, max_length=64)
+    source: str = Field("agent", min_length=1, max_length=50)
+    observer: Optional[str] = Field(None, max_length=255)
+    confidence: int = Field(50, ge=0, le=100)
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    raw_ref: Optional[str] = Field(None, max_length=500)
+
+    ip_address: Optional[str] = None
+    mac_address: Optional[str] = None
+    hostname: Optional[str] = Field(None, max_length=255)
+    fqdn: Optional[str] = Field(None, max_length=255)
+    name: Optional[str] = Field(None, max_length=255)
+
+    local_ip: Optional[str] = None
+    local_port: Optional[int] = Field(None, ge=0, le=65535)
+    remote_ip: Optional[str] = None
+    remote_port: Optional[int] = Field(None, ge=0, le=65535)
+    protocol: Optional[str] = None
+
+    gateway: Optional[str] = None
+    destination: Optional[str] = Field(None, max_length=255)
+    interface: Optional[str] = Field(None, max_length=255)
+    source_ip: Optional[str] = None
+
+    switch_ip: Optional[str] = None
+    switch_name: Optional[str] = Field(None, max_length=255)
+    switch_port: Optional[str] = Field(None, max_length=255)
+    port_id: Optional[str] = Field(None, max_length=255)
+    port_description: Optional[str] = Field(None, max_length=500)
+    chassis_id: Optional[str] = Field(None, max_length=255)
+    system_name: Optional[str] = Field(None, max_length=255)
+    management_ip: Optional[str] = None
+
+    vlan_id: Optional[int] = Field(None, ge=0, le=4095)
+    vlan_name: Optional[str] = Field(None, max_length=255)
+    network: Optional[str] = Field(None, max_length=255)
+    lease_start: Optional[datetime] = None
+    lease_end: Optional[datetime] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator("evidence_type")
+    @classmethod
+    def validate_evidence_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in VALID_TOPOLOGY_EVIDENCE_TYPES:
+            raise ValueError(
+                f"Invalid topology evidence type '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_TOPOLOGY_EVIDENCE_TYPES))}"
+            )
+        return normalized
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in VALID_TOPOLOGY_SOURCES:
+            raise ValueError(
+                f"Invalid topology evidence source '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_TOPOLOGY_SOURCES))}"
+            )
+        return normalized
+
+    @field_validator(
+        "ip_address",
+        "local_ip",
+        "remote_ip",
+        "gateway",
+        "source_ip",
+        "switch_ip",
+        "management_ip",
+    )
+    @classmethod
+    def validate_optional_ip(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_ip(value, "topology evidence IP address", allow_unspecified=True)
+
+    @field_validator("mac_address")
+    @classmethod
+    def validate_mac(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_mac(value)
+
+    @field_validator("hostname", "fqdn", "name", "switch_name", "system_name")
+    @classmethod
+    def validate_optional_hostname(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _validate_hostname(value)
+
+    @field_validator("protocol")
+    @classmethod
+    def validate_protocol(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        lower = value.lower()
+        if lower not in VALID_PROTOCOLS:
+            raise ValueError(
+                f"Invalid protocol '{value}'. "
+                f"Allowed values: {', '.join(sorted(VALID_PROTOCOLS))}"
+            )
+        return lower
+
+    @field_validator("network")
+    @classmethod
+    def validate_network(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        try:
+            return str(ip_network(value, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"Invalid topology network '{value}'") from exc
+
+
 class AgentRegistrationRequest(BaseModel):
     """Bootstrap request sent by an unenrolled or pending agent."""
 
@@ -1210,10 +1349,38 @@ class AgentReactivateRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000)
 
 
+class PassiveCaptureOptions(BaseModel):
+    """Bounded passive packet-capture options for an on-demand collection."""
+
+    enabled: bool = False
+    duration_seconds: int = Field(60, ge=1, le=300)
+    max_bytes: int = Field(5 * 1024 * 1024, ge=65536, le=50 * 1024 * 1024)
+    interfaces: Optional[List[str]] = Field(None, max_length=16)
+    include_flows: bool = False
+
+    @field_validator("interfaces")
+    @classmethod
+    def validate_interfaces(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        cleaned = []
+        for item in value:
+            interface = item.strip()
+            if not interface:
+                continue
+            if len(interface) > 64:
+                raise ValueError("Passive capture interface names must be 64 characters or fewer")
+            if not re.match(r"^[A-Za-z0-9_.:@*\-]+$", interface):
+                raise ValueError(f"Invalid passive capture interface '{interface}'")
+            cleaned.append(interface)
+        return cleaned or None
+
+
 class AgentCollectionRequestCreate(BaseModel):
     """Admin request to make an agent collect on its next poll."""
 
     reason: Optional[str] = Field(None, max_length=1000)
+    passive_capture: Optional[PassiveCaptureOptions] = None
 
 
 class AgentPollRequest(BaseModel):
@@ -1228,6 +1395,7 @@ class AgentCollectionRequestStatus(BaseModel):
     requested: bool
     requested_at: Optional[datetime] = None
     reason: Optional[str] = None
+    passive_capture: Optional[PassiveCaptureOptions] = None
 
 
 class AgentCheckInRequest(BaseModel):
@@ -1247,6 +1415,7 @@ class AgentCheckInRequest(BaseModel):
     connections: List[AgentConnectionObservation] = Field(default_factory=list)
     addresses: List[AgentAddressObservation] = Field(default_factory=list)
     routes: List[AgentRouteObservation] = Field(default_factory=list)
+    topology_evidence: List[AgentTopologyEvidenceObservation] = Field(default_factory=list)
 
 
 class AgentCheckInRecordResponse(BaseModel):

@@ -86,6 +86,7 @@ AGENT_SECTION_POLICY = {
     "neighbors": ("ip_neigh", "neighbor"),
     "connections": ("ss_tunap", "connection"),
     "routes": ("ip_route", "route"),
+    "topology_evidence": ("topology_evidence", "topology_evidence"),
 }
 
 DEFAULT_HEALTH_INTERVAL_SECONDS = 3600
@@ -428,6 +429,7 @@ async def _upsert_entity_evidence(
 
     observed_value = fact.get("observed_value")
     now = _utcnow()
+    source_type = fact.get("source_type") or AGENT_SOURCE_TYPE
     result = await db.execute(
         select(EntityEvidence).where(
             EntityEvidence.entity_type == fact["entity_type"],
@@ -435,7 +437,7 @@ async def _upsert_entity_evidence(
             EntityEvidence.field_name == fact.get("field_name"),
             EntityEvidence.observed_value == observed_value,
             EntityEvidence.source_origin == AGENT_SOURCE_ORIGIN,
-            EntityEvidence.source_type == AGENT_SOURCE_TYPE,
+            EntityEvidence.source_type == source_type,
             EntityEvidence.observer_agent_id == observation.agent_id,
             EntityEvidence.relationship_type == observation.relationship_type,
         )
@@ -460,7 +462,7 @@ async def _upsert_entity_evidence(
             field_name=fact.get("field_name"),
             observed_value=observed_value,
             source_origin=AGENT_SOURCE_ORIGIN,
-            source_type=AGENT_SOURCE_TYPE,
+            source_type=source_type,
             observer_agent_id=observation.agent_id,
             raw_import_id=raw_import_id,
             agent_observation_id=observation.id,
@@ -486,10 +488,10 @@ async def _upsert_entity_evidence(
     return created
 
 
-async def _mark_observation_evidence_removed(
+async def _mark_observation_evidence_stale(
     db: AsyncSession,
     observation: AgentObservation,
-    removed_at: datetime,
+    stale_at: datetime,
 ) -> int:
     result = await db.execute(
         select(EntityEvidence).where(
@@ -497,13 +499,13 @@ async def _mark_observation_evidence_removed(
             EntityEvidence.is_current.is_(True),
         )
     )
-    removed_count = 0
+    stale_count = 0
     for evidence in result.scalars().all():
         evidence.is_current = False
-        evidence.last_seen_at = removed_at
+        evidence.last_seen_at = stale_at
         evidence.updated_at = _utcnow()
-        removed_count += 1
-    return removed_count
+        stale_count += 1
+    return stale_count
 
 
 def _pending_collection_request(agent: Agent) -> AgentCollectionRequestStatus:
@@ -516,6 +518,9 @@ def _pending_collection_request(agent: Agent) -> AgentCollectionRequestStatus:
         requested=requested,
         requested_at=requested_at if requested else None,
         reason=agent.collection_request_reason if requested else None,
+        passive_capture=(agent.collection_request_options or {}).get("passive_capture")
+        if requested and agent.collection_request_options
+        else None,
     )
 
 
@@ -933,6 +938,32 @@ def _observation_identity(observation_type: str, payload: dict[str, Any]) -> dic
             "interface": payload.get("interface"),
             "source_ip": payload.get("source_ip"),
         }
+    if observation_type == "topology_evidence":
+        return {
+            "evidence_type": payload.get("evidence_type"),
+            "source": payload.get("source"),
+            "ip_address": payload.get("ip_address"),
+            "mac_address": payload.get("mac_address"),
+            "hostname": payload.get("hostname"),
+            "name": payload.get("name"),
+            "local_ip": payload.get("local_ip"),
+            "local_port": payload.get("local_port"),
+            "remote_ip": payload.get("remote_ip"),
+            "remote_port": payload.get("remote_port"),
+            "protocol": payload.get("protocol"),
+            "gateway": payload.get("gateway"),
+            "destination": payload.get("destination"),
+            "interface": payload.get("interface"),
+            "source_ip": payload.get("source_ip"),
+            "switch_ip": payload.get("switch_ip"),
+            "switch_name": payload.get("switch_name"),
+            "switch_port": payload.get("switch_port") or payload.get("port_id"),
+            "chassis_id": payload.get("chassis_id"),
+            "system_name": payload.get("system_name"),
+            "management_ip": payload.get("management_ip"),
+            "vlan_id": payload.get("vlan_id"),
+            "network": payload.get("network"),
+        }
     return payload
 
 
@@ -967,6 +998,20 @@ def _relationship_key(agent_id: int, relationship_type: Optional[str], payload: 
             "source_ip": payload.get("source_ip"),
             "gateway": payload.get("gateway"),
             "destination": payload.get("destination"),
+        }
+    elif relationship_type in {
+        "l2_neighbor",
+        "switch_port_attachment",
+        "mac_ip_binding",
+        "dhcp_lease",
+        "dns_name",
+        "route",
+        "flow_relationship",
+        "network_segment",
+    }:
+        identity = {
+            "agent_id": agent_id,
+            **_observation_identity("topology_evidence", payload),
         }
     else:
         identity = {"agent_id": agent_id, "payload": payload}
@@ -1045,12 +1090,12 @@ async def _upsert_agent_observation(
     return observation, True, False
 
 
-async def _mark_removed_observations(
+async def _mark_stale_observations(
     db: AsyncSession,
     agent: Agent,
     observation_type: str,
     current_hashes: set[str],
-    removed_at: datetime,
+    stale_at: datetime,
 ) -> int:
     result = await db.execute(
         select(AgentObservation).where(
@@ -1059,17 +1104,107 @@ async def _mark_removed_observations(
             AgentObservation.is_current.is_(True),
         )
     )
-    removed_count = 0
+    stale_count = 0
     for observation in result.scalars().all():
         if observation.identity_hash in current_hashes:
             continue
         observation.is_current = False
-        observation.stale_at = removed_at
-        observation.removed_at = removed_at
+        observation.stale_at = stale_at
+        observation.removed_at = None
         observation.updated_at = _utcnow()
-        await _mark_observation_evidence_removed(db, observation, removed_at)
-        removed_count += 1
-    return removed_count
+        await _mark_observation_evidence_stale(db, observation, stale_at)
+        stale_count += 1
+    return stale_count
+
+
+def _is_usable_host_ip(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        return not parse_ip(value).is_unspecified
+    except ValueError:
+        return False
+
+
+def _topology_summary(payload: dict[str, Any]) -> str:
+    evidence_type = payload.get("evidence_type") or "topology_evidence"
+    if evidence_type == "flow_relationship":
+        return (
+            f"{payload.get('local_ip') or '?'}:{payload.get('local_port') or '?'} -> "
+            f"{payload.get('remote_ip') or '?'}:{payload.get('remote_port') or '?'}"
+        )
+    if evidence_type == "route":
+        return f"{payload.get('source_ip') or '?'} -> {payload.get('destination') or '?'} via {payload.get('gateway') or '?'}"
+    if evidence_type == "dns_name":
+        return f"{payload.get('ip_address') or '?'} -> {payload.get('name') or payload.get('hostname') or '?'}"
+    if evidence_type == "network_segment":
+        return f"{payload.get('network') or '?'} vlan={payload.get('vlan_id') or '?'}"
+    if evidence_type == "switch_port_attachment":
+        return (
+            f"{payload.get('mac_address') or payload.get('ip_address') or '?'} on "
+            f"{payload.get('switch_name') or payload.get('switch_ip') or '?'} "
+            f"{payload.get('switch_port') or payload.get('port_id') or '?'}"
+        )
+    if evidence_type == "l2_neighbor":
+        return (
+            f"{payload.get('system_name') or payload.get('chassis_id') or '?'} "
+            f"port {payload.get('port_id') or '?'}"
+        )
+    if evidence_type in {"mac_ip_binding", "dhcp_lease"}:
+        return f"{payload.get('mac_address') or '?'} -> {payload.get('ip_address') or '?'}"
+    return json.dumps(payload, sort_keys=True, default=str)[:500]
+
+
+def _topology_metadata(payload: dict[str, Any], role: str) -> dict[str, Any]:
+    return {
+        "observation_role": role,
+        "evidence_type": payload.get("evidence_type"),
+        "source": payload.get("source"),
+        "observer": payload.get("observer"),
+        "raw_ref": payload.get("raw_ref"),
+        "raw": payload.get("metadata") or {},
+    }
+
+
+def _topology_fact(
+    host: Optional[Host],
+    payload: dict[str, Any],
+    field_name: Optional[str],
+    observed_value: Any,
+    *,
+    confidence: int,
+    role: str,
+) -> Optional[dict[str, Any]]:
+    if host is None or observed_value is None or observed_value == "":
+        return None
+    return {
+        "entity_type": "host",
+        "entity_ref": host,
+        "field_name": field_name,
+        "observed_value": str(observed_value),
+        "confidence": confidence,
+        "source_type": payload.get("source") or AGENT_SOURCE_TYPE,
+        "metadata": _topology_metadata(payload, role),
+    }
+
+
+async def _topology_host(
+    db: AsyncSession,
+    agent: Agent,
+    ip_address: Optional[str],
+    *,
+    hostname: Optional[str] = None,
+    mac_address: Optional[str] = None,
+) -> tuple[Optional[Host], bool]:
+    if not _is_usable_host_ip(ip_address):
+        return None, False
+    return await _upsert_host(
+        db,
+        ip_address,
+        hostname=hostname,
+        mac_address=mac_address,
+        observed_by_agent_id=agent.id,
+    )
 
 
 async def _ingest_agent_payload(
@@ -1099,6 +1234,7 @@ async def _ingest_agent_payload(
     observation_creates = 0
     observation_refreshes = 0
     observation_reactivations = 0
+    observation_stale = 0
     observation_removals = 0
     evidence_creates = 0
     evidence_refreshes = 0
@@ -1111,6 +1247,7 @@ async def _ingest_agent_payload(
         "neighbor": set(),
         "connection": set(),
         "route": set(),
+        "topology_evidence": set(),
     }
     agent_self_ips = {
         address.ip_address
@@ -1368,6 +1505,294 @@ async def _ingest_agent_payload(
             }
         )
 
+    for topology_item in payload.topology_evidence:
+        topology_payload = topology_item.model_dump(mode="json")
+        evidence_type = topology_payload["evidence_type"]
+        confidence = int(topology_payload.get("confidence") or 50)
+        relationship_type = evidence_type
+        topology_role = evidence_type
+        topology_host_ref = None
+        topology_host_id = None
+        topology_connection_id = None
+        topology_arp_id = None
+        topology_evidence: list[dict[str, Any]] = []
+        item_host_creates = 0
+
+        primary_name = (
+            topology_payload.get("hostname")
+            or topology_payload.get("fqdn")
+            or topology_payload.get("name")
+        )
+        primary_host, created = await _topology_host(
+            db,
+            agent,
+            topology_payload.get("ip_address"),
+            hostname=primary_name if evidence_type in {"dhcp_lease", "mac_ip_binding"} else None,
+            mac_address=topology_payload.get("mac_address"),
+        )
+        item_host_creates += int(created)
+        if primary_host:
+            topology_host_ref = primary_host
+            topology_host_id = primary_host.id
+            seen_ips.add(primary_host.ip_address)
+            if topology_payload.get("mac_address"):
+                seen_macs.add(topology_payload["mac_address"])
+            topology_evidence.extend(
+                _host_identity_evidence(
+                    primary_host,
+                    ip_address=topology_payload.get("ip_address"),
+                    mac_address=topology_payload.get("mac_address"),
+                    hostname=(
+                        primary_name
+                        if evidence_type in {"dhcp_lease", "mac_ip_binding"}
+                        else None
+                    ),
+                    fqdn=topology_payload.get("fqdn"),
+                    confidence=confidence,
+                    metadata=_topology_metadata(topology_payload, topology_role),
+                )
+            )
+
+        if evidence_type in {"mac_ip_binding", "dhcp_lease"} and topology_payload.get("ip_address"):
+            arp_entry, arp_created = await _upsert_arp_entry(
+                db,
+                topology_payload["ip_address"],
+                topology_payload.get("mac_address"),
+                topology_payload.get("interface"),
+                evidence_type,
+                observer_agent_id=agent.id,
+            )
+            topology_arp_id = arp_entry.id if arp_entry else None
+            arp_creates += int(arp_created)
+            if primary_host:
+                topology_evidence.append(
+                    _topology_fact(
+                        primary_host,
+                        topology_payload,
+                        "mac_ip_binding" if evidence_type == "mac_ip_binding" else "dhcp_lease",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role=topology_role,
+                    )
+                )
+
+        if evidence_type == "dns_name" and primary_host:
+            dns_value = topology_payload.get("name") or topology_payload.get("hostname") or topology_payload.get("fqdn")
+            topology_evidence.append(
+                _topology_fact(
+                    primary_host,
+                    topology_payload,
+                    "dns_name",
+                    dns_value,
+                    confidence=confidence,
+                    role=topology_role,
+                )
+            )
+
+        if evidence_type == "route":
+            source_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("source_ip"),
+            )
+            item_host_creates += int(created)
+            gateway_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("gateway"),
+            )
+            item_host_creates += int(created)
+            if source_host:
+                topology_host_ref = source_host
+                topology_host_id = source_host.id
+                seen_ips.add(source_host.ip_address)
+                topology_evidence.append(
+                    _topology_fact(
+                        source_host,
+                        topology_payload,
+                        "route",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role="route_source",
+                    )
+                )
+            if gateway_host:
+                seen_ips.add(gateway_host.ip_address)
+                topology_evidence.extend(
+                    _host_identity_evidence(
+                        gateway_host,
+                        ip_address=topology_payload.get("gateway"),
+                        device_type="router",
+                        confidence=max(confidence, 70),
+                        metadata=_topology_metadata(topology_payload, "route_gateway"),
+                    )
+                )
+
+        if evidence_type == "flow_relationship":
+            local_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("local_ip"),
+            )
+            item_host_creates += int(created)
+            remote_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("remote_ip"),
+            )
+            item_host_creates += int(created)
+            if local_host:
+                topology_host_ref = local_host
+                topology_host_id = local_host.id
+                seen_ips.add(local_host.ip_address)
+                topology_evidence.append(
+                    _topology_fact(
+                        local_host,
+                        topology_payload,
+                        "flow_relationship",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role="flow_local",
+                    )
+                )
+            if remote_host:
+                seen_ips.add(remote_host.ip_address)
+            if (
+                _is_usable_host_ip(topology_payload.get("local_ip"))
+                and _is_usable_host_ip(topology_payload.get("remote_ip"))
+                and topology_payload.get("local_port") is not None
+                and topology_payload.get("protocol")
+            ):
+                db_connection, connection_created = await _upsert_connection(
+                    db,
+                    local_ip=topology_payload["local_ip"],
+                    local_port=topology_payload["local_port"],
+                    remote_ip=topology_payload["remote_ip"],
+                    remote_port=topology_payload.get("remote_port"),
+                    protocol=topology_payload["protocol"],
+                    state_value="established",
+                    pid=None,
+                    process_name=None,
+                    observer_agent_id=agent.id,
+                )
+                topology_connection_id = db_connection.id
+                connection_creates += int(connection_created)
+
+        if evidence_type == "l2_neighbor":
+            neighbor_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("management_ip") or topology_payload.get("switch_ip"),
+                hostname=topology_payload.get("system_name") or topology_payload.get("switch_name"),
+            )
+            item_host_creates += int(created)
+            if neighbor_host:
+                topology_host_ref = neighbor_host
+                topology_host_id = neighbor_host.id
+                seen_ips.add(neighbor_host.ip_address)
+                topology_evidence.extend(
+                    _host_identity_evidence(
+                        neighbor_host,
+                        ip_address=neighbor_host.ip_address,
+                        hostname=topology_payload.get("system_name") or topology_payload.get("switch_name"),
+                        device_type="switch",
+                        confidence=confidence,
+                        metadata=_topology_metadata(topology_payload, topology_role),
+                    )
+                )
+            if topology_host_ref:
+                topology_evidence.append(
+                    _topology_fact(
+                        topology_host_ref,
+                        topology_payload,
+                        "l2_neighbor",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role=topology_role,
+                    )
+                )
+
+        if evidence_type == "switch_port_attachment":
+            attached_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("ip_address"),
+                hostname=topology_payload.get("hostname"),
+                mac_address=topology_payload.get("mac_address"),
+            )
+            item_host_creates += int(created)
+            switch_host, created = await _topology_host(
+                db,
+                agent,
+                topology_payload.get("switch_ip") or topology_payload.get("management_ip"),
+                hostname=topology_payload.get("switch_name") or topology_payload.get("system_name"),
+            )
+            item_host_creates += int(created)
+            if attached_host:
+                topology_host_ref = attached_host
+                topology_host_id = attached_host.id
+                seen_ips.add(attached_host.ip_address)
+                topology_evidence.append(
+                    _topology_fact(
+                        attached_host,
+                        topology_payload,
+                        "switch_port_attachment",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role=topology_role,
+                    )
+                )
+            if switch_host:
+                seen_ips.add(switch_host.ip_address)
+                topology_evidence.extend(
+                    _host_identity_evidence(
+                        switch_host,
+                        ip_address=switch_host.ip_address,
+                        hostname=topology_payload.get("switch_name") or topology_payload.get("system_name"),
+                        device_type="switch",
+                        confidence=confidence,
+                        metadata=_topology_metadata(topology_payload, "switch"),
+                    )
+                )
+
+        if evidence_type == "network_segment":
+            if primary_host:
+                topology_evidence.append(
+                    _topology_fact(
+                        primary_host,
+                        topology_payload,
+                        "network_segment",
+                        _topology_summary(topology_payload),
+                        confidence=confidence,
+                        role=topology_role,
+                    )
+                )
+            else:
+                topology_host_id = None
+
+        host_creates += item_host_creates
+        topology_evidence = [item for item in topology_evidence if item is not None]
+        current_hashes["topology_evidence"].add(
+            _identity_hash(
+                "topology_evidence",
+                _observation_identity("topology_evidence", topology_payload),
+            )
+        )
+        observation_inputs.append(
+            {
+                "type": "topology_evidence",
+                "payload": topology_payload,
+                "observation_role": topology_role,
+                "confidence": confidence,
+                "relationship_type": relationship_type,
+                "host_ref": topology_host_ref,
+                "host_id": topology_host_id,
+                "arp_entry_id": topology_arp_id,
+                "connection_id": topology_connection_id,
+                "evidence": topology_evidence,
+            }
+        )
+
     raw_import = RawImport(
         source_type=AGENT_SOURCE_TYPE,
         source_origin=AGENT_SOURCE_ORIGIN,
@@ -1447,7 +1872,7 @@ async def _ingest_agent_payload(
     if effective_full_snapshot:
         for _, (command_name, observation_type) in AGENT_SECTION_POLICY.items():
             if commands.get(command_name, True):
-                observation_removals += await _mark_removed_observations(
+                observation_stale += await _mark_stale_observations(
                     db,
                     agent,
                     observation_type,
@@ -1462,6 +1887,7 @@ async def _ingest_agent_payload(
         "observations_created": observation_creates,
         "observations_refreshed": observation_refreshes,
         "observations_reactivated": observation_reactivations,
+        "observations_stale": observation_stale,
         "observations_removed": observation_removals,
         "evidence_created": evidence_creates,
         "evidence_refreshed": evidence_refreshes,
@@ -1471,6 +1897,7 @@ async def _ingest_agent_payload(
         "neighbor_count": len(payload.neighbors),
         "connection_count": len(payload.connections),
         "route_count": len(payload.routes),
+        "topology_evidence_count": len(payload.topology_evidence),
         "raw_import_id": raw_import.id,
         "full_snapshot": effective_full_snapshot,
         "reported_full_snapshot": payload.full_snapshot,
@@ -1504,6 +1931,7 @@ async def _ingest_agent_payload(
         )
     ):
         agent.collection_request_fulfilled_at = now
+        agent.collection_request_options = None
 
     await db.flush()
 
@@ -2292,6 +2720,9 @@ async def request_agent_collection(
     now = _utcnow()
     agent.collection_requested_at = now
     agent.collection_request_reason = collection_request.reason
+    agent.collection_request_options = {
+        "passive_capture": collection_request.passive_capture.model_dump(mode="json")
+    } if collection_request.passive_capture else None
     agent.collection_request_fulfilled_at = None
 
     await db.commit()
@@ -2554,6 +2985,13 @@ async def agent_check_in(
         details={
             "raw_import_id": raw_import.id,
             "records_created": checkin.records_created,
+            "observations_created": summary.get("observations_created"),
+            "observations_refreshed": summary.get("observations_refreshed"),
+            "observations_reactivated": summary.get("observations_reactivated"),
+            "observations_stale": summary.get("observations_stale"),
+            "observations_removed": summary.get("observations_removed"),
+            "evidence_created": summary.get("evidence_created"),
+            "evidence_refreshed": summary.get("evidence_refreshed"),
         },
     )
 

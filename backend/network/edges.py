@@ -466,7 +466,16 @@ def add_agent_topology_edges(
         "arp_neighbor": 0,
         "connection_remote": 0,
         "route_gateway": 0,
+        "l2_neighbor": 0,
+        "switch_port_attachment": 0,
+        "mac_ip_binding": 0,
+        "dhcp_lease": 0,
+        "dns_name": 0,
+        "route": 0,
+        "flow_relationship": 0,
+        "network_segment": 0,
     }
+    node_ids = {node["data"].get("id") for node in nodes}
 
     address_by_agent_interface: Dict[tuple[int, str], str] = {}
     first_address_by_agent: Dict[int, str] = {}
@@ -550,12 +559,78 @@ def add_agent_topology_edges(
                     if observation.last_seen_at
                     else None,
                     "relationship_key": observation.relationship_key,
+                    "topology_evidence": [
+                        {
+                            "source": (observation.payload or {}).get("source") or "agent",
+                            "observer": (observation.payload or {}).get("observer"),
+                            "confidence": observation.confidence,
+                            "first_seen": observation.first_seen_at.isoformat()
+                            if observation.first_seen_at
+                            else None,
+                            "last_seen": observation.last_seen_at.isoformat()
+                            if observation.last_seen_at
+                            else None,
+                            "evidence_type": observation.relationship_type,
+                            "summary": _topology_edge_summary(observation.payload or {}),
+                            "raw_ref": (observation.payload or {}).get("raw_ref"),
+                        }
+                    ],
                     "tooltip": tooltip,
                 }
             }
         )
         if connection_type in added_counts:
             added_counts[connection_type] += 1
+
+    def ensure_evidence_node(
+        node_id: str,
+        label: str,
+        node_type: str,
+        observation: Any,
+        *,
+        color: str = "#64748b",
+        shape: str = "round-rectangle",
+    ) -> str:
+        if node_id in node_ids:
+            return node_id
+        payload = observation.payload or {}
+        node_ids.add(node_id)
+        nodes.append(
+            {
+                "data": {
+                    "id": node_id,
+                    "label": label,
+                    "type": node_type,
+                    "device_type": node_type,
+                    "node_shape": shape,
+                    "node_size": 42,
+                    "color": color,
+                    "relationship_type": observation.relationship_type,
+                    "source_origin": "agent",
+                    "source_type": payload.get("source") or "agent",
+                    "observer_agent_id": observation.agent_id,
+                    "agent_observation_id": observation.id,
+                    "topology_evidence": [
+                        {
+                            "source": payload.get("source") or "agent",
+                            "observer": payload.get("observer"),
+                            "confidence": observation.confidence,
+                            "first_seen": observation.first_seen_at.isoformat()
+                            if observation.first_seen_at
+                            else None,
+                            "last_seen": observation.last_seen_at.isoformat()
+                            if observation.last_seen_at
+                            else None,
+                            "evidence_type": observation.relationship_type,
+                            "summary": _topology_edge_summary(payload),
+                            "raw_ref": payload.get("raw_ref"),
+                        }
+                    ],
+                    "tooltip": tooltip_from_payload(payload, label),
+                }
+            }
+        )
+        return node_id
 
     for observation in observations:
         payload = observation.payload or {}
@@ -632,5 +707,139 @@ def add_agent_topology_edges(
                         f"{payload.get('gateway')} ({observation.confidence}% confidence)"
                     ),
                 )
+            continue
+
+        if relationship_type == "flow_relationship":
+            source_id = ip_to_host_id.get(payload.get("local_ip"))
+            target_id = ip_to_host_id.get(payload.get("remote_ip"))
+            if source_id and target_id:
+                add_edge(
+                    str(source_id),
+                    str(target_id),
+                    observation,
+                    "flow_relationship",
+                    _topology_edge_summary(payload),
+                )
+            continue
+
+        if relationship_type == "route":
+            source_id = ip_to_host_id.get(payload.get("source_ip"))
+            target_id = ip_to_host_id.get(payload.get("gateway"))
+            if source_id and target_id:
+                add_edge(
+                    str(source_id),
+                    str(target_id),
+                    observation,
+                    "route",
+                    _topology_edge_summary(payload),
+                )
+            continue
+
+        if relationship_type in {"mac_ip_binding", "dhcp_lease"}:
+            host_id = ip_to_host_id.get(payload.get("ip_address"))
+            if host_id and payload.get("mac_address"):
+                mac_node = ensure_evidence_node(
+                    f"mac_{payload.get('mac_address')}",
+                    f"MAC\n{payload.get('mac_address')}",
+                    "mac_identity",
+                    observation,
+                    color="#0f766e",
+                )
+                add_edge(mac_node, str(host_id), observation, relationship_type, _topology_edge_summary(payload))
+            continue
+
+        if relationship_type == "dns_name":
+            host_id = ip_to_host_id.get(payload.get("ip_address"))
+            dns_name = payload.get("name") or payload.get("hostname") or payload.get("fqdn")
+            if host_id and dns_name:
+                dns_node = ensure_evidence_node(
+                    f"dns_{dns_name}",
+                    f"DNS\n{dns_name}",
+                    "dns_name",
+                    observation,
+                    color="#2563eb",
+                )
+                add_edge(str(host_id), dns_node, observation, "dns_name", _topology_edge_summary(payload))
+            continue
+
+        if relationship_type == "network_segment":
+            network = payload.get("network")
+            host_id = ip_to_host_id.get(payload.get("ip_address"))
+            if network:
+                segment_node = ensure_evidence_node(
+                    f"segment_{network}",
+                    f"Segment\n{network}",
+                    "network_segment",
+                    observation,
+                    color="#7c3aed",
+                )
+                if host_id:
+                    add_edge(str(host_id), segment_node, observation, "network_segment", _topology_edge_summary(payload))
+            continue
+
+        if relationship_type == "l2_neighbor":
+            local_ip = address_by_agent_interface.get(
+                (observation.agent_id, payload.get("interface"))
+            ) or first_address_by_agent.get(observation.agent_id)
+            source_id = ip_to_host_id.get(local_ip)
+            target_id = ip_to_host_id.get(payload.get("management_ip") or payload.get("switch_ip"))
+            if not target_id and (payload.get("system_name") or payload.get("chassis_id")):
+                target_id = ensure_evidence_node(
+                    f"l2_{payload.get('chassis_id') or payload.get('system_name')}",
+                    f"L2\n{payload.get('system_name') or payload.get('chassis_id')}",
+                    "l2_neighbor",
+                    observation,
+                    color="#0891b2",
+                    shape="hexagon",
+                )
+            if source_id and target_id:
+                add_edge(str(source_id), str(target_id), observation, "l2_neighbor", _topology_edge_summary(payload))
+            continue
+
+        if relationship_type == "switch_port_attachment":
+            host_id = ip_to_host_id.get(payload.get("ip_address"))
+            switch_id = ip_to_host_id.get(payload.get("switch_ip") or payload.get("management_ip"))
+            port_label = payload.get("switch_port") or payload.get("port_id") or "port"
+            if switch_id:
+                port_node = ensure_evidence_node(
+                    f"switch_port_{switch_id}_{port_label}",
+                    f"Port\n{port_label}",
+                    "switch_port",
+                    observation,
+                    color="#9333ea",
+                )
+                add_edge(str(switch_id), port_node, observation, "switch_port_attachment", _topology_edge_summary(payload))
+                if host_id:
+                    add_edge(str(host_id), port_node, observation, "switch_port_attachment", _topology_edge_summary(payload))
 
     return added_counts
+
+
+def _topology_edge_summary(payload: dict[str, Any]) -> str:
+    evidence_type = payload.get("evidence_type") or "topology_evidence"
+    if evidence_type == "flow_relationship":
+        return (
+            f"{payload.get('local_ip') or '?'}:{payload.get('local_port') or '?'} -> "
+            f"{payload.get('remote_ip') or '?'}:{payload.get('remote_port') or '?'}"
+        )
+    if evidence_type in {"route", "route_gateway"}:
+        return f"{payload.get('source_ip') or '?'} -> {payload.get('destination') or '?'} via {payload.get('gateway') or '?'}"
+    if evidence_type == "dns_name":
+        return f"{payload.get('ip_address') or '?'} -> {payload.get('name') or payload.get('hostname') or '?'}"
+    if evidence_type == "network_segment":
+        return f"{payload.get('network') or '?'} vlan={payload.get('vlan_id') or '?'}"
+    if evidence_type == "switch_port_attachment":
+        return (
+            f"{payload.get('mac_address') or payload.get('ip_address') or '?'} on "
+            f"{payload.get('switch_name') or payload.get('switch_ip') or '?'} "
+            f"{payload.get('switch_port') or payload.get('port_id') or '?'}"
+        )
+    if evidence_type == "l2_neighbor":
+        return f"{payload.get('system_name') or payload.get('chassis_id') or '?'} port {payload.get('port_id') or '?'}"
+    if evidence_type in {"mac_ip_binding", "dhcp_lease"}:
+        return f"{payload.get('mac_address') or '?'} -> {payload.get('ip_address') or '?'}"
+    return evidence_type
+
+
+def tooltip_from_payload(payload: dict[str, Any], label: str) -> str:
+    return f"{label}<br>{_topology_edge_summary(payload)}"

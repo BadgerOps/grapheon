@@ -159,6 +159,10 @@ export async function getNetworkMap(params = {}) {
   return apiCall('GET', '/network/map', null, params)
 }
 
+export async function getNetworkEvidence(params = {}) {
+  return apiCall('GET', '/network/evidence', null, params)
+}
+
 export async function getNetworkRoutes(params = {}) {
   return apiCall('GET', '/network/routes', null, params)
 }

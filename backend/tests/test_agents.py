@@ -36,6 +36,7 @@ async def _create_policy(async_client: AsyncClient, headers, name: str) -> int:
                 "ss_tunap": True,
                 "ip_addr": True,
                 "ip_route": True,
+                "topology_evidence": True,
             },
             "max_report_bytes": 262144,
             "is_active": True,
@@ -668,6 +669,212 @@ class TestAgentEnrollmentAndCheckIn:
         assert agent.last_ip_addresses == ["10.0.0.1", "10.0.0.10", "10.0.0.5"]
 
     @pytest.mark.asyncio
+    async def test_topology_evidence_checkin_feeds_evidence_api_and_map_layers(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_topology_evidence_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "agent-topology-evidence")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "agent-topology-evidence-enrollment",
+            policy_id,
+        )
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-topology-evidence-001",
+            ip_address="10.90.0.10",
+            mac_address="AA:BB:CC:90:00:10",
+        )
+        assert register_response.status_code == 200
+        api_key = register_response.json()["api_key"]
+        agent_id = register_response.json()["agent"]["id"]
+
+        payload = _checkin_payload(
+            "agent-topology-evidence-001",
+            observed_at="2026-03-22T22:00:00Z",
+        )
+        payload["hostname"] = "collector-topology"
+        payload["addresses"] = [
+            {
+                "ip_address": "10.90.0.10",
+                "interface": "eth0",
+                "prefix_length": 24,
+                "mac_address": "AA:BB:CC:90:00:10",
+            }
+        ]
+        payload["topology_evidence"] = [
+            {
+                "evidence_type": "dhcp_lease",
+                "source": "dhcp",
+                "observer": "dhcp01",
+                "confidence": 92,
+                "ip_address": "10.90.0.40",
+                "mac_address": "AA:BB:CC:90:00:40",
+                "hostname": "printer-40",
+                "interface": "vlan90",
+                "lease_start": "2026-03-22T21:00:00Z",
+                "lease_end": "2026-03-23T21:00:00Z",
+                "raw_ref": "dhcp.leases:40",
+            },
+            {
+                "evidence_type": "dns_name",
+                "source": "dns",
+                "observer": "resolver01",
+                "confidence": 80,
+                "ip_address": "10.90.0.40",
+                "name": "printer-40.example.test",
+            },
+            {
+                "evidence_type": "flow_relationship",
+                "source": "zeek",
+                "observer": "zeek01",
+                "confidence": 65,
+                "local_ip": "10.90.0.10",
+                "local_port": 515,
+                "remote_ip": "10.90.0.40",
+                "remote_port": 9100,
+                "protocol": "tcp",
+            },
+            {
+                "evidence_type": "route",
+                "source": "snmp",
+                "observer": "router01",
+                "confidence": 70,
+                "source_ip": "10.90.0.10",
+                "gateway": "10.90.0.1",
+                "destination": "default",
+                "interface": "eth0",
+            },
+            {
+                "evidence_type": "network_segment",
+                "source": "snmp",
+                "observer": "switch01",
+                "confidence": 75,
+                "network": "10.90.0.0/24",
+                "vlan_id": 90,
+                "vlan_name": "Printers",
+                "ip_address": "10.90.0.40",
+            },
+            {
+                "evidence_type": "l2_neighbor",
+                "source": "lldp",
+                "observer": "collector-topology",
+                "confidence": 88,
+                "interface": "eth0",
+                "chassis_id": "00:11:22:33:44:55",
+                "system_name": "switch01",
+                "port_id": "Gi1/0/1",
+                "management_ip": "10.90.0.2",
+            },
+            {
+                "evidence_type": "switch_port_attachment",
+                "source": "snmp",
+                "observer": "switch01",
+                "confidence": 90,
+                "ip_address": "10.90.0.40",
+                "mac_address": "AA:BB:CC:90:00:40",
+                "switch_ip": "10.90.0.2",
+                "switch_name": "switch01",
+                "switch_port": "Gi1/0/24",
+            },
+            {
+                "evidence_type": "mac_ip_binding",
+                "source": "snmp",
+                "observer": "switch01",
+                "confidence": 85,
+                "ip_address": "10.90.0.40",
+                "mac_address": "AA:BB:CC:90:00:40",
+            },
+        ]
+
+        checkin_response = await _post_checkin(async_client, api_key, payload)
+        assert checkin_response.status_code == 200
+        assert checkin_response.json()["summary"]["topology_evidence_count"] == 8
+
+        observations = await _get_observations(
+            async_client,
+            admin_headers,
+            agent_id,
+            "topology_evidence",
+        )
+        assert len(observations) == 8
+        assert {item["relationship_type"] for item in observations} >= {
+            "dhcp_lease",
+            "dns_name",
+            "flow_relationship",
+            "route",
+            "network_segment",
+            "l2_neighbor",
+            "switch_port_attachment",
+            "mac_ip_binding",
+        }
+
+        evidence_response = await async_client.get(
+            "/api/network/evidence",
+            params=[
+                ("relationship_types", "dhcp_lease"),
+                ("source_types", "dhcp"),
+                ("observer_agent_id", str(agent_id)),
+                ("min_confidence", "90"),
+            ],
+            headers=admin_headers,
+        )
+        assert evidence_response.status_code == 200
+        evidence_data = evidence_response.json()
+        assert evidence_data["total"] == 1
+        assert evidence_data["items"][0]["field_name"] == "dhcp_lease"
+        assert evidence_data["items"][0]["source_type"] == "dhcp"
+        assert evidence_data["items"][0]["metadata"]["raw_ref"] == "dhcp.leases:40"
+
+        map_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("observed_by_agent_id", str(agent_id)),
+                ("relationship_types", "dhcp_lease"),
+                ("relationship_types", "dns_name"),
+                ("relationship_types", "flow_relationship"),
+                ("relationship_types", "route"),
+                ("relationship_types", "network_segment"),
+                ("relationship_types", "l2_neighbor"),
+                ("relationship_types", "switch_port_attachment"),
+                ("relationship_types", "mac_ip_binding"),
+                ("evidence_sources", "dhcp"),
+                ("evidence_sources", "dns"),
+                ("evidence_sources", "zeek"),
+                ("evidence_sources", "snmp"),
+                ("evidence_sources", "lldp"),
+            ],
+            headers=admin_headers,
+        )
+        assert map_response.status_code == 200
+        map_data = map_response.json()
+        assert map_data["stats"]["topology_evidence_edges"] >= 8
+        map_relationships = {
+            edge["data"].get("relationship_type")
+            for edge in map_data["elements"]["edges"]
+            if edge["data"].get("agent_observation_id")
+        }
+        assert {
+            "dhcp_lease",
+            "dns_name",
+            "flow_relationship",
+            "route",
+            "network_segment",
+            "l2_neighbor",
+            "switch_port_attachment",
+            "mac_ip_binding",
+        }.issubset(map_relationships)
+        assert any(
+            edge["data"].get("topology_evidence")
+            for edge in map_data["elements"]["edges"]
+            if edge["data"].get("relationship_type") == "dns_name"
+        )
+
+    @pytest.mark.asyncio
     async def test_on_demand_collection_request_is_polled_and_fulfilled(
         self,
         async_client: AsyncClient,
@@ -738,6 +945,81 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert agent_response.status_code == 200
         assert agent_response.json()["collection_request_fulfilled_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_collection_request_can_include_passive_capture_options(
+        self,
+        async_client: AsyncClient,
+        auth_headers,
+    ):
+        admin_headers = await auth_headers("admin", "agent_passive_capture_admin")
+        policy_id = await _create_policy(async_client, admin_headers, "agent-passive-capture")
+        enrollment_key = await _create_enrollment_key(
+            async_client,
+            admin_headers,
+            "agent-passive-capture-key",
+            policy_id,
+            auto_approve=True,
+        )
+
+        register_response = await _register_agent(
+            async_client,
+            enrollment_key,
+            "agent-passive-capture-001",
+            ip_address="10.81.0.5",
+            mac_address="AA:BB:CC:81:00:05",
+        )
+        assert register_response.status_code == 200
+        agent_id = register_response.json()["agent"]["id"]
+        api_key = register_response.json()["api_key"]
+
+        request_response = await async_client.post(
+            f"/api/agents/{agent_id}/request-collection",
+            json={
+                "reason": "passive observation window",
+                "passive_capture": {
+                    "enabled": True,
+                    "duration_seconds": 45,
+                    "max_bytes": 1048576,
+                    "interfaces": ["eth0"],
+                    "include_flows": True,
+                },
+            },
+            headers=admin_headers,
+        )
+        assert request_response.status_code == 200
+        request_data = request_response.json()
+        assert request_data["collection_request_options"]["passive_capture"]["enabled"] is True
+        assert request_data["collection_request_options"]["passive_capture"]["duration_seconds"] == 45
+
+        poll_response = await async_client.post(
+            "/api/agents/poll",
+            json={"agent_uuid": "agent-passive-capture-001"},
+            headers={settings.AGENT_API_KEY_HEADER: api_key},
+        )
+        assert poll_response.status_code == 200
+        capture_options = poll_response.json()["collection_request"]["passive_capture"]
+        assert capture_options == {
+            "enabled": True,
+            "duration_seconds": 45,
+            "max_bytes": 1048576,
+            "interfaces": ["eth0"],
+            "include_flows": True,
+        }
+
+        checkin_response = await _post_checkin(
+            async_client,
+            api_key,
+            _checkin_payload("agent-passive-capture-001"),
+        )
+        assert checkin_response.status_code == 200
+
+        agent_response = await async_client.get(
+            f"/api/agents/{agent_id}",
+            headers=admin_headers,
+        )
+        assert agent_response.status_code == 200
+        assert agent_response.json()["collection_request_options"] is None
 
     @pytest.mark.asyncio
     async def test_network_map_uses_agent_observed_subnet_boundaries(
@@ -1429,7 +1711,7 @@ class TestAgentEnrollmentAndCheckIn:
         assert (await db.execute(select(func.count(AgentObservation.id)))).scalar_one() == 0
 
     @pytest.mark.asyncio
-    async def test_full_snapshot_observations_mark_removed_per_agent(
+    async def test_full_snapshot_observations_mark_stale_per_agent(
         self,
         async_client: AsyncClient,
         auth_headers,
@@ -1500,6 +1782,7 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert first_a_response.status_code == 200
         assert first_b_response.status_code == 200
+        assert first_a_response.json()["summary"]["observations_stale"] == 0
         assert first_a_response.json()["summary"]["observations_removed"] == 0
         assert first_a_response.json()["agent"]["health"]["state"] == "healthy"
         assert first_a_response.json()["compatibility"]["status"] == "older_supported"
@@ -1515,7 +1798,8 @@ class TestAgentEnrollmentAndCheckIn:
             second_a,
         )
         assert second_a_response.status_code == 200
-        assert second_a_response.json()["summary"]["observations_removed"] == 1
+        assert second_a_response.json()["summary"]["observations_stale"] == 1
+        assert second_a_response.json()["summary"]["observations_removed"] == 0
 
         agent_a_observations = await async_client.get(
             f"/api/agents/{agent_a_id}/observations",
@@ -1531,11 +1815,13 @@ class TestAgentEnrollmentAndCheckIn:
         assert agent_b_observations.status_code == 200
         assert agent_a_observations.json()["total"] == 1
         assert agent_b_observations.json()["total"] == 1
-        removed_observation = agent_a_observations.json()["items"][0]
+        stale_observation = agent_a_observations.json()["items"][0]
         current_observation = agent_b_observations.json()["items"][0]
-        assert removed_observation["is_current"] is False
-        assert removed_observation["removed_at"] is not None
+        assert stale_observation["is_current"] is False
+        assert stale_observation["stale_at"] is not None
+        assert stale_observation["removed_at"] is None
         assert current_observation["is_current"] is True
+        assert current_observation["stale_at"] is None
         assert current_observation["removed_at"] is None
 
         legacy_partial_b = _checkin_payload(
@@ -1554,6 +1840,7 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert legacy_response.status_code == 200
         assert legacy_response.json()["summary"]["full_snapshot"] is False
+        assert legacy_response.json()["summary"]["observations_stale"] == 0
         assert legacy_response.json()["summary"]["observations_removed"] == 0
 
         agent_b_after_legacy = await async_client.get(
@@ -1701,7 +1988,8 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert changed_connection_response.status_code == 200
         assert changed_connection_response.json()["summary"]["observations_created"] == 1
-        assert changed_connection_response.json()["summary"]["observations_removed"] == 1
+        assert changed_connection_response.json()["summary"]["observations_stale"] == 1
+        assert changed_connection_response.json()["summary"]["observations_removed"] == 0
 
         changed_connections = await _get_observations(
             async_client,
@@ -1711,49 +1999,50 @@ class TestAgentEnrollmentAndCheckIn:
         )
         assert len(changed_connections) == 2
         current_connections = [item for item in changed_connections if item["is_current"]]
-        removed_connections = [item for item in changed_connections if not item["is_current"]]
+        stale_connections = [item for item in changed_connections if not item["is_current"]]
         assert len(current_connections) == 1
-        assert len(removed_connections) == 1
-        assert removed_connections[0]["identity_hash"] == original_connection_hash
+        assert len(stale_connections) == 1
+        assert stale_connections[0]["identity_hash"] == original_connection_hash
         assert current_connections[0]["identity_hash"] != original_connection_hash
         assert current_connections[0]["payload"]["pid"] == 778
 
-        removal_payload = dict(changed_connection_payload)
-        removal_payload["sequence_number"] = 4
-        removal_payload["observed_at"] = "2026-03-22T22:15:00Z"
-        removal_payload["addresses"] = []
-        removal_payload["routes"] = []
-        removal_payload["connections"] = []
-        removal_response = await _post_checkin(async_client, api_key, removal_payload)
-        assert removal_response.status_code == 200
-        assert removal_response.json()["summary"]["observations_removed"] == 3
+        stale_payload = dict(changed_connection_payload)
+        stale_payload["sequence_number"] = 4
+        stale_payload["observed_at"] = "2026-03-22T22:15:00Z"
+        stale_payload["addresses"] = []
+        stale_payload["routes"] = []
+        stale_payload["connections"] = []
+        stale_response = await _post_checkin(async_client, api_key, stale_payload)
+        assert stale_response.status_code == 200
+        assert stale_response.json()["summary"]["observations_stale"] == 3
+        assert stale_response.json()["summary"]["observations_removed"] == 0
 
-        removed_addresses = await _get_observations(
+        stale_addresses = await _get_observations(
             async_client,
             admin_headers,
             agent_id,
             "address",
         )
-        removed_routes = await _get_observations(
+        stale_routes = await _get_observations(
             async_client,
             admin_headers,
             agent_id,
             "route",
         )
-        removed_connections_after_empty = await _get_observations(
+        stale_connections_after_empty = await _get_observations(
             async_client,
             admin_headers,
             agent_id,
             "connection",
         )
-        assert len(removed_addresses) == 1
-        assert len(removed_routes) == 1
-        assert len(removed_connections_after_empty) == 2
-        assert removed_addresses[0]["identity_hash"] == original_address_hash
-        assert removed_routes[0]["identity_hash"] == original_route_hash
-        assert all(not item["is_current"] for item in removed_addresses)
-        assert all(not item["is_current"] for item in removed_routes)
-        assert all(not item["is_current"] for item in removed_connections_after_empty)
+        assert len(stale_addresses) == 1
+        assert len(stale_routes) == 1
+        assert len(stale_connections_after_empty) == 2
+        assert stale_addresses[0]["identity_hash"] == original_address_hash
+        assert stale_routes[0]["identity_hash"] == original_route_hash
+        assert all(not item["is_current"] for item in stale_addresses)
+        assert all(not item["is_current"] for item in stale_routes)
+        assert all(not item["is_current"] for item in stale_connections_after_empty)
 
     @pytest.mark.asyncio
     async def test_cleanup_prunes_old_agent_checkin_reports_but_keeps_metadata(

@@ -22,6 +22,7 @@ from schemas import (
     ARPEntryCreate, ARPEntryResponse,
     RawImportCreate, RawImportResponse,
     DeviceIdentityCreate, DeviceIdentityUpdate, DeviceIdentityResponse,
+    AgentTopologyEvidenceObservation,
 )
 
 
@@ -1449,3 +1450,26 @@ class TestARPEntryResponseLenience:
         )
         assert arp.ip_address == "192.168.1.1"
         assert arp.mac_address == "00:1A:2B:3C:4D:5E"
+
+
+class TestAgentTopologyEvidenceObservation:
+    """Test passive topology evidence source validation."""
+
+    def test_passive_capture_protocol_sources_are_accepted(self):
+        sources = [
+            "dhcpv6", "mdns", "llmnr", "nbns", "ssdp", "wsd", "stp", "lacp",
+            "hsrp", "vrrp", "carp", "ospf", "rip", "eigrp", "bgp",
+        ]
+
+        for source in sources:
+            evidence = AgentTopologyEvidenceObservation(
+                evidence_type="dns_name" if source in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else "route",
+                source=source,
+                ip_address="10.0.0.10" if source in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else None,
+                name="example.local" if source in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else None,
+                source_ip="10.0.0.2" if source not in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else None,
+                gateway="10.0.0.1" if source not in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else None,
+                destination="default" if source not in {"mdns", "llmnr", "nbns", "ssdp", "wsd"} else None,
+            )
+
+            assert evidence.source == source

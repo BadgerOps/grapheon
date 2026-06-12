@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, String, or_
 
-from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity, AgentObservation, Agent, NetworkGroup
+from models import Host, Port, Connection, RouteHop, ARPEntry, VLANConfig, DeviceIdentity, AgentObservation, Agent, NetworkGroup, EntityEvidence
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +144,12 @@ async def fetch_current_agent_observations(
     observed_by_agent_id: Optional[int] = None,
     relationship_types: Optional[list[str]] = None,
     min_confidence: Optional[int] = None,
+    include_historical: bool = False,
 ) -> list:
     """Fetch current agent observations used for topology relationship edges."""
-    query = select(AgentObservation).where(
-        AgentObservation.is_current.is_(True),
-        AgentObservation.relationship_type.is_not(None),
-    )
+    query = select(AgentObservation).where(AgentObservation.relationship_type.is_not(None))
+    if not include_historical:
+        query = query.where(AgentObservation.is_current.is_(True))
     if observed_by_agent_id is not None:
         query = query.where(AgentObservation.agent_id == observed_by_agent_id)
     if relationship_types:
@@ -158,6 +158,59 @@ async def fetch_current_agent_observations(
         query = query.where(AgentObservation.confidence >= min_confidence)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+async def fetch_entity_evidence(
+    db: AsyncSession,
+    *,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    relationship_types: Optional[list[str]] = None,
+    source_origin: Optional[str] = None,
+    source_types: Optional[list[str]] = None,
+    observer_agent_id: Optional[int] = None,
+    min_confidence: Optional[int] = None,
+    is_current: Optional[bool] = True,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[int, list[EntityEvidence]]:
+    """Fetch entity evidence with map-oriented filters."""
+    filters = []
+    if entity_type:
+        filters.append(EntityEvidence.entity_type == entity_type)
+    if entity_id is not None:
+        filters.append(EntityEvidence.entity_id == entity_id)
+    if relationship_types:
+        filters.append(EntityEvidence.relationship_type.in_(relationship_types))
+    if source_origin:
+        filters.append(EntityEvidence.source_origin == source_origin)
+    if source_types:
+        filters.append(EntityEvidence.source_type.in_(source_types))
+    if observer_agent_id is not None:
+        filters.append(EntityEvidence.observer_agent_id == observer_agent_id)
+    if min_confidence is not None:
+        filters.append(EntityEvidence.confidence >= min_confidence)
+    if is_current is not None:
+        filters.append(EntityEvidence.is_current.is_(is_current))
+
+    count_query = select(func.count(EntityEvidence.id))
+    query = select(EntityEvidence)
+    if filters:
+        count_query = count_query.where(*filters)
+        query = query.where(*filters)
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(
+        query.order_by(
+            EntityEvidence.is_current.desc(),
+            EntityEvidence.last_seen_at.desc(),
+            EntityEvidence.confidence.desc(),
+            EntityEvidence.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+    return total, result.scalars().all()
 
 
 async def fetch_agents_by_ids(db: AsyncSession, agent_ids: list[int]) -> dict[int, Agent]:
@@ -188,7 +241,7 @@ async def fetch_observed_networks(
     """Fetch current agent-observed networks for map subnet grouping."""
     query = select(AgentObservation).where(
         AgentObservation.is_current.is_(True),
-        AgentObservation.observation_type.in_(("address", "route")),
+        AgentObservation.observation_type.in_(("address", "route", "topology_evidence")),
     )
     if observed_by_agent_id is not None:
         query = query.where(AgentObservation.agent_id == observed_by_agent_id)
@@ -207,6 +260,9 @@ async def fetch_observed_networks(
             destination = payload.get("destination")
             if destination and destination != "default" and "/" in destination:
                 candidates.append(destination)
+        elif observation.observation_type == "topology_evidence":
+            if payload.get("evidence_type") == "network_segment" and payload.get("network"):
+                candidates.append(payload["network"])
 
         for candidate in candidates:
             try:

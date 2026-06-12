@@ -86,6 +86,7 @@ The API will be available at `http://localhost:8000`
 
 ### Network
 - `GET /api/network/map` - Cytoscape graph data for network visualization
+- `GET /api/network/evidence` - Query map-oriented evidence by entity, relationship type, source, observer, confidence, and current state
 - `GET /api/network/subnets` - Detected subnet summary using observed and saved network boundaries
 - `GET /api/network/groups` - List saved network grouping overrides
 - `POST /api/network/groups` - Create a saved CIDR grouping override
@@ -93,6 +94,10 @@ The API will be available at `http://localhost:8000`
 - `DELETE /api/network/groups/{id}` - Delete a saved network grouping override
 
 Saved network groups provide operator-controlled CIDR labels and hidden/expected state. The map, subnet summary, and network graph exports apply saved groups alongside VLAN CIDRs, passive-agent interface/route evidence, subnet filters, and temporary `network_cidrs` query hints.
+
+Passive topology evidence can be ingested through agent check-ins in the `topology_evidence` section. Supported evidence types are `l2_neighbor`, `switch_port_attachment`, `mac_ip_binding`, `dhcp_lease`, `dns_name`, `route`, `flow_relationship`, and `network_segment`. `/api/network/map` includes those relationship layers only when requested with `relationship_types`, and can narrow them with `evidence_sources`, `observed_by_agent_id`, `min_confidence`, and `include_historical_evidence`.
+
+Passive capture evidence sources include base labels such as `agent`, `dhcp`, `dns`, `lldp`, and `cdp`, plus tcpdump-derived protocol labels including `dhcpv6`, `mdns`, `llmnr`, `nbns`, `ssdp`, `wsd`, `stp`, `lacp`, `hsrp`, `vrrp`, `carp`, `ospf`, `rip`, `eigrp`, and `bgp`.
 
 ### Connections
 - `GET /api/connections` - List parsed connection records
@@ -119,9 +124,9 @@ Saved network groups provide operator-controlled CIDR labels and hidden/expected
 - `POST /api/agents/{id}/revoke` - Revoke a passive agent and invalidate its API key
 - `POST /api/agents/{id}/reactivate` - Move a revoked or inactive agent back to pending approval
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue an agent API key
-- `POST /api/agents/{id}/request-collection` - Request collection on the agent's next timer run
+- `POST /api/agents/{id}/request-collection` - Request passive collection on the agent's next timer run, optionally with bounded passive tcpdump observation options
 - `GET /api/agents/{id}/checkins` - List passive agent check-in history
-- `GET /api/agents/{id}/observations` - List current and removed agent-scoped observations
+- `GET /api/agents/{id}/observations` - List current, stale, and removed agent-scoped observations
 - `GET /api/agents/policies` - List passive collection policies
 - `POST /api/agents/policies` - Create passive collection policy
 - `PATCH /api/agents/policies/{id}` - Update passive collection policy
@@ -131,6 +136,8 @@ Saved network groups provide operator-controlled CIDR labels and hidden/expected
 - `POST /api/agents/register` - Register or re-poll an agent using an enrollment key
 - `POST /api/agents/poll` - Agent-authenticated policy and control-plane poll
 - `POST /api/agents/check-in` - Ingest passive agent report using the agent API key
+
+Agent check-ins accept the base passive sections (`addresses`, `neighbors`, `connections`, `routes`) plus optional normalized `topology_evidence` records emitted by local passive capture parsing or external low-impact importers. The backend stores map evidence summaries only; raw pcaps are not uploaded.
 
 ## Database Models
 

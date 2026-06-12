@@ -4,6 +4,24 @@ All notable changes to the Graphēon passive agent will be documented in this fi
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.16.0 - 2026-06-11
+### Added
+- **Richer passive capture parsing**: tcpdump evidence now preserves VLAN IDs, extended LLDP/CDP details, DHCPv4/DHCPv6 options, IPv6 RA prefixes/DNS/MTU hints, DNS PTR/CNAME/SRV/SVCB/HTTPS records, NBNS names, SSDP and WS-Discovery labels, STP/LACP neighbor hints, HSRP/VRRP/CARP gateway hints, OSPF/RIP/EIGRP/BGP map hints, and aggregated optional flow counters.
+
+### Fixed
+- **Schema-safe passive service names**: DNS, mDNS, and NBNS names with display characters such as spaces are normalized before check-in so backend validation does not reject the run; the original value is preserved in evidence metadata as `raw_name`.
+
+## 0.15.0 - 2026-06-11
+### Added
+- **Passive topology evidence config**: the stdlib agent now exposes config knobs for bounded normalized topology evidence file ingest, interface ignore filters, and passive tcpdump observation windows.
+- **Topology evidence payloads**: check-ins now include a `topology_evidence` section when configured JSON collector output is available.
+- **Topology evidence tests**: added agent coverage for bounded topology evidence file loading and configured collector output forwarding.
+- **Bounded passive capture**: configured or admin-requested collection can run a short local tcpdump window, parse LLDP/CDP, ARP, DHCP, DNS-family, IPv6 ND/RA, and optional header-only flow summaries into topology evidence, then delete the temporary pcap without uploading it.
+
+### Fixed
+- **Immediate requested passive collection**: admin-requested agent collections now bypass policy jitter as well as cached cadence so requested passive refreshes start immediately.
+- **Passive capture default interface**: capture requests without explicit interfaces now use default-route interfaces instead of tcpdump's `any` pseudo-device, which cannot compile Ethernet-header LLDP/CDP filters.
+
 ## 0.14.0 - 2026-06-11
 ### Added
 - **Local network noise filtering**: `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true` / `--ignore-local-net` drops loopback, link-local, unspecified, reserved/multicast IPs, and common local virtualization bridge interfaces from agent collection.

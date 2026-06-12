@@ -268,7 +268,7 @@ GRAPHEON_AGENT_SITE_NAME=Boise
 Optional User-Agent override for stricter edge policies:
 
 ```dotenv
-GRAPHEON_AGENT_USER_AGENT=Grapheon-Agent/0.14.0 python-urllib
+GRAPHEON_AGENT_USER_AGENT=Grapheon-Agent/0.16.0 python-urllib
 ```
 
 Optional local-noise filtering for workstation, hypervisor, or lab hosts:
@@ -413,7 +413,7 @@ An admin can request collection from the Agents page. Because the runtime is out
 - Treat the enrollment key as bootstrap-only.
 - Treat `/var/lib/grapheon-agent/api_key` as a secret.
 - Prefer `auto_approve=false` for real deployments.
-- Check-ins send full snapshots. The backend tracks missing observations as stale/removed for that agent without deleting shared topology rows from other sources.
+- Check-ins send full snapshots. The backend tracks missing observations as stale for that agent without deleting shared topology rows from other sources.
 - Full check-in report bodies are retained temporarily for audit/debugging and pruned by maintenance cleanup after the configured `agent_checkin_report_max_age_days` window. Check-in metadata, summaries, raw import links, and observation state remain.
 - No active scanning is performed in the MVP.
 - Upgrade by extracting a newer release artifact and running `sudo bash scripts/upgrade-passive-agent.sh`.

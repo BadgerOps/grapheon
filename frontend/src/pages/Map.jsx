@@ -13,6 +13,27 @@ const AGENT_RELATIONSHIP_OPTIONS = [
   { value: 'route_gateway', label: 'Routes' },
 ]
 const DEFAULT_AGENT_RELATIONSHIPS = AGENT_RELATIONSHIP_OPTIONS.map(option => option.value)
+const TOPOLOGY_LAYER_OPTIONS = [
+  { key: 'physical', label: 'Physical/L2', relationships: ['l2_neighbor', 'switch_port_attachment'] },
+  { key: 'routes', label: 'Routes/Gateways', relationships: ['route'] },
+  { key: 'dhcp', label: 'DHCP identity', relationships: ['dhcp_lease', 'mac_ip_binding'] },
+  { key: 'dns', label: 'DNS names', relationships: ['dns_name'] },
+  { key: 'flows', label: 'Flow relationships', relationships: ['flow_relationship'] },
+  { key: 'segments', label: 'Manual/saved groups', relationships: ['network_segment'] },
+]
+const DEFAULT_TOPOLOGY_LAYERS = {
+  physical: false,
+  routes: false,
+  dhcp: false,
+  dns: false,
+  flows: false,
+  segments: true,
+}
+const EVIDENCE_SOURCE_OPTIONS = [
+  'agent', 'snmp', 'dhcp', 'dhcpv6', 'dns', 'mdns', 'llmnr', 'nbns',
+  'zeek', 'lldp', 'cdp', 'ssdp', 'wsd', 'stp', 'lacp',
+  'hsrp', 'vrrp', 'carp', 'ospf', 'rip', 'eigrp', 'bgp', 'manual',
+]
 
 /**
  * Map Page — Network topology visualization
@@ -55,6 +76,8 @@ export default function Map() {
   const [routeThroughGateway, setRouteThroughGateway] = useState(false)
   const [observedByAgentId, setObservedByAgentId] = useState('')
   const [relationshipTypes, setRelationshipTypes] = useState(DEFAULT_AGENT_RELATIONSHIPS)
+  const [topologyLayers, setTopologyLayers] = useState(DEFAULT_TOPOLOGY_LAYERS)
+  const [evidenceSources, setEvidenceSources] = useState([])
   const [minConfidence, setMinConfidence] = useState(0)
   const [includeCollectorNodes, setIncludeCollectorNodes] = useState(true)
   const [cidrHints, setCidrHints] = useState('')
@@ -84,6 +107,15 @@ export default function Map() {
       })),
     [elements.nodes],
   )
+  const activeRelationshipTypes = useMemo(() => {
+    const active = new Set(relationshipTypes)
+    TOPOLOGY_LAYER_OPTIONS.forEach(layer => {
+      if (topologyLayers[layer.key]) {
+        layer.relationships.forEach(value => active.add(value))
+      }
+    })
+    return [...active]
+  }, [relationshipTypes, topologyLayers])
 
   // ── Fetch data ──────────────────────────────────────────────────
   const fetchNetworkMap = useCallback(async () => {
@@ -101,8 +133,11 @@ export default function Map() {
       if (observedByAgentId) {
         params.observed_by_agent_id = observedByAgentId
       }
-      if (relationshipTypes.length > 0) {
-        params.relationship_types = relationshipTypes
+      if (activeRelationshipTypes.length > 0) {
+        params.relationship_types = activeRelationshipTypes
+      }
+      if (evidenceSources.length > 0) {
+        params.evidence_sources = evidenceSources
       }
       if (minConfidence > 0) {
         params.min_confidence = minConfidence
@@ -128,7 +163,8 @@ export default function Map() {
     layoutMode,
     selectedVlan,
     observedByAgentId,
-    relationshipTypes,
+    activeRelationshipTypes,
+    evidenceSources,
     minConfidence,
     includeCollectorNodes,
     networkCidrHints,
@@ -270,12 +306,26 @@ export default function Map() {
     ))
   }
 
+  const handleTopologyLayerToggle = (layerKey) => {
+    setTopologyLayers(current => ({ ...current, [layerKey]: !current[layerKey] }))
+  }
+
+  const handleEvidenceSourceToggle = (source) => {
+    setEvidenceSources(current => (
+      current.includes(source)
+        ? current.filter(item => item !== source)
+        : [...current, source]
+    ))
+  }
+
   const handleClearFilters = () => {
     setSelectedDeviceTypes([])
     setSearchQuery('')
     setSelectedVlan('')
     setObservedByAgentId('')
     setRelationshipTypes(DEFAULT_AGENT_RELATIONSHIPS)
+    setTopologyLayers(DEFAULT_TOPOLOGY_LAYERS)
+    setEvidenceSources([])
     setMinConfidence(0)
     setIncludeCollectorNodes(true)
     setCidrHints('')
@@ -393,6 +443,8 @@ export default function Map() {
   const hasAgentTopologyFilters = (
     observedByAgentId
     || relationshipTypes.length !== DEFAULT_AGENT_RELATIONSHIPS.length
+    || Object.keys(DEFAULT_TOPOLOGY_LAYERS).some(key => topologyLayers[key] !== DEFAULT_TOPOLOGY_LAYERS[key])
+    || evidenceSources.length > 0
     || minConfidence > 0
     || !includeCollectorNodes
     || networkCidrHints.length > 0
@@ -642,6 +694,42 @@ export default function Map() {
                   />
                 </label>
               </div>
+            </div>
+          </div>
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Topology Evidence Layers</h3>
+            <div className="flex flex-wrap gap-2">
+              {TOPOLOGY_LAYER_OPTIONS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleTopologyLayerToggle(key)}
+                  className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                    topologyLayers[key]
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Sources</span>
+              {EVIDENCE_SOURCE_OPTIONS.map(source => (
+                <button
+                  key={source}
+                  type="button"
+                  onClick={() => handleEvidenceSourceToggle(source)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                    evidenceSources.includes(source)
+                      ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {source.toUpperCase()}
+                </button>
+              ))}
             </div>
           </div>
           <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">

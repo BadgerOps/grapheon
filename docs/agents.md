@@ -1,13 +1,13 @@
 # Passive Agents
 
-Graphēon now has the backend foundation and the first host-side runtime for a low-impact passive agent fleet. The MVP stays intentionally conservative: outbound-only check-in, no active scanning, slow cadence, and reuse of Graphēon's existing host, ARP, connection, and import models.
+Graphēon now has the backend foundation and the first host-side runtime for a low-impact passive agent fleet. The MVP stays intentionally conservative: outbound-only check-in, no active scanning, bounded passive observation windows, slow cadence, and reuse of Graphēon's existing host, ARP, connection, and import models.
 
 For a concrete runtime walkthrough, see `docs/agent_quickstart.md`. For host-side implementation notes, see `agent/README.md`.
 
 ## MVP Shape
 
 - Runtime model: short-lived collector plus `systemd` timer/service on the managed host.
-- Collection model: local/passive commands only such as `ip neigh`, `ss -tunap`, `ip addr`, and `ip route`.
+- Collection model: local/passive commands only such as `ip neigh`, `ss -tunap`, `ip addr`, `ip route`, optional normalized topology evidence files, and explicitly requested bounded tcpdump observation windows.
 - Transport model: compressed JSON reports over HTTPS with outbound-only check-in.
 - Backend model: agent registry, enrollment keys, approval workflow, policy profiles, check-in audit records, and normalized ingest into existing Graphēon tables.
 
@@ -31,7 +31,7 @@ Do not derive `agent_uuid` from MAC addresses or other host traits. MACs are ope
 - `POST /api/agents/{id}/revoke` - Revoke an agent and invalidate its API key.
 - `POST /api/agents/{id}/reactivate` - Move a revoked or inactive agent back to pending approval.
 - `POST /api/agents/{id}/rotate-api-key` - Rotate and reissue a per-agent API key once.
-- `POST /api/agents/{id}/request-collection` - Request that an active agent collect on its next timer run.
+- `POST /api/agents/{id}/request-collection` - Request that an active agent collect on its next timer run, optionally including passive capture options for a bounded tcpdump observation window.
 - `GET /api/agents/{id}/checkins` - List check-in history for one agent.
 - `GET /api/agents/{id}/observations` - List current or historical observations for one agent, with optional `observation_type`, `observation_role`, `min_confidence`, and `is_current` filters.
 - `POST /api/agents/poll` - Agent-authenticated control-plane poll for policy and pending collection requests.
@@ -106,8 +106,13 @@ The command set is explicitly limited in the MVP:
 - `ss_tunap`
 - `ip_addr`
 - `ip_route`
+- `topology_evidence`
 
 This keeps the agent side easy to reason about and avoids unexpected CPU or network load.
+
+On-demand requests can include `passive_capture` options with `enabled`, `duration_seconds` capped at 300, `max_bytes`, optional `interfaces`, and `include_flows`. These options tell the agent to run a local bounded tcpdump observation window on its next poll. If interfaces are not provided, the agent uses the interface or interfaces that own default routes rather than tcpdump's `any` pseudo-device, because the topology filter needs Ethernet headers. The agent skips cadence and jitter for requested collections, parses the temporary pcap into normalized topology evidence, deletes the pcap, and sends only summaries.
+
+The passive tcpdump parser is map-focused. It extracts VLAN IDs, LLDP/CDP metadata, DHCPv4/DHCPv6 lease and option hints, IPv6 router-advertisement prefixes and DNS options, DNS/mDNS/LLMNR/NBNS names, SSDP and WS-Discovery service labels, STP/LACP L2 hints, HSRP/VRRP/CARP gateway hints, visible OSPF/RIP/EIGRP/BGP routing hints, and aggregated optional flow headers. It does not parse TLS SNI, HTTP Host, QUIC SNI, Kerberos, LDAP, or SMB names.
 
 ## Report Model
 
@@ -120,6 +125,7 @@ The payload includes:
 - Neighbor observations
 - Local socket observations
 - Route observations
+- Optional topology evidence observations
 - Optional host/platform metadata
 
 Reports may be sent with `Content-Encoding: gzip`. The backend stores the normalized payload in both:
@@ -128,6 +134,8 @@ Reports may be sent with `Content-Encoding: gzip`. The backend stores the normal
 - `raw_imports` for auditability and future replay/converter work
 
 Agent check-ins are stored with `source_origin=agent`. Manual paste/file/bulk imports use `source_origin=manual`. Host, port, ARP, connection, and import list APIs can filter by this origin so operator views can separate passive-agent data from manually imported data.
+
+Successful check-ins write audit details for the number of observations created, refreshed, reactivated, marked stale, or explicitly removed, plus entity evidence created/refreshed counts. A missing record in a later full snapshot is treated as stale historical evidence, not as a delete request.
 
 Agent ingest also tracks the collector separately from what it observed:
 
@@ -174,6 +182,7 @@ Current behavior:
 - polls Graphēon on each timer run before local cadence gating so admin-requested collections can run on the next outbound agent invocation
 - uses a shipped 15-second timer cadence for lightweight control-plane polls while backend policy controls full collection frequency
 - can optionally filter host-local network noise with `GRAPHEON_AGENT_IGNORE_LOCAL_NET=true`, dropping loopback/link-local IPs and common local virtualization bridge interfaces while keeping normal LAN/private addresses on primary interfaces
+- can optionally run bounded passive tcpdump observation windows when configured or explicitly requested by an admin; raw pcaps are deleted locally and are not uploaded
 - ships as both a GHCR container image and a GitHub release tarball for distribution
 - installs host releases under a versioned `releases/` directory with a stable `current` symlink for rollback
 - uses cached backend policy for:
@@ -186,7 +195,8 @@ Current behavior:
 
 Backend snapshot handling:
 
-- missing entries in a later full snapshot are marked stale/removed in backend agent-scoped observation state
+- missing entries in a later full snapshot are marked stale in backend agent-scoped observation state
+- stale observations and linked evidence are retained as historical records; they are not deleted or marked removed unless an explicit removal path is used
 - full report bodies in `agent_checkins.report` are retained only for the configured maintenance retention window
 - cleanup preserves check-in metadata, summaries, raw import links, and agent-scoped observation state after pruning old report bodies
 

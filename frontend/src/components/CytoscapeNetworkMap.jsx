@@ -34,7 +34,7 @@ export default function CytoscapeNetworkMap({
   const containerRef = useRef(null)
   const cyRef = useRef(null)
   const navigate = useNavigate()
-  const [selectedNode, setSelectedNode] = useState(null)
+  const [selectedElement, setSelectedElement] = useState(null)
   const [stats, setStats] = useState({ nodes: 0, edges: 0, vlans: 0, subnets: 0 })
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains('dark')
@@ -97,7 +97,7 @@ export default function CytoscapeNetworkMap({
 
   // Clear selectedNode when elements change
   useEffect(() => {
-    setSelectedNode(null)
+    setSelectedElement(null)
   }, [elements])
 
   // ── Initialize Cytoscape ──────────────────────────────────────
@@ -142,13 +142,18 @@ export default function CytoscapeNetworkMap({
       // Skip compound nodes
       if (data.type === 'vlan' || data.type === 'subnet') return
 
-      setSelectedNode(data)
+      setSelectedElement({ kind: 'node', data })
       if (onNodeClick) onNodeClick(data)
+    })
+
+    cy.on('tap', 'edge', (evt) => {
+      const edge = evt.target
+      setSelectedElement({ kind: 'edge', data: edge.data() })
     })
 
     cy.on('tap', (evt) => {
       if (evt.target === cy) {
-        setSelectedNode(null)
+        setSelectedElement(null)
       }
     })
 
@@ -266,6 +271,8 @@ export default function CytoscapeNetworkMap({
   }
 
   const hasElements = (elements.nodes || []).length > 0
+  const selectedData = selectedElement?.data
+  const selectedEvidence = selectedData?.topology_evidence || []
 
   return (
     <div className="relative h-full">
@@ -442,51 +449,81 @@ export default function CytoscapeNetworkMap({
       )}
 
       {/* ── Selected node info panel ─────────────────────────── */}
-      {selectedNode && (
+      {selectedElement && (
         <div className="absolute bottom-4 right-4 max-w-xs p-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
           <div className="flex items-center justify-between mb-2">
             <h4 className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-              {selectedNode.hostname || selectedNode.ip}
+              {selectedElement.kind === 'edge'
+                ? selectedData.relationship_type || selectedData.connection_type || 'Relationship'
+                : selectedData.hostname || selectedData.ip || selectedData.label}
             </h4>
-            <button onClick={() => setSelectedNode(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-2">
+            <button onClick={() => setSelectedElement(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
           <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
-            <p><span className="text-gray-500">IP:</span> {selectedNode.ip}</p>
-            {selectedNode.mac && <p><span className="text-gray-500">MAC:</span> {selectedNode.mac}</p>}
-            {selectedNode.os && <p><span className="text-gray-500">OS:</span> {selectedNode.os}</p>}
-            {selectedNode.vendor && <p><span className="text-gray-500">Vendor:</span> {selectedNode.vendor}</p>}
-            {selectedNode.device_type && selectedNode.device_type !== 'unknown' && (
+            {selectedElement.kind === 'node' && selectedData.ip && (
+              <p><span className="text-gray-500">IP:</span> {selectedData.ip}</p>
+            )}
+            {selectedData.mac && <p><span className="text-gray-500">MAC:</span> {selectedData.mac}</p>}
+            {selectedData.os && <p><span className="text-gray-500">OS:</span> {selectedData.os}</p>}
+            {selectedData.vendor && <p><span className="text-gray-500">Vendor:</span> {selectedData.vendor}</p>}
+            {selectedData.device_type && selectedData.device_type !== 'unknown' && (
               <p>
                 <span className="text-gray-500">Type:</span>{' '}
                 <span className="inline-flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: selectedNode.color }}></span>
-                  {selectedNode.device_type}
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: selectedData.color }}></span>
+                  {selectedData.device_type}
                 </span>
               </p>
             )}
-            {selectedNode.is_gateway && <p className="text-orange-500 font-medium">Gateway / Router</p>}
-            <p><span className="text-gray-500">Open Ports:</span> {selectedNode.open_ports || 0}</p>
-            <p><span className="text-gray-500">Subnet:</span> {selectedNode.subnet}</p>
-            {selectedNode.vlan_id != null && (
+            {selectedData.is_gateway && <p className="text-orange-500 font-medium">Gateway / Router</p>}
+            {selectedElement.kind === 'node' && (
+              <p><span className="text-gray-500">Open Ports:</span> {selectedData.open_ports || 0}</p>
+            )}
+            {selectedData.subnet && <p><span className="text-gray-500">Subnet:</span> {selectedData.subnet}</p>}
+            {selectedData.vlan_id != null && (
               <p>
                 <span className="text-gray-500">VLAN:</span>{' '}
-                {selectedNode.vlan_name || `VLAN ${selectedNode.vlan_id}`} ({selectedNode.vlan_id})
+                {selectedData.vlan_name || `VLAN ${selectedData.vlan_id}`} ({selectedData.vlan_id})
               </p>
             )}
-            {selectedNode.segment && (
-              <p><span className="text-gray-500">Segment:</span> {selectedNode.segment}</p>
+            {selectedData.segment && (
+              <p><span className="text-gray-500">Segment:</span> {selectedData.segment}</p>
+            )}
+            {selectedElement.kind === 'edge' && selectedData.tooltip && (
+              <p><span className="text-gray-500">Summary:</span> {selectedData.tooltip}</p>
+            )}
+            {selectedEvidence.length > 0 && (
+              <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Topology Evidence</p>
+                <div className="space-y-2">
+                  {selectedEvidence.slice(0, 4).map((evidence, idx) => (
+                    <div key={`${evidence.evidence_type || 'evidence'}-${idx}`} className="rounded border border-gray-200 p-2 text-xs dark:border-gray-700">
+                      <p className="font-medium text-gray-700 dark:text-gray-200">{evidence.evidence_type || 'evidence'}</p>
+                      {evidence.summary && <p>{evidence.summary}</p>}
+                      <p><span className="text-gray-500">Source:</span> {evidence.source || 'agent'}</p>
+                      {evidence.observer && <p><span className="text-gray-500">Observer:</span> {evidence.observer}</p>}
+                      <p><span className="text-gray-500">Confidence:</span> {evidence.confidence ?? selectedData.confidence ?? 0}%</p>
+                      {evidence.first_seen && <p><span className="text-gray-500">First:</span> {new Date(evidence.first_seen).toLocaleString()}</p>}
+                      {evidence.last_seen && <p><span className="text-gray-500">Last:</span> {new Date(evidence.last_seen).toLocaleString()}</p>}
+                      {evidence.raw_ref && <p><span className="text-gray-500">Raw:</span> {evidence.raw_ref}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-          <button
-            onClick={() => navigate(`/hosts/${selectedNode.id}`)}
-            className="mt-3 w-full btn btn-primary text-sm"
-          >
-            View Details
-          </button>
+          {selectedElement.kind === 'node' && selectedData.id && !String(selectedData.id).includes('_') && (
+            <button
+              onClick={() => navigate(`/hosts/${selectedData.id}`)}
+              className="mt-3 w-full btn btn-primary text-sm"
+            >
+              View Details
+            </button>
+          )}
         </div>
       )}
 

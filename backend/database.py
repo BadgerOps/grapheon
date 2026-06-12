@@ -171,6 +171,7 @@ def _run_migrations(sync_conn) -> None:
             ("last_registration_summary", "last_registration_summary JSON"),
             ("collection_requested_at", "collection_requested_at DATETIME"),
             ("collection_request_reason", "collection_request_reason VARCHAR(1000)"),
+            ("collection_request_options", "collection_request_options JSON"),
             ("collection_request_fulfilled_at", "collection_request_fulfilled_at DATETIME"),
         ],
     )

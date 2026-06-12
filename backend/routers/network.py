@@ -37,16 +37,29 @@ from network.queries import (
     fetch_port_counts,
     fetch_device_identities,
     fetch_route_hops,
+    fetch_entity_evidence,
     build_device_id_to_hosts,
 )
 from network.nodes import build_all_nodes
 from network.edges import build_all_edges, add_agent_topology_edges
 from network.legacy_format import build_legacy_response
+from schemas import EntityEvidenceResponse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 router = APIRouter(prefix="/api/network", tags=["network"])
+
+TOPOLOGY_EVIDENCE_RELATIONSHIPS = {
+    "l2_neighbor",
+    "switch_port_attachment",
+    "mac_ip_binding",
+    "dhcp_lease",
+    "dns_name",
+    "route",
+    "flow_relationship",
+    "network_segment",
+}
 
 
 class NetworkGroupCreate(BaseModel):
@@ -190,6 +203,46 @@ async def delete_network_group(
     return {"status": "deleted", "id": group_id}
 
 
+@router.get("/evidence")
+async def list_network_evidence(
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
+    relationship_types: Optional[list[str]] = Query(None, description="Filter by relationship/evidence types"),
+    source_origin: Optional[str] = Query(None, description="Filter by source origin"),
+    source_types: Optional[list[str]] = Query(None, description="Filter by evidence source type"),
+    observer_agent_id: Optional[int] = Query(None, description="Filter by observing agent ID"),
+    min_confidence: Optional[int] = Query(None, ge=0, le=100, description="Minimum confidence"),
+    is_current: Optional[bool] = Query(True, description="Filter current/historical evidence"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """List map-oriented field and relationship evidence."""
+    total, items = await fetch_entity_evidence(
+        db,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        relationship_types=relationship_types,
+        source_origin=source_origin,
+        source_types=source_types,
+        observer_agent_id=observer_agent_id,
+        min_confidence=min_confidence,
+        is_current=is_current,
+        skip=skip,
+        limit=limit,
+    )
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": [
+            EntityEvidenceResponse.model_validate(item).model_dump(mode="json")
+            for item in items
+        ],
+    }
+
+
 # ── Main map endpoint ────────────────────────────────────────────────
 
 @router.get("/map")
@@ -208,7 +261,9 @@ async def get_network_map(
     source_origin: Optional[str] = Query(None, description="Filter map data by source origin"),
     observed_by_agent_id: Optional[int] = Query(None, description="Filter agent-observed data by collector agent ID"),
     relationship_types: Optional[list[str]] = Query(None, description="Agent relationship edge types to include"),
+    evidence_sources: Optional[list[str]] = Query(None, description="Evidence source types to include"),
     min_confidence: Optional[int] = Query(None, ge=0, le=100, description="Minimum agent relationship confidence"),
+    include_historical_evidence: bool = Query(False, description="Include stale/removed topology evidence observations"),
     include_collector_nodes: bool = Query(False, description="Include passive-agent collector/vantage nodes"),
     user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
@@ -348,9 +403,12 @@ async def get_network_map(
     should_build_agent_topology = (
         include_collector_nodes
         or bool(relationship_types)
+        or bool(evidence_sources)
     )
     if should_build_agent_topology:
         active_relationship_types = set(relationship_types or [])
+        if evidence_sources and not active_relationship_types:
+            active_relationship_types.update(TOPOLOGY_EVIDENCE_RELATIONSHIPS)
         if active_relationship_types or include_collector_nodes:
             active_relationship_types.add("collector_interface")
         agent_observations = await fetch_current_agent_observations(
@@ -358,7 +416,16 @@ async def get_network_map(
             observed_by_agent_id=observed_by_agent_id,
             relationship_types=sorted(active_relationship_types),
             min_confidence=min_confidence,
+            include_historical=include_historical_evidence,
         )
+        if evidence_sources:
+            source_filter = {source.lower() for source in evidence_sources}
+            agent_observations = [
+                observation
+                for observation in agent_observations
+                if (observation.payload or {}).get("source", "agent").lower() in source_filter
+                or observation.relationship_type not in TOPOLOGY_EVIDENCE_RELATIONSHIPS
+            ]
         agents_by_id = await fetch_agents_by_ids(
             db,
             [observation.agent_id for observation in agent_observations],
@@ -397,6 +464,11 @@ async def get_network_map(
         "shared_gateways": len(shared_gateway_nodes),
         "agent_topology_edges": sum(agent_edge_stats.values()),
         "agent_edge_counts": agent_edge_stats,
+        "topology_evidence_edges": sum(
+            count
+            for relationship_type, count in agent_edge_stats.items()
+            if relationship_type in TOPOLOGY_EVIDENCE_RELATIONSHIPS
+        ),
         "observed_networks": [str(network) for network in observed_networks],
         "saved_network_groups": [
             _network_group_summary(group)

@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.19.0 - 2026-06-12
+### Added
+- **Historical topology evidence metadata**: Network Map relationship evidence now includes current/stale state, stale and removed timestamps, observation IDs, raw payload summaries, and host endpoint hints so the UI can expose history and promotion actions.
+
 ## 0.18.0 - 2026-06-11
 ### Added
 - **Passive topology evidence ingest**: agent check-ins now accept normalized `topology_evidence` records for L2 neighbors, switch-port attachments, MAC/IP bindings, DHCP leases, DNS names, routes, flow relationships, and network segments.

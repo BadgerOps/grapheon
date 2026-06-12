@@ -78,6 +78,9 @@ export default function Map() {
   const [relationshipTypes, setRelationshipTypes] = useState(DEFAULT_AGENT_RELATIONSHIPS)
   const [topologyLayers, setTopologyLayers] = useState(DEFAULT_TOPOLOGY_LAYERS)
   const [evidenceSources, setEvidenceSources] = useState([])
+  const [ignoredEvidenceSources, setIgnoredEvidenceSources] = useState([])
+  const [ignoredObserverAgentIds, setIgnoredObserverAgentIds] = useState([])
+  const [includeHistoricalEvidence, setIncludeHistoricalEvidence] = useState(false)
   const [minConfidence, setMinConfidence] = useState(0)
   const [includeCollectorNodes, setIncludeCollectorNodes] = useState(true)
   const [cidrHints, setCidrHints] = useState('')
@@ -90,6 +93,8 @@ export default function Map() {
   const [editingNetworkGroupId, setEditingNetworkGroupId] = useState(null)
   const [networkGroupDraft, setNetworkGroupDraft] = useState(null)
   const [promoteDrafts, setPromoteDrafts] = useState({})
+  const [deviceIdentities, setDeviceIdentities] = useState([])
+  const [mapActionMessage, setMapActionMessage] = useState('')
 
   // ── Cytoscape ref ───────────────────────────────────────────────
   const cyRef = useRef(null)
@@ -139,6 +144,9 @@ export default function Map() {
       if (evidenceSources.length > 0) {
         params.evidence_sources = evidenceSources
       }
+      if (includeHistoricalEvidence) {
+        params.include_historical_evidence = true
+      }
       if (minConfidence > 0) {
         params.min_confidence = minConfidence
       }
@@ -165,6 +173,7 @@ export default function Map() {
     observedByAgentId,
     activeRelationshipTypes,
     evidenceSources,
+    includeHistoricalEvidence,
     minConfidence,
     includeCollectorNodes,
     networkCidrHints,
@@ -212,6 +221,16 @@ export default function Map() {
     }
   }
 
+  const fetchDeviceIdentities = async () => {
+    try {
+      const data = await api.getDeviceIdentities({ limit: 1000, active_only: true })
+      setDeviceIdentities(data.items || [])
+    } catch (err) {
+      console.error('Failed to fetch device identities:', err)
+      setWarnings(prev => [...prev.filter(w => w.key !== 'device-identities'), { key: 'device-identities', msg: 'Could not load device identities' }])
+    }
+  }
+
   const fetchRoutes = async () => {
     try {
       const data = await api.getNetworkRoutes()
@@ -229,21 +248,47 @@ export default function Map() {
     fetchSubnets()
     fetchAgents()
     fetchNetworkGroups()
+    fetchDeviceIdentities()
   }, [fetchNetworkMap])
 
   useEffect(() => {
     if (showRoutes) fetchRoutes()
   }, [showRoutes])
 
+  const filteredElements = useMemo(() => {
+    if (ignoredEvidenceSources.length === 0 && ignoredObserverAgentIds.length === 0) {
+      return elements
+    }
+    const ignoredSources = new Set(ignoredEvidenceSources.map(source => source.toLowerCase()))
+    const ignoredObservers = new Set(ignoredObserverAgentIds.map(value => Number(value)))
+    const isIgnored = (item) => {
+      const data = item.data || {}
+      const evidence = data.topology_evidence || []
+      const sourceIgnored = evidence.some(record => ignoredSources.has(String(record.source || '').toLowerCase()))
+        || ignoredSources.has(String(data.source_type || '').toLowerCase())
+      const observerIgnored = evidence.some(record => ignoredObservers.has(Number(record.observer_agent_id)))
+        || ignoredObservers.has(Number(data.observer_agent_id))
+      return sourceIgnored || observerIgnored
+    }
+    const nodes = (elements.nodes || []).filter(node => !isIgnored(node))
+    const nodeIds = new Set(nodes.map(node => node.data?.id))
+    const edges = (elements.edges || []).filter(edge => (
+      !isIgnored(edge)
+      && nodeIds.has(edge.data?.source)
+      && nodeIds.has(edge.data?.target)
+    ))
+    return { nodes, edges }
+  }, [elements, ignoredEvidenceSources, ignoredObserverAgentIds])
+
   // ── Merge route edges into elements ─────────────────────────────
   const mergedElements = useMemo(() => {
     if (!showRoutes || !routeData.path_edges || routeData.path_edges.length === 0) {
-      return elements
+      return filteredElements
     }
 
     // Map IPs to host node IDs
     const ipToId = {}
-    ;(elements.nodes || []).forEach(node => {
+    ;(filteredElements.nodes || []).forEach(node => {
       if (node.data.ip) {
         ipToId[node.data.ip] = node.data.id
       }
@@ -270,10 +315,10 @@ export default function Map() {
       })
 
     return {
-      nodes: elements.nodes,
-      edges: [...(elements.edges || []), ...routeEdges],
+      nodes: filteredElements.nodes,
+      edges: [...(filteredElements.edges || []), ...routeEdges],
     }
-  }, [elements, routeData.path_edges, showRoutes])
+  }, [filteredElements, routeData.path_edges, showRoutes])
 
   // ── Client-side filter handlers ─────────────────────────────────
   const handleSearch = (query) => {
@@ -326,6 +371,9 @@ export default function Map() {
     setRelationshipTypes(DEFAULT_AGENT_RELATIONSHIPS)
     setTopologyLayers(DEFAULT_TOPOLOGY_LAYERS)
     setEvidenceSources([])
+    setIgnoredEvidenceSources([])
+    setIgnoredObserverAgentIds([])
+    setIncludeHistoricalEvidence(false)
     setMinConfidence(0)
     setIncludeCollectorNodes(true)
     setCidrHints('')
@@ -429,6 +477,76 @@ export default function Map() {
     }
   }
 
+  const handleUseHostname = async ({ hostId, hostname }) => {
+    if (!hostId || !hostname) return
+    setNetworkGroupError('')
+    setMapActionMessage('')
+    try {
+      await api.updateHost(hostId, {
+        hostname,
+        is_verified: true,
+      })
+      setMapActionMessage(`Saved hostname ${hostname}`)
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
+  const handleAttachToDevice = async ({ hostId, deviceId }) => {
+    if (!hostId || !deviceId) return
+    setNetworkGroupError('')
+    setMapActionMessage('')
+    try {
+      await api.linkHostsToDevice(deviceId, [hostId])
+      setMapActionMessage('Attached host to device identity')
+      await fetchDeviceIdentities()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
+  const handleIgnoreEvidenceSource = (source) => {
+    if (!source) return
+    setIgnoredEvidenceSources(current => current.includes(source) ? current : [...current, source])
+    setMapActionMessage(`Ignored ${source.toUpperCase()} evidence in this view`)
+  }
+
+  const handleIgnoreObserver = (observerAgentId) => {
+    if (!observerAgentId) return
+    setIgnoredObserverAgentIds(current => current.includes(observerAgentId) ? current : [...current, observerAgentId])
+    setMapActionMessage(`Ignored observer ${observerAgentId} in this view`)
+  }
+
+  const handleMarkExpected = async ({ cidr, label }) => {
+    if (!cidr) return
+    setNetworkGroupError('')
+    setMapActionMessage('')
+    try {
+      const existing = networkGroups.find(group => group.cidr === cidr)
+      if (existing) {
+        await api.updateNetworkGroup(existing.id, {
+          is_expected: true,
+          is_hidden: false,
+          label: existing.label || label || null,
+        })
+      } else {
+        await api.createNetworkGroup({
+          cidr,
+          label: label || null,
+          is_expected: true,
+          is_hidden: false,
+        })
+      }
+      setMapActionMessage(`Marked ${cidr} as expected`)
+      await fetchNetworkGroups()
+      await fetchNetworkMap()
+    } catch (err) {
+      setNetworkGroupError(err.message)
+    }
+  }
+
   const handleNodeClick = useCallback(() => {}, [])
 
   const handleCyReady = useCallback((cy) => {
@@ -445,6 +563,9 @@ export default function Map() {
     || relationshipTypes.length !== DEFAULT_AGENT_RELATIONSHIPS.length
     || Object.keys(DEFAULT_TOPOLOGY_LAYERS).some(key => topologyLayers[key] !== DEFAULT_TOPOLOGY_LAYERS[key])
     || evidenceSources.length > 0
+    || ignoredEvidenceSources.length > 0
+    || ignoredObserverAgentIds.length > 0
+    || includeHistoricalEvidence
     || minConfidence > 0
     || !includeCollectorNodes
     || networkCidrHints.length > 0
@@ -693,8 +814,42 @@ export default function Map() {
                     className="input w-20"
                   />
                 </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={includeHistoricalEvidence}
+                    onChange={(e) => setIncludeHistoricalEvidence(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                  />
+                  Historical
+                </label>
               </div>
             </div>
+            {(ignoredEvidenceSources.length > 0 || ignoredObserverAgentIds.length > 0) && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Ignored</span>
+                {ignoredEvidenceSources.map(source => (
+                  <button
+                    key={`source-${source}`}
+                    type="button"
+                    onClick={() => setIgnoredEvidenceSources(current => current.filter(item => item !== source))}
+                    className="rounded bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300"
+                  >
+                    {source.toUpperCase()} x
+                  </button>
+                ))}
+                {ignoredObserverAgentIds.map(agentId => (
+                  <button
+                    key={`observer-${agentId}`}
+                    type="button"
+                    onClick={() => setIgnoredObserverAgentIds(current => current.filter(item => item !== agentId))}
+                    className="rounded bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300"
+                  >
+                    Observer {agentId} x
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Topology Evidence Layers</h3>
@@ -916,6 +1071,12 @@ export default function Map() {
         </div>
       )}
 
+      {mapActionMessage && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+          {mapActionMessage}
+        </div>
+      )}
+
       {/* Inline warnings for secondary fetch failures */}
       {warnings.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -994,6 +1155,12 @@ export default function Map() {
                 onNodeClick={handleNodeClick}
                 onCyReady={handleCyReady}
                 loading={loading}
+                deviceIdentities={deviceIdentities}
+                onUseHostname={handleUseHostname}
+                onAttachToDevice={handleAttachToDevice}
+                onIgnoreEvidenceSource={handleIgnoreEvidenceSource}
+                onIgnoreObserver={handleIgnoreObserver}
+                onMarkExpected={handleMarkExpected}
               />
             ) : (
               <IsoflowNetworkMap

@@ -30,6 +30,12 @@ export default function CytoscapeNetworkMap({
   onNodeClick,
   onCyReady,
   loading = false,
+  deviceIdentities = [],
+  onUseHostname,
+  onAttachToDevice,
+  onIgnoreEvidenceSource,
+  onIgnoreObserver,
+  onMarkExpected,
 }) {
   const containerRef = useRef(null)
   const cyRef = useRef(null)
@@ -42,6 +48,7 @@ export default function CytoscapeNetworkMap({
   const [showLegend, setShowLegend] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [selectedDeviceId, setSelectedDeviceId] = useState('')
   const exportMenuRef = useRef(null)
 
   // Watch for theme changes
@@ -98,6 +105,7 @@ export default function CytoscapeNetworkMap({
   // Clear selectedNode when elements change
   useEffect(() => {
     setSelectedElement(null)
+    setSelectedDeviceId('')
   }, [elements])
 
   // ── Initialize Cytoscape ──────────────────────────────────────
@@ -273,6 +281,33 @@ export default function CytoscapeNetworkMap({
   const hasElements = (elements.nodes || []).length > 0
   const selectedData = selectedElement?.data
   const selectedEvidence = selectedData?.topology_evidence || []
+  const primaryEvidence = selectedEvidence[0] || null
+  const selectedHostId = (() => {
+    if (!selectedData) return null
+    if (selectedElement?.kind === 'node' && selectedData.type === 'host' && String(selectedData.id || '').match(/^\d+$/)) {
+      return Number(selectedData.id)
+    }
+    const evidenceHostId = primaryEvidence?.source_host_id || primaryEvidence?.target_host_id
+    if (evidenceHostId) return Number(evidenceHostId)
+    if (selectedElement?.kind === 'edge') {
+      if (String(selectedData.source || '').match(/^\d+$/)) return Number(selectedData.source)
+      if (String(selectedData.target || '').match(/^\d+$/)) return Number(selectedData.target)
+    }
+    return null
+  })()
+  const hostnameCandidate = (() => {
+    const payload = primaryEvidence?.payload || {}
+    if ((primaryEvidence?.evidence_type || selectedData?.relationship_type) !== 'dns_name') return ''
+    return payload.name || payload.hostname || payload.fqdn || ''
+  })()
+  const expectedNetworkCandidate = (() => {
+    const payload = primaryEvidence?.payload || {}
+    return payload.network || selectedData?.subnet_cidr || selectedData?.network || ''
+  })()
+  const expectedLabelCandidate = (() => {
+    const payload = primaryEvidence?.payload || {}
+    return payload.label || selectedData?.label || expectedNetworkCandidate
+  })()
 
   return (
     <div className="relative h-full">
@@ -501,14 +536,32 @@ export default function CytoscapeNetworkMap({
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Topology Evidence</p>
                 <div className="space-y-2">
                   {selectedEvidence.slice(0, 4).map((evidence, idx) => (
-                    <div key={`${evidence.evidence_type || 'evidence'}-${idx}`} className="rounded border border-gray-200 p-2 text-xs dark:border-gray-700">
-                      <p className="font-medium text-gray-700 dark:text-gray-200">{evidence.evidence_type || 'evidence'}</p>
+                    <div
+                      key={`${evidence.evidence_type || 'evidence'}-${idx}`}
+                      className={`rounded border p-2 text-xs ${
+                        evidence.is_current === false
+                          ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100'
+                          : 'border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium text-gray-700 dark:text-gray-200">{evidence.evidence_type || 'evidence'}</p>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                          evidence.is_current === false
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-800 dark:text-amber-100'
+                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                        }`}>
+                          {evidence.is_current === false ? 'Stale' : 'Current'}
+                        </span>
+                      </div>
                       {evidence.summary && <p>{evidence.summary}</p>}
                       <p><span className="text-gray-500">Source:</span> {evidence.source || 'agent'}</p>
                       {evidence.observer && <p><span className="text-gray-500">Observer:</span> {evidence.observer}</p>}
                       <p><span className="text-gray-500">Confidence:</span> {evidence.confidence ?? selectedData.confidence ?? 0}%</p>
                       {evidence.first_seen && <p><span className="text-gray-500">First:</span> {new Date(evidence.first_seen).toLocaleString()}</p>}
                       {evidence.last_seen && <p><span className="text-gray-500">Last:</span> {new Date(evidence.last_seen).toLocaleString()}</p>}
+                      {evidence.stale_at && <p><span className="text-gray-500">Stale:</span> {new Date(evidence.stale_at).toLocaleString()}</p>}
+                      {evidence.removed_at && <p><span className="text-gray-500">Removed:</span> {new Date(evidence.removed_at).toLocaleString()}</p>}
                       {evidence.raw_ref && <p><span className="text-gray-500">Raw:</span> {evidence.raw_ref}</p>}
                     </div>
                   ))}
@@ -516,6 +569,78 @@ export default function CytoscapeNetworkMap({
               </div>
             )}
           </div>
+          {(hostnameCandidate || expectedNetworkCandidate || selectedHostId || primaryEvidence?.source || primaryEvidence?.observer_agent_id) && (
+            <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Actions</p>
+              <div className="space-y-2">
+                {selectedHostId && hostnameCandidate && onUseHostname && (
+                  <button
+                    type="button"
+                    onClick={() => onUseHostname({ hostId: selectedHostId, hostname: hostnameCandidate })}
+                    className="w-full rounded bg-blue-600 px-3 py-1.5 text-left text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Use as hostname
+                  </button>
+                )}
+                {selectedHostId && onAttachToDevice && (
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <select
+                      value={selectedDeviceId}
+                      onChange={(event) => setSelectedDeviceId(event.target.value)}
+                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    >
+                      <option value="">Device identity</option>
+                      {deviceIdentities.map(device => (
+                        <option key={device.id} value={device.id}>
+                          {device.name || `Device ${device.id}`} ({device.host_count || 0})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!selectedDeviceId}
+                      onClick={() => {
+                        onAttachToDevice({ hostId: selectedHostId, deviceId: Number(selectedDeviceId) })
+                        setSelectedDeviceId('')
+                      }}
+                      className="rounded bg-slate-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Attach
+                    </button>
+                  </div>
+                )}
+                {expectedNetworkCandidate && onMarkExpected && (
+                  <button
+                    type="button"
+                    onClick={() => onMarkExpected({ cidr: expectedNetworkCandidate, label: expectedLabelCandidate })}
+                    className="w-full rounded bg-emerald-600 px-3 py-1.5 text-left text-xs font-medium text-white hover:bg-emerald-700"
+                  >
+                    Mark as expected
+                  </button>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {primaryEvidence?.source && onIgnoreEvidenceSource && (
+                    <button
+                      type="button"
+                      onClick={() => onIgnoreEvidenceSource(primaryEvidence.source)}
+                      className="rounded bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300"
+                    >
+                      Ignore source
+                    </button>
+                  )}
+                  {primaryEvidence?.observer_agent_id && onIgnoreObserver && (
+                    <button
+                      type="button"
+                      onClick={() => onIgnoreObserver(primaryEvidence.observer_agent_id)}
+                      className="rounded bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300"
+                    >
+                      Ignore observer
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           {selectedElement.kind === 'node' && selectedData.id && !String(selectedData.id).includes('_') && (
             <button
               onClick={() => navigate(`/hosts/${selectedData.id}`)}

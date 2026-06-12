@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 Versioning policy: do not use `Unreleased` changelog sections. Every behavior change, bug fix, hardening change, or notable test addition must be recorded under a concrete SemVer version. Bump patch versions for bug fixes and minor versions for new behavior or API/UI changes.
 
+## 0.18.0 - 2026-06-12
+### Added
+- **Topology evidence promotion actions**: selected evidence can now promote DNS names to hostnames, attach hosts to existing device identities, mark selected segments as expected network groups, and ignore noisy sources or observers for the current map view.
+- **Stale evidence visibility**: Network Map filters now include an opt-in historical evidence toggle, and selected evidence displays current/stale status plus stale/removed timestamps.
+
 ## 0.17.0 - 2026-06-11
 ### Added
 - **Topology evidence layers**: Network Map filters now include Physical/L2, Routes/Gateways, DHCP identity, DNS names, Flow relationships, Agent observer topology, and Manual/saved network group layer controls.

@@ -105,6 +105,8 @@ The parser preserves VLAN IDs, LLDP/CDP capabilities and platform details, DHCP 
 
 Service and discovery display names can contain characters that are not valid in Graphēon's hostname-like `name` field. The agent sends a schema-safe top-level label for those records and preserves the original value in `metadata.raw_name`.
 
+The capture parser has fixture coverage for vendor-shaped LLDP/CDP management-address records, DHCPv6 delegated prefixes, and mDNS service instances with display names. These fixtures are synthetic pcaps and do not require real tcpdump during tests.
+
 Topology evidence records support `l2_neighbor`, `switch_port_attachment`, `mac_ip_binding`, `dhcp_lease`, `dns_name`, `route`, `flow_relationship`, and `network_segment` evidence types. They are map enrichment data, not security alerts or active scans.
 
 Versioned install helpers:

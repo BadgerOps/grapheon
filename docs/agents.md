@@ -114,6 +114,8 @@ On-demand requests can include `passive_capture` options with `enabled`, `durati
 
 The passive tcpdump parser is map-focused. It extracts VLAN IDs, LLDP/CDP metadata, DHCPv4/DHCPv6 lease and option hints, IPv6 router-advertisement prefixes and DNS options, DNS/mDNS/LLMNR/NBNS names, SSDP and WS-Discovery service labels, STP/LACP L2 hints, HSRP/VRRP/CARP gateway hints, visible OSPF/RIP/EIGRP/BGP routing hints, and aggregated optional flow headers. It does not parse TLS SNI, HTTP Host, QUIC SNI, Kerberos, LDAP, or SMB names.
 
+Network Map evidence can be inspected as current-only by default or with historical/stale evidence included. Selecting evidence-backed map elements shows the source, observer, confidence, current/stale state, timestamps, and map summary. Operators can promote selected DNS evidence to a hostname, attach a selected host to an existing device identity, mark a selected network segment as expected, or ignore a noisy evidence source/observer for the current map view without deleting stored evidence.
+
 ## Report Model
 
 The ingest endpoint expects a normalized JSON payload. The current host-side runtime converts local command output into that schema and sends gzip-compressed reports.

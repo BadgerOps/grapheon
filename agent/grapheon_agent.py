@@ -932,10 +932,25 @@ def parse_cdp_frame(frame: bytes, interface: Optional[str] = None) -> Optional[d
             metadata["native_vlan"] = vlan_id
         elif tlv_type == 0x000b and value:
             metadata["duplex"] = "full" if value[-1] else "half"
-        elif tlv_type == 0x0002 and len(value) >= 17:
-            protocol_type = value[8] if len(value) > 8 else None
-            if protocol_type == 0xCC and len(value) >= 17:
-                record["management_ip"] = ".".join(str(byte) for byte in value[-4:])
+        elif tlv_type == 0x0002 and len(value) >= 4:
+            address_count = int.from_bytes(value[:4], "big")
+            address_offset = 4
+            for _ in range(address_count):
+                if address_offset + 4 > len(value):
+                    break
+                protocol_type = value[address_offset]
+                protocol_len = value[address_offset + 1]
+                protocol = value[address_offset + 2 : address_offset + 2 + protocol_len]
+                address_offset += 2 + protocol_len
+                if address_offset + 2 > len(value):
+                    break
+                address_len = int.from_bytes(value[address_offset : address_offset + 2], "big")
+                address_offset += 2
+                address = value[address_offset : address_offset + address_len]
+                address_offset += address_len
+                if protocol_type == 1 and protocol == b"\xcc" and address_len == 4 and len(address) == 4:
+                    record["management_ip"] = str(ip_address(address))
+                    break
     merge_metadata(record, **metadata)
     if record.get("system_name") or record.get("port_id") or record.get("management_ip"):
         return {key: value for key, value in record.items() if value is not None}
@@ -1321,8 +1336,8 @@ def parse_dhcpv6_evidence(
                         }
                     )
                 elif sub_code == 26 and len(sub_value) >= 25:
-                    prefix_len = sub_value[24]
-                    prefix_ip = ip_address(sub_value[25:41]) if len(sub_value) >= 41 else None
+                    prefix_len = sub_value[8]
+                    prefix_ip = ip_address(sub_value[9:25])
                     if prefix_ip:
                         prefixes.append(
                             {

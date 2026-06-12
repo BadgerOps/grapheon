@@ -873,6 +873,48 @@ class TestAgentEnrollmentAndCheckIn:
             for edge in map_data["elements"]["edges"]
             if edge["data"].get("relationship_type") == "dns_name"
         )
+        dns_edge = next(
+            edge
+            for edge in map_data["elements"]["edges"]
+            if edge["data"].get("relationship_type") == "dns_name"
+        )
+        dns_evidence = dns_edge["data"]["topology_evidence"][0]
+        assert dns_evidence["is_current"] is True
+        assert dns_evidence["agent_observation_id"] == dns_edge["data"]["agent_observation_id"]
+        assert dns_evidence["source_host_id"] or dns_evidence["target_host_id"]
+        assert dns_evidence["payload"]["name"] == "printer-40.example.test"
+
+        stale_payload = _checkin_payload(
+            "agent-topology-evidence-001",
+            observed_at="2026-03-22T22:10:00Z",
+        )
+        stale_payload["sequence_number"] = 2
+        stale_payload["addresses"] = payload["addresses"]
+        stale_payload["topology_evidence"] = []
+        stale_response = await _post_checkin(async_client, api_key, stale_payload)
+        assert stale_response.status_code == 200
+        assert stale_response.json()["summary"]["observations_stale"] == 8
+
+        historical_map_response = await async_client.get(
+            "/api/network/map",
+            params=[
+                ("observed_by_agent_id", str(agent_id)),
+                ("relationship_types", "dns_name"),
+                ("include_historical_evidence", "true"),
+            ],
+            headers=admin_headers,
+        )
+        assert historical_map_response.status_code == 200
+        historical_edges = [
+            edge
+            for edge in historical_map_response.json()["elements"]["edges"]
+            if edge["data"].get("relationship_type") == "dns_name"
+        ]
+        assert historical_edges
+        assert historical_edges[0]["data"]["is_current"] is False
+        assert historical_edges[0]["data"]["stale_at"] is not None
+        assert historical_edges[0]["data"]["topology_evidence"][0]["is_current"] is False
+        assert historical_edges[0]["data"]["topology_evidence"][0]["stale_at"] is not None
 
     @pytest.mark.asyncio
     async def test_on_demand_collection_request_is_polled_and_fulfilled(

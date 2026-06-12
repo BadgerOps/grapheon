@@ -524,6 +524,43 @@ def add_agent_topology_edges(
                 }
             )
 
+    def evidence_record(
+        observation: Any,
+        *,
+        source_host_id: int | None = None,
+        target_host_id: int | None = None,
+    ) -> dict[str, Any]:
+        payload = observation.payload or {}
+        record = {
+            "source": payload.get("source") or "agent",
+            "observer": payload.get("observer"),
+            "observer_agent_id": observation.agent_id,
+            "confidence": observation.confidence,
+            "first_seen": observation.first_seen_at.isoformat()
+            if observation.first_seen_at
+            else None,
+            "last_seen": observation.last_seen_at.isoformat()
+            if observation.last_seen_at
+            else None,
+            "stale_at": observation.stale_at.isoformat()
+            if observation.stale_at
+            else None,
+            "removed_at": observation.removed_at.isoformat()
+            if observation.removed_at
+            else None,
+            "is_current": observation.is_current,
+            "evidence_type": observation.relationship_type,
+            "summary": _topology_edge_summary(payload),
+            "raw_ref": payload.get("raw_ref"),
+            "agent_observation_id": observation.id,
+            "payload": payload,
+        }
+        if source_host_id is not None:
+            record["source_host_id"] = source_host_id
+        if target_host_id is not None:
+            record["target_host_id"] = target_host_id
+        return record
+
     def add_edge(
         source: str,
         target: str,
@@ -537,6 +574,8 @@ def add_agent_topology_edges(
         if edge_id in edge_ids:
             return
         edge_ids.add(edge_id)
+        source_host_id = int(source) if str(source).isdigit() else None
+        target_host_id = int(target) if str(target).isdigit() else None
         edges.append(
             {
                 "data": {
@@ -558,22 +597,20 @@ def add_agent_topology_edges(
                     "last_seen_at": observation.last_seen_at.isoformat()
                     if observation.last_seen_at
                     else None,
+                    "stale_at": observation.stale_at.isoformat()
+                    if observation.stale_at
+                    else None,
+                    "removed_at": observation.removed_at.isoformat()
+                    if observation.removed_at
+                    else None,
+                    "is_current": observation.is_current,
                     "relationship_key": observation.relationship_key,
                     "topology_evidence": [
-                        {
-                            "source": (observation.payload or {}).get("source") or "agent",
-                            "observer": (observation.payload or {}).get("observer"),
-                            "confidence": observation.confidence,
-                            "first_seen": observation.first_seen_at.isoformat()
-                            if observation.first_seen_at
-                            else None,
-                            "last_seen": observation.last_seen_at.isoformat()
-                            if observation.last_seen_at
-                            else None,
-                            "evidence_type": observation.relationship_type,
-                            "summary": _topology_edge_summary(observation.payload or {}),
-                            "raw_ref": (observation.payload or {}).get("raw_ref"),
-                        }
+                        evidence_record(
+                            observation,
+                            source_host_id=source_host_id,
+                            target_host_id=target_host_id,
+                        )
                     ],
                     "tooltip": tooltip,
                 }
@@ -610,22 +647,14 @@ def add_agent_topology_edges(
                     "source_type": payload.get("source") or "agent",
                     "observer_agent_id": observation.agent_id,
                     "agent_observation_id": observation.id,
-                    "topology_evidence": [
-                        {
-                            "source": payload.get("source") or "agent",
-                            "observer": payload.get("observer"),
-                            "confidence": observation.confidence,
-                            "first_seen": observation.first_seen_at.isoformat()
-                            if observation.first_seen_at
-                            else None,
-                            "last_seen": observation.last_seen_at.isoformat()
-                            if observation.last_seen_at
-                            else None,
-                            "evidence_type": observation.relationship_type,
-                            "summary": _topology_edge_summary(payload),
-                            "raw_ref": payload.get("raw_ref"),
-                        }
-                    ],
+                    "is_current": observation.is_current,
+                    "stale_at": observation.stale_at.isoformat()
+                    if observation.stale_at
+                    else None,
+                    "removed_at": observation.removed_at.isoformat()
+                    if observation.removed_at
+                    else None,
+                    "topology_evidence": [evidence_record(observation)],
                     "tooltip": tooltip_from_payload(payload, label),
                 }
             }

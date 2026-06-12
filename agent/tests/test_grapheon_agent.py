@@ -186,6 +186,19 @@ def _dns_ptr_response(name: str, target: str) -> bytes:
     return b"\x12\x34\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + qname + b"\x00\x0c\x00\x01" + answer
 
 
+def _dns_srv_response(name: str, target: str, port: int) -> bytes:
+    qname = _dns_name(name)
+    rdata = b"\x00\x00\x00\x05" + port.to_bytes(2, "big") + _dns_name(target)
+    answer = (
+        b"\xc0\x0c"
+        + b"\x00\x21\x00\x01"
+        + b"\x00\x00\x00\x3c"
+        + len(rdata).to_bytes(2, "big")
+        + rdata
+    )
+    return b"\x12\x36\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + qname + b"\x00\x21\x00\x01" + answer
+
+
 def _dns_misc_response() -> bytes:
     qname = _dns_name("2.0.0.10.in-addr.arpa")
     ptr = (
@@ -276,10 +289,13 @@ def _dhcpv6_reply() -> bytes:
     duid = b"\x00\x03\x00\x01" + bytes.fromhex("aabbccddee03")
     iaaddr = ipaddress.ip_address("2001:db8::50").packed + b"\x00\x00\x0e\x10\x00\x00\x1c\x20"
     ia_na = b"\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00" + b"\x00\x05" + len(iaaddr).to_bytes(2, "big") + iaaddr
+    iaprefix = b"\x00\x00\x0e\x10\x00\x00\x1c\x20\x38" + ipaddress.ip_address("2001:db8:1200::").packed
+    ia_pd = b"\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00" + b"\x00\x1a" + len(iaprefix).to_bytes(2, "big") + iaprefix
     return (
         b"\x07\x12\x34\x56"
         + b"\x00\x01" + len(duid).to_bytes(2, "big") + duid
         + b"\x00\x03" + len(ia_na).to_bytes(2, "big") + ia_na
+        + b"\x00\x19" + len(ia_pd).to_bytes(2, "big") + ia_pd
         + b"\x00\x17\x00\x10" + ipaddress.ip_address("2001:db8::53").packed
         + b"\x00\x18" + len(_dns_name("example.local")).to_bytes(2, "big") + _dns_name("example.local")
         + b"\x00\x27\x00\x0b\x00lease-host"
@@ -516,6 +532,8 @@ def test_parse_dns_evidence_sanitizes_service_instance_names():
 
 
 def test_parse_pcap_topology_evidence_extracts_lldp_and_cdp(tmp_path):
+    import ipaddress
+
     lldp_payload = b"".join(
         [
             _lldp_tlv(1, b"\x04\x00\x11\x22\x33\x44\x55"),
@@ -529,9 +547,25 @@ def test_parse_pcap_topology_evidence_extracts_lldp_and_cdp(tmp_path):
             _lldp_tlv(0, b""),
         ]
     )
+    lldp_ipv6_payload = b"".join(
+        [
+            _lldp_tlv(1, b"\x04\x00\x11\x22\x33\x44\x66"),
+            _lldp_tlv(2, b"\x05Te1/0/49"),
+            _lldp_tlv(5, b"switch-ipv6"),
+            _lldp_tlv(8, b"\x11\x02" + ipaddress.ip_address("2001:db8::2").packed + b"\x02\x00\x00"),
+            _lldp_tlv(0, b""),
+        ]
+    )
+    cdp_address = (
+        b"\x00\x00\x00\x01"
+        + b"\x01\x01\xcc"
+        + b"\x00\x04"
+        + bytes([10, 0, 0, 254])
+    )
     cdp_payload = (
         bytes.fromhex("01000000")
         + _cdp_tlv(0x0001, b"router01")
+        + _cdp_tlv(0x0002, cdp_address)
         + _cdp_tlv(0x0003, b"Eth1/1")
         + _cdp_tlv(0x0004, b"\x00\x00\x00\x09")
         + _cdp_tlv(0x0005, b"IOS-XE")
@@ -550,6 +584,11 @@ def test_parse_pcap_topology_evidence_extracts_lldp_and_cdp(tmp_path):
         tmp_path,
         _ether(
             lldp_payload,
+            ether_type=0x88CC,
+            dst=bytes.fromhex("0180c200000e"),
+        ),
+        _ether(
+            lldp_ipv6_payload,
             ether_type=0x88CC,
             dst=bytes.fromhex("0180c200000e"),
         ),
@@ -573,11 +612,19 @@ def test_parse_pcap_topology_evidence_extracts_lldp_and_cdp(tmp_path):
         item["evidence_type"] == "l2_neighbor"
         and item["source"] == "cdp"
         and item["system_name"] == "router01"
+        and item["management_ip"] == "10.0.0.254"
         and item["port_id"] == "Eth1/1"
         and item["vlan_id"] == 20
         and item["metadata"]["platform"] == "C9300"
         and item["metadata"]["software_version"] == "IOS-XE"
         and item["metadata"]["duplex"] == "full"
+        for item in evidence
+    )
+    assert any(
+        item["evidence_type"] == "l2_neighbor"
+        and item["source"] == "lldp"
+        and item["system_name"] == "switch-ipv6"
+        and item["management_ip"] == "2001:db8::2"
         for item in evidence
     )
 
@@ -586,6 +633,7 @@ def test_parse_pcap_topology_evidence_enriches_dns_nbns_and_discovery(tmp_path):
     pcap_path = _write_pcap(
         tmp_path,
         _ether(_ipv4_udp("10.0.0.53", "10.0.0.2", 53, 53000, _dns_misc_response())),
+        _ether(_ipv4_udp("10.0.0.20", "224.0.0.251", 5353, 5353, _dns_srv_response("EPSON ET-16600 Series._smb._tcp.local", "epson.local", 445))),
         _ether(_ipv4_udp("10.0.0.10", "10.0.0.255", 137, 137, _nbns_response("WORKSTATION", "10.0.0.10"))),
         _ether(_ipv4_udp("10.0.0.20", "239.255.255.250", 1900, 1900, b"NOTIFY * HTTP/1.1\r\nUSN: uuid:device-1\r\nLOCATION: http://10.0.0.20/root.xml\r\nST: upnp:rootdevice\r\n\r\n")),
         _ether(_ipv4_udp("10.0.0.30", "239.255.255.250", 3702, 3702, b"<Envelope><ProbeMatch><a:Address>urn:uuid:printer-1</a:Address><d:Types>dn:Printer</d:Types><d:XAddrs>http://10.0.0.30/wsd</d:XAddrs></ProbeMatch></Envelope>")),
@@ -596,6 +644,13 @@ def test_parse_pcap_topology_evidence_enriches_dns_nbns_and_discovery(tmp_path):
     assert any(item["source"] == "dns" and item["name"] == "host.local" and item["ip_address"] == "10.0.0.2" for item in evidence)
     assert any(item["source"] == "dns" and item["name"] == "_printer._tcp.local" and item["metadata"]["service_port"] == 9100 for item in evidence)
     assert any(item["source"] == "dns" and item["metadata"].get("record_kind") == "https" for item in evidence)
+    assert any(
+        item["source"] == "mdns"
+        and item["name"] == "EPSON_ET-16600_Series._smb._tcp.local"
+        and item["metadata"]["raw_name"] == "EPSON ET-16600 Series._smb._tcp.local"
+        and item["metadata"]["service_port"] == 445
+        for item in evidence
+    )
     assert any(item["source"] == "nbns" and item["name"] == "WORKSTATION" and item["ip_address"] == "10.0.0.10" for item in evidence)
     assert any(item["source"] == "ssdp" and item["metadata"]["location"] == "http://10.0.0.20/root.xml" for item in evidence)
     assert any(item["source"] == "wsd" and item["metadata"]["types"] == "dn:Printer" for item in evidence)
@@ -617,7 +672,8 @@ def test_parse_pcap_topology_evidence_enriches_dhcpv4_dhcpv6_and_ra(tmp_path):
     assert dhcpv4["metadata"]["dns_servers"] == ["10.0.0.53", "10.0.0.54"]
     assert dhcpv4["metadata"]["lease_time_seconds"] == 3600
 
-    assert any(item["source"] == "dhcpv6" and item["ip_address"] == "2001:db8::50" and item["hostname"] == "lease-host" for item in evidence)
+    assert any(item["source"] == "dhcpv6" and item.get("ip_address") == "2001:db8::50" and item["hostname"] == "lease-host" for item in evidence)
+    assert any(item["source"] == "dhcpv6" and item.get("network") == "2001:db8:1200::/56" for item in evidence)
     assert any(item["evidence_type"] == "network_segment" and item["network"] == "2001:db8:1::/64" for item in evidence)
     ra_route = next(item for item in evidence if item["evidence_type"] == "route" and item["gateway"] == "fe80::1")
     assert ra_route["metadata"]["mtu"] == 1500

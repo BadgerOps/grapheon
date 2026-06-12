@@ -4,6 +4,10 @@ All notable changes to the Graphēon passive agent will be documented in this fi
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## 0.17.0 - 2026-06-12
+### Fixed
+- **Passive capture parser hardening**: improved CDP management-address TLV parsing and DHCPv6 delegated-prefix parsing, with additional vendor-shaped LLDP, CDP, DHCPv6, and mDNS fixture coverage.
+
 ## 0.16.0 - 2026-06-11
 ### Added
 - **Richer passive capture parsing**: tcpdump evidence now preserves VLAN IDs, extended LLDP/CDP details, DHCPv4/DHCPv6 options, IPv6 RA prefixes/DNS/MTU hints, DNS PTR/CNAME/SRV/SVCB/HTTPS records, NBNS names, SSDP and WS-Discovery labels, STP/LACP neighbor hints, HSRP/VRRP/CARP gateway hints, OSPF/RIP/EIGRP/BGP map hints, and aggregated optional flow counters.

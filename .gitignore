@@ -46,3 +46,4 @@ terraform.tfstate.backup
 
 # OS
 .DS_Store
+.clawpatch/
